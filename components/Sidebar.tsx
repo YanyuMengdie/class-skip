@@ -15,7 +15,10 @@ interface SidebarProps {
   hasPdfLoaded?: boolean;
   onOpenQuiz?: () => void;
   onOpenFlashCard?: () => void;
-  
+  onOpenStudyGuide?: () => void;
+  onOpenTrapList?: () => void;
+  trapCount?: number;
+
   /** 页面标记数据 */
   pageMarks?: PageMarks;
   fileName?: string | null;
@@ -25,6 +28,8 @@ interface SidebarProps {
   onLogin: () => void;
   onRestoreSession: (session: CloudSession) => void;
   onDeleteSession?: (session: CloudSession) => Promise<boolean>;
+  /** 多选后「一起复习」：传入选中的文件 sessions */
+  onStartCombinedReview?: (sessions: CloudSession[]) => void;
 }
 
 type Tab = 'pages' | 'cloud' | 'calendar' | 'memo';
@@ -101,11 +106,14 @@ interface FileTreeItemProps {
     level: number;
     onToggle: (id: string) => void;
     isExpanded: boolean;
+    expandedIds: Set<string>;
     onSelect: (node: CloudSession) => void;
     onRename: (node: CloudSession) => void;
     onDelete: (node: CloudSession) => void;
     onDropMove: (draggedId: string, targetId: string | null) => void;
     onCreateSubFolder: (parentId: string) => void;
+    selectedSessionIds?: Set<string>;
+    onToggleSelect?: (id: string) => void;
 }
 
 const FileTreeItem: React.FC<FileTreeItemProps> = ({ 
@@ -113,11 +121,14 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
     level, 
     onToggle, 
     isExpanded, 
+    expandedIds,
     onSelect,
     onRename,
     onDelete,
     onDropMove,
-    onCreateSubFolder
+    onCreateSubFolder,
+    selectedSessionIds,
+    onToggleSelect
 }) => {
     const [isDragOver, setIsDragOver] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
@@ -175,6 +186,11 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
                 }}
             >
                 <div className="flex items-center space-x-2 min-w-0 flex-1 pl-2">
+                    {!isFolder && selectedSessionIds && onToggleSelect && (
+                        <div className="shrink-0" onClick={e => { e.stopPropagation(); onToggleSelect(node.id); }}>
+                            <input type="checkbox" checked={selectedSessionIds.has(node.id)} readOnly className="rounded border-stone-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer" />
+                        </div>
+                    )}
                     <div className={`shrink-0 ${isFolder ? 'text-slate-600' : 'text-stone-400'}`}>
                         {isFolder ? (isExpanded ? <FolderOpen className="w-4 h-4" /> : <Folder className="w-4 h-4" />) : (<FileText className="w-3.5 h-3.5" />)}
                     </div>
@@ -215,9 +231,10 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
                         node.children.map(child => (
                             <FileTreeItem 
                                 key={child.id} node={child} level={level + 1}
-                                isExpanded={isExpanded} onToggle={onToggle} onSelect={onSelect}
-                                onRename={onRename} onDelete={onDelete} onDropMove={onDropMove}
-                                onCreateSubFolder={onCreateSubFolder} {...{isExpanded: false}}
+                                isExpanded={expandedIds.has(child.id)} onToggle={onToggle} expandedIds={expandedIds}
+                                onSelect={onSelect} onRename={onRename} onDelete={onDelete} onDropMove={onDropMove}
+                                onCreateSubFolder={onCreateSubFolder}
+                                selectedSessionIds={selectedSessionIds} onToggleSelect={onToggleSelect}
                             />
                         ))
                     ) : (
@@ -251,12 +268,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
   hasPdfLoaded,
   onOpenQuiz,
   onOpenFlashCard,
+  onOpenStudyGuide,
+  onOpenTrapList,
+  trapCount = 0,
   pageMarks,
   fileName,
   user,
   onLogin,
   onRestoreSession,
-  onDeleteSession
+  onDeleteSession,
+  onStartCombinedReview
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('pages');
   const [sessions, setSessions] = useState<CloudSession[]>([]);
@@ -286,6 +307,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // --- PAGE MARK FILTER STATE ---
   const [markFilter, setMarkFilter] = useState<MarkType | 'all' | 'priority-high'>('all');
+
+  // --- 多选：一起复习 ---
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
+  const handleToggleSelect = (id: string) => {
+    setSelectedSessionIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const selectedFileSessions = useMemo(() => sessions.filter(s => s.type === 'file' && selectedSessionIds.has(s.id)), [sessions, selectedSessionIds]);
+  const handleStartCombinedReview = () => {
+    if (selectedFileSessions.length >= 2 && onStartCombinedReview) onStartCombinedReview(selectedFileSessions);
+  };
 
   // --- DATA SYNC EFFECT ---
   useEffect(() => {
@@ -471,9 +506,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
       return nodes.map(node => (
           <FileTreeItem 
             key={node.id} node={node} level={level}
-            isExpanded={expandedIds.has(node.id)} onToggle={handleToggleFolder}
+            isExpanded={expandedIds.has(node.id)} onToggle={handleToggleFolder} expandedIds={expandedIds}
             onSelect={onRestoreSession} onRename={node => { setRenamingId(node.id); setRenameValue(node.customTitle || node.fileName); }}
             onDelete={handleDelete} onDropMove={handleDropMove} onCreateSubFolder={handleInitiateCreateFolder}
+            selectedSessionIds={selectedSessionIds} onToggleSelect={handleToggleSelect}
           />
       ));
   };
@@ -665,7 +701,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             })}
                         </div>
                     </div>
-                    {hasPdfLoaded && (onOpenQuiz || onOpenFlashCard) && (
+                    {hasPdfLoaded && (onOpenQuiz || onOpenFlashCard || onOpenStudyGuide || onOpenTrapList) && (
                         <div className="border-t border-stone-200 pt-3 mt-2">
                             <p className="text-[10px] font-bold text-stone-400 uppercase tracking-wider mb-2">复习</p>
                             <div className="flex flex-col gap-2">
@@ -677,6 +713,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 {onOpenFlashCard && (
                                     <button onClick={onOpenFlashCard} className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-amber-50 border border-amber-100 text-amber-700 rounded-xl text-xs font-bold hover:bg-amber-100 transition-colors">
                                         <Layers className="w-4 h-4" /> Flash Card
+                                    </button>
+                                )}
+                                {onOpenStudyGuide && (
+                                    <button onClick={onOpenStudyGuide} className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-xl text-xs font-bold hover:bg-indigo-100 transition-colors">
+                                        <FileText className="w-4 h-4" /> Study Guide
+                                    </button>
+                                )}
+                                {onOpenTrapList && (
+                                    <button onClick={onOpenTrapList} className="w-full flex items-center justify-center gap-2 py-2.5 px-3 bg-amber-50 border border-amber-100 text-amber-700 rounded-xl text-xs font-bold hover:bg-amber-100 transition-colors">
+                                        <AlertTriangle className="w-4 h-4" /> 陷阱清单{trapCount > 0 ? ` (${trapCount})` : ''}
                                     </button>
                                 )}
                             </div>
@@ -736,7 +782,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ) : sessions.length === 0 ? (
                       <div className="text-center mt-20 text-stone-300 space-y-2"><Cloud className="w-12 h-12 mx-auto opacity-20" /><p className="text-xs">暂无笔记本分区</p></div>
                   ) : (
-                      <div className="pb-20 min-h-[300px]">{renderTree(fileTree)}</div>
+                      <>
+                          <div className="pb-24 min-h-[300px]">{renderTree(fileTree)}</div>
+                          {selectedFileSessions.length >= 2 && onStartCombinedReview && (
+                              <div className="sticky bottom-0 left-0 right-0 p-2 bg-[#F9F9F9] border-t border-stone-200 z-10">
+                                  <button
+                                      onClick={handleStartCombinedReview}
+                                      className="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 shadow-md flex items-center justify-center gap-2"
+                                  >
+                                      <BookOpen className="w-4 h-4" />
+                                      一起复习 ({selectedFileSessions.length} 个文件)
+                                  </button>
+                              </div>
+                          )}
+                      </>
                   )}
               </div>
           )}

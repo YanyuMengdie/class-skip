@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { jsPDF } from 'jspdf';
 import { Header } from './components/Header';
 import { SlideViewer } from './components/SlideViewer';
@@ -17,12 +17,23 @@ import { SideQuestPanel } from './components/SideQuestPanel';
 import { QuizReviewPanel } from './components/QuizReviewPanel';
 import { FlashCardReviewPanel } from './components/FlashCardReviewPanel';
 import { PageMarkPanel } from './components/PageMarkPanel';
+import { StudyGuidePanel } from './components/StudyGuidePanel';
+import { ExamSummaryPanel } from './components/ExamSummaryPanel';
+import { FeynmanPanel } from './components/FeynmanPanel';
+import { ExamTrapsPanel } from './components/ExamTrapsPanel';
+import { TerminologyPanel } from './components/TerminologyPanel';
+import { TrapListPanel } from './components/TrapListPanel';
+import { TrickyProfessorPanel } from './components/TrickyProfessorPanel';
+import { BreakPanel } from './components/BreakPanel';
+import { ClassroomPanel } from './components/ClassroomPanel';
+import { LectureTranscriptPage } from './components/LectureTranscriptPage';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from './utils/pdfUtils';
-import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent } from './services/geminiService'; // NEW IMPORT
+import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript } from './services/geminiService';
+import { startRecording, stopRecording, isTranscriptionSupported } from './services/transcriptionService';
 import { storageService } from './services/storageService';
 import { auth, loginWithGoogle, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, PageMarks, PageMark } from './types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord } from './types';
 import { Sparkles, X, ChevronDown, Loader2, Wand2 } from 'lucide-react';
 
 // #region agent log
@@ -103,6 +114,10 @@ const App: React.FC = () => {
   // --- ENERGY MODE STATE ---
   const [isEnergyMode, setIsEnergyMode] = useState(false);
 
+  // --- 小憩区 & 白噪音面板受控 ---
+  const [isBreakPanelOpen, setIsBreakPanelOpen] = useState(false);
+  const [isMusicPanelOpen, setIsMusicPanelOpen] = useState(false);
+
   // --- SIDE QUEST STATE (NEW) ---
   const [sideQuest, setSideQuest] = useState<SideQuestState>({ isActive: false, anchorText: '', messages: [], isLoading: false });
   const [triggerPosition, setTriggerPosition] = useState<{ top: number, left: number, text: string } | null>(null);
@@ -116,6 +131,53 @@ const App: React.FC = () => {
   // --- 页面标记状态 ---
   const [pageMarks, setPageMarks] = useState<PageMarks>({});
   const [isMarkPanelOpen, setIsMarkPanelOpen] = useState(false);
+
+  // --- Study Guide 状态 ---
+  const [studyGuide, setStudyGuide] = useState<StudyGuide | null>(null);
+  const [studyGuidePanel, setStudyGuidePanel] = useState(false);
+
+  // --- 一起复习：多选合并内容与方式选择 ---
+  const [combinedReviewContent, setCombinedReviewContent] = useState<string | null>(null);
+  const [combinedReviewFileName, setCombinedReviewFileName] = useState<string | null>(null);
+  const [reviewModeChooserOpen, setReviewModeChooserOpen] = useState(false);
+  const [isCombinedReviewLoading, setIsCombinedReviewLoading] = useState(false);
+  const [examSummaryPanelOpen, setExamSummaryPanelOpen] = useState(false);
+  const [feynmanPanelOpen, setFeynmanPanelOpen] = useState(false);
+  const [examTrapsPanelOpen, setExamTrapsPanelOpen] = useState(false);
+  const [terminologyPanelOpen, setTerminologyPanelOpen] = useState(false);
+  const [trapListPanelOpen, setTrapListPanelOpen] = useState(false);
+  const [trickyProfessorPanelOpen, setTrickyProfessorPanelOpen] = useState(false);
+  const [isClassroomMode, setIsClassroomMode] = useState(false);
+  const [currentLecture, setCurrentLecture] = useState<LectureRecord | null>(null);
+  const [lectureHistory, setLectureHistory] = useState<LectureRecord[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('lecture_history') || '[]');
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem('lecture_history', JSON.stringify(lectureHistory));
+    } catch (_) {}
+  }, [lectureHistory]);
+  const [lectureTranscriptPageOpen, setLectureTranscriptPageOpen] = useState(false);
+  const [organizingLectureId, setOrganizingLectureId] = useState<string | null>(null);
+  const [transcriptLive, setTranscriptLive] = useState('');
+  const transcriptionSupported = useMemo(() => isTranscriptionSupported(), []);
+  const [trapList, setTrapList] = useState<TrapItem[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('trap_list') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('trap_list', JSON.stringify(trapList));
+    } catch (_) {}
+  }, [trapList]);
 
   const [notebookData, setNotebookData] = useState<NotebookData>(() => {
     try { 
@@ -135,6 +197,7 @@ const App: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hiddenFileInputRef = useRef<HTMLInputElement>(null);
   const selectionTimeoutRef = useRef<number | null>(null);
+  const leftPanelRef = useRef<HTMLDivElement>(null);
   
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [audioVolume, setAudioVolume] = useState(0.5);
@@ -302,7 +365,8 @@ const App: React.FC = () => {
             reviewQuizRounds,
             reviewFlashCards,
             flashCardEstimate,
-            pageMarks
+            pageMarks,
+            studyGuide
           }
         };
         await storageService.saveFileState(item);
@@ -310,17 +374,17 @@ const App: React.FC = () => {
       } catch (e) { console.warn('Auto-save failed:', e); }
     }, 2000);
     return () => clearTimeout(saveTimeout);
-  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, currentIndex, viewMode, skimTopHeight, studyMap, skimStage, quizData, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks]);
+  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, currentIndex, viewMode, skimTopHeight, studyMap, skimStage, quizData, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide]);
 
   useEffect(() => {
     if (!currentSessionId || !user) return;
     const cloudSaveTimeout = setTimeout(() => {
       updateCloudSessionState(currentSessionId, {
-        explanations, chatCache, annotations, notebookData, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks
+        explanations, chatCache, annotations, notebookData, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide
       });
     }, 3000);
     return () => clearTimeout(cloudSaveTimeout);
-  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, viewMode, studyMap, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks]);
+  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, viewMode, studyMap, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide]);
 
 
   // --- HANDLERS ---
@@ -354,11 +418,12 @@ const App: React.FC = () => {
         setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setSkimTopHeight(stateToRestore.skimTopHeight || 60); setStudyMap(stateToRestore.studyMap || null); setSkimStage(stateToRestore.skimStage || 'diagnosis'); setQuizData(stateToRestore.quizData || null); setDocType(stateToRestore.docType || 'STEM');
         setReviewQuizRounds(stateToRestore.reviewQuizRounds || []); setReviewFlashCards(stateToRestore.reviewFlashCards || []); setFlashCardEstimate(stateToRestore.flashCardEstimate);
         setPageMarks(stateToRestore.pageMarks || {});
+        setStudyGuide(stateToRestore.studyGuide || null);
         if (restoredAvatar) setCustomAvatarUrl(restoredAvatar); else if (stateToRestore.customAvatarUrl) setCustomAvatarUrl(stateToRestore.customAvatarUrl);
         if (restoredBg) setCustomBackgroundUrl(restoredBg); else if (stateToRestore.galgameBackgroundUrl) setCustomBackgroundUrl(stateToRestore.galgameBackgroundUrl);
         if (stateToRestore.personaSettings) setPersonaSettings(stateToRestore.personaSettings);
       } else {
-        setExplanations({}); setChatCache({}); setSkimMessages([]); setAnnotations({}); setCurrentIndex(0); setViewMode('deep'); setSkimTopHeight(60); setStudyMap(null); setSkimStage('diagnosis'); setQuizData(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({});
+        setExplanations({}); setChatCache({}); setSkimMessages([]); setAnnotations({}); setCurrentIndex(0); setViewMode('deep'); setSkimTopHeight(60); setStudyMap(null); setSkimStage('diagnosis'); setQuizData(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null);
       }
       if (!stateToRestore?.studyMap) {
         setIsStudyMapLoading(true); const diagnosisContent = rawPdfData || fullText;
@@ -415,12 +480,112 @@ const App: React.FC = () => {
 
   const handleRestoreCloudSession = async (session: CloudSession) => {
     if (!user) return; setIsProcessingFile(true);
-    try { if (!session.fileUrl) throw new Error("File URL missing"); const heavyDetails = await fetchSessionDetails(session.id); const file = await fetchFileFromUrl(session.fileUrl, session.fileName); const fullData = { ...session, ...heavyDetails }; const restoreData: Partial<FilePersistedState> = { explanations: fullData.explanations, chatCache: fullData.chatCache, annotations: fullData.annotations, notebookData: fullData.notebookData, skimMessages: fullData.skimMessages, viewMode: fullData.viewMode, studyMap: fullData.studyMap, skimStage: fullData.skimStage, quizData: fullData.quizData, docType: fullData.docType, skimTopHeight: fullData.skimTopHeight, currentIndex: fullData.currentIndex, personaSettings: fullData.personaSettings, reviewQuizRounds: fullData.reviewQuizRounds, reviewFlashCards: fullData.reviewFlashCards, flashCardEstimate: fullData.flashCardEstimate, pageMarks: fullData.pageMarks }; await processFile(file, restoreData, fullData.customAvatarUrl, fullData.customBackgroundUrl); setCurrentSessionId(session.id); setIsSyncing(true); } catch (e) { console.error("Restore failed:", e); alert("无法从云端恢复，请重试。"); } finally { setIsProcessingFile(false); }
+    try { if (!session.fileUrl) throw new Error("File URL missing"); const heavyDetails = await fetchSessionDetails(session.id); const file = await fetchFileFromUrl(session.fileUrl, session.fileName); const fullData = { ...session, ...heavyDetails }; const restoreData: Partial<FilePersistedState> = { explanations: fullData.explanations, chatCache: fullData.chatCache, annotations: fullData.annotations, notebookData: fullData.notebookData, skimMessages: fullData.skimMessages, viewMode: fullData.viewMode, studyMap: fullData.studyMap, skimStage: fullData.skimStage, quizData: fullData.quizData, docType: fullData.docType, skimTopHeight: fullData.skimTopHeight, currentIndex: fullData.currentIndex, personaSettings: fullData.personaSettings, reviewQuizRounds: fullData.reviewQuizRounds, reviewFlashCards: fullData.reviewFlashCards, flashCardEstimate: fullData.flashCardEstimate, pageMarks: fullData.pageMarks, studyGuide: fullData.studyGuide }; await processFile(file, restoreData, fullData.customAvatarUrl, fullData.customBackgroundUrl); setCurrentSessionId(session.id); setIsSyncing(true); } catch (e) { console.error("Restore failed:", e); alert("无法从云端恢复，请重试。"); } finally { setIsProcessingFile(false); }
   };
 
   const handleDeleteSession = async (session: CloudSession): Promise<boolean> => {
     if (!window.confirm("确定删除此存档？")) return false; try { await deleteCloudSession(session.id); if (currentSessionId === session.id) { setCurrentSessionId(null); setIsSyncing(false); } return true; } catch (e) { console.error("Delete failed:", e); return false; }
   };
+
+  const handleStartCombinedReview = async (sessions: CloudSession[]) => {
+    if (!user || sessions.length < 2) return;
+    setIsCombinedReviewLoading(true);
+    setCombinedReviewContent(null);
+    setCombinedReviewFileName(null);
+    try {
+      const parts: string[] = [];
+      for (const session of sessions) {
+        if (!session.fileUrl || session.type !== 'file') continue;
+        const file = await fetchFileFromUrl(session.fileUrl, session.fileName);
+        const texts = await extractPdfText(file);
+        const block = `【${session.fileName}】\n${texts.join('\n')}`;
+        parts.push(block);
+      }
+      const merged = parts.join('\n\n').slice(0, 60000);
+      setCombinedReviewContent(merged);
+      setCombinedReviewFileName(`多文档合并 (${sessions.length} 个文件)`);
+      setReviewModeChooserOpen(true);
+    } catch (e) {
+      console.error("Combined review load failed:", e);
+      alert("拉取或合并文件失败，请重试。");
+    } finally {
+      setIsCombinedReviewLoading(false);
+    }
+  };
+
+  const clearCombinedReview = () => {
+    setCombinedReviewContent(null);
+    setCombinedReviewFileName(null);
+    setReviewModeChooserOpen(false);
+  };
+
+  const handleStartClass = async () => {
+    try {
+      const lecture: LectureRecord = {
+        id: `lecture-${Date.now()}`,
+        startedAt: Date.now(),
+        transcript: []
+      };
+      setCurrentLecture(lecture);
+      setTranscriptLive('');
+      setIsClassroomMode(true);
+      await startRecording((text, isFinal) => {
+        if (isFinal) {
+          setCurrentLecture((prev) =>
+            prev
+              ? { ...prev, transcript: [...prev.transcript, { text, timestamp: Date.now() }] }
+              : null
+          );
+        } else {
+          setTranscriptLive(text);
+        }
+      });
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '无法开启录音');
+      setCurrentLecture(null);
+      setIsClassroomMode(false);
+    }
+  };
+
+  const handleEndClass = async () => {
+    await stopRecording();
+    setTranscriptLive('');
+    setCurrentLecture((prev) => {
+      if (!prev) return null;
+      const ended = { ...prev, endedAt: Date.now() };
+      setLectureHistory((h) => [ended, ...h]);
+      return null;
+    });
+    setIsClassroomMode(false);
+  };
+
+  const handleOrganizeLecture = useCallback(async (lecture: LectureRecord) => {
+    const id = lecture.id;
+    const text = lecture.transcript.map((t) => t.text).join('');
+    if (!text.trim()) return;
+    setOrganizingLectureId(id);
+    try {
+      const summary = await organizeLectureFromTranscript(text);
+      setLectureHistory((prev) =>
+        prev.map((l) => (l.id === id ? { ...l, organizedSummary: summary } : l))
+      );
+    } catch (e) {
+      console.error(e);
+      alert(e instanceof Error ? e.message : 'AI 整理失败');
+    } finally {
+      setOrganizingLectureId(null);
+    }
+  }, []);
+
+  const handleDeleteLecture = useCallback((lectureId: string) => {
+    setLectureHistory((prev) => prev.filter((l) => l.id !== lectureId));
+  }, []);
+
+  const handleRenameLecture = useCallback((lectureId: string, newName: string) => {
+    setLectureHistory((prev) =>
+      prev.map((l) => (l.id === lectureId ? { ...l, name: newName } : l))
+    );
+  }, []);
 
   // --- STANDARD LOGIC ---
   const fetchExplanation = useCallback(async (index: number, currentSlides: Slide[], fullContext: string | null) => {
@@ -459,7 +624,15 @@ const App: React.FC = () => {
   const handleDeleteAnnotation = (id: string) => { if (!slides[currentIndex]) return; const slideId = slides[currentIndex].id; setAnnotations(prev => ({ ...prev, [slideId]: (prev[slideId] || []).filter(a => a.id !== id) })); };
 
   const handleRetryExplanation = useCallback(() => { 
-      if (!slides.length) return; 
+      if (!slides.length || !slides[currentIndex]) return;
+      // 清除当前页面的解释，强制重新生成
+      const slideId = slides[currentIndex].id;
+      setExplanations(prev => {
+        const newExplanations = { ...prev };
+        delete newExplanations[slideId];
+        return newExplanations;
+      });
+      // 重新生成解释
       fetchExplanation(currentIndex, slides, fullPdfText); 
   }, [slides, currentIndex, fetchExplanation, fullPdfText]);
 
@@ -588,6 +761,14 @@ const App: React.FC = () => {
       onEnterEnergyMode={() => setIsEnergyMode(true)}
       onOpenMarkPanel={() => setIsMarkPanelOpen(true)}
       hasMarkOnCurrentPage={fileName && pageMarks[fileName] && pageMarks[fileName][currentIndex + 1] ? pageMarks[fileName][currentIndex + 1].length > 0 : false}
+      onToggleBreakPanel={() => setIsBreakPanelOpen((v) => !v)}
+      musicPanelOpen={isMusicPanelOpen}
+      onMusicPanelOpenChange={setIsMusicPanelOpen}
+      hasLectureHistory={lectureHistory.length > 0}
+      onOpenLectureTranscript={() => setLectureTranscriptPageOpen(true)}
+      isClassroomMode={isClassroomMode}
+      onStartClass={handleStartClass}
+      isTranscriptionSupported={transcriptionSupported}
     />
   );
   
@@ -600,11 +781,18 @@ const App: React.FC = () => {
       onDeleteAnnotation={handleDeleteAnnotation} 
       onExportPDF={handleExportPDF} 
       onRequestUpload={() => hiddenFileInputRef.current?.click()} 
-      isImmersive={isImmersive} 
+      isImmersive={isImmersive}
+      leftPanelRef={leftPanelRef}
     />
   );
   
-  const commonRightPanel = viewMode === 'skim' ? (
+  const commonRightPanel = isClassroomMode && currentLecture ? (
+    <ClassroomPanel
+      currentLecture={currentLecture}
+      onEndClass={handleEndClass}
+      transcriptLive={transcriptLive}
+    />
+  ) : viewMode === 'skim' ? (
     <SkimPanel 
       studyMap={studyMap} 
       isLoading={isStudyMapLoading} 
@@ -653,6 +841,23 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-screen bg-[#FFFBF7] font-sans">
+      {isCombinedReviewLoading && (
+        <div className="fixed inset-0 z-[180] bg-black/40 flex items-center justify-center">
+          <div className="bg-white rounded-2xl shadow-xl px-8 py-6 flex flex-col items-center gap-3">
+            <Loader2 className="w-10 h-10 animate-spin text-indigo-500" />
+            <p className="text-sm font-bold text-slate-700">正在拉取并合并文档...</p>
+          </div>
+        </div>
+      )}
+
+      <BreakPanel
+        isOpen={isBreakPanelOpen}
+        onClose={() => setIsBreakPanelOpen(false)}
+        onOpenMusicPlayer={() => setIsMusicPanelOpen(true)}
+        onEnterEnergyMode={() => setIsEnergyMode(true)}
+        onVideoSelect={handleVideoSelect}
+      />
+
       <HistoryModal 
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
@@ -660,6 +865,17 @@ const App: React.FC = () => {
         onSelect={handleSelectHistory}
         onDelete={handleDeleteHistory}
       />
+
+      {lectureTranscriptPageOpen && (
+        <LectureTranscriptPage
+          lectureHistory={lectureHistory}
+          onClose={() => setLectureTranscriptPageOpen(false)}
+          onOrganize={handleOrganizeLecture}
+          organizingId={organizingLectureId}
+          onDelete={handleDeleteLecture}
+          onRename={handleRenameLecture}
+        />
+      )}
       
       <GalgameSettings 
         isOpen={isSettingsOpen}
@@ -710,21 +926,56 @@ const App: React.FC = () => {
         onSend={handleSideQuestSend}
       />
 
+      {/* 复习方式选择（多选一起复习后） */}
+      {reviewModeChooserOpen && (
+        <div className="fixed inset-0 z-[200] bg-black/30 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl border border-stone-200 max-w-lg w-full p-6 animate-in zoom-in-95 duration-200">
+            <h3 className="text-lg font-bold text-slate-800 mb-2">选择复习方式</h3>
+            <p className="text-sm text-slate-500 mb-4">基于 {combinedReviewFileName} 进行复习</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('quiz'); }} className="py-3 px-4 rounded-xl bg-violet-100 text-violet-800 font-bold text-sm hover:bg-violet-200 transition-colors">测验</button>
+              <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('flashcard'); }} className="py-3 px-4 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors">闪卡</button>
+              <button onClick={() => { setReviewModeChooserOpen(false); setStudyGuidePanel(true); }} className="py-3 px-4 rounded-xl bg-indigo-100 text-indigo-800 font-bold text-sm hover:bg-indigo-200 transition-colors">学习指南</button>
+              <button onClick={() => { setReviewModeChooserOpen(false); setExamSummaryPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-emerald-100 text-emerald-800 font-bold text-sm hover:bg-emerald-200 transition-colors">考前速览</button>
+              <button onClick={() => { setReviewModeChooserOpen(false); setFeynmanPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-sky-100 text-sky-800 font-bold text-sm hover:bg-sky-200 transition-colors">费曼检验</button>
+              <button onClick={() => { setReviewModeChooserOpen(false); setExamTrapsPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-rose-100 text-rose-800 font-bold text-sm hover:bg-rose-200 transition-colors">考点与陷阱</button>
+              <button onClick={() => { setReviewModeChooserOpen(false); setTerminologyPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-cyan-100 text-cyan-800 font-bold text-sm hover:bg-cyan-200 transition-colors">术语精确定义</button>
+              <button onClick={() => { setReviewModeChooserOpen(false); setTrickyProfessorPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-orange-100 text-orange-800 font-bold text-sm hover:bg-orange-200 transition-colors">刁钻教授</button>
+            </div>
+            <button onClick={() => { setReviewModeChooserOpen(false); setTrapListPanelOpen(true); }} className="mt-2 text-amber-600 text-sm font-medium hover:underline">我的陷阱清单{trapList.length > 0 ? ` (${trapList.length})` : ''}</button>
+            <button onClick={clearCombinedReview} className="mt-4 w-full py-2 text-slate-500 text-sm hover:text-slate-700">取消</button>
+          </div>
+        </div>
+      )}
+
       {/* 复习：Quiz */}
       {reviewPanel === 'quiz' && (
         <QuizReviewPanel
-          onClose={() => setReviewPanel(null)}
-          pdfContent={pdfDataUrl || fullPdfText}
+          onClose={() => { setReviewPanel(null); clearCombinedReview(); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
           existingRounds={reviewQuizRounds}
           onSaveRounds={setReviewQuizRounds}
+          onAddToTrap={(data) => {
+            const trap: TrapItem = {
+              id: `trap-${Date.now()}`,
+              question: data.question,
+              options: data.options,
+              correctIndex: data.correctIndex,
+              userSelectedIndex: data.userSelectedIndex,
+              explanation: data.explanation,
+              source: combinedReviewFileName ?? fileName ?? undefined,
+              createdAt: Date.now()
+            };
+            setTrapList(prev => [...prev, trap]);
+          }}
         />
       )}
 
       {/* 复习：Flash Card */}
       {reviewPanel === 'flashcard' && (
         <FlashCardReviewPanel
-          onClose={() => setReviewPanel(null)}
-          pdfContent={pdfDataUrl || fullPdfText}
+          onClose={() => { setReviewPanel(null); clearCombinedReview(); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
           existingCards={reviewFlashCards}
           savedEstimate={flashCardEstimate}
           onSaveCards={setReviewFlashCards}
@@ -750,6 +1001,81 @@ const App: React.FC = () => {
             });
           }}
           onClose={() => setIsMarkPanelOpen(false)}
+        />
+      )}
+
+      {/* 费曼检验面板 */}
+      {feynmanPanelOpen && (
+        <FeynmanPanel
+          onClose={() => { setFeynmanPanelOpen(false); clearCombinedReview(); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+        />
+      )}
+
+      {/* 考前速览面板 */}
+      {examSummaryPanelOpen && (
+        <ExamSummaryPanel
+          onClose={() => { setExamSummaryPanelOpen(false); clearCombinedReview(); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+        />
+      )}
+
+      {/* 考点与陷阱面板 */}
+      {examTrapsPanelOpen && (
+        <ExamTrapsPanel
+          onClose={() => { setExamTrapsPanelOpen(false); clearCombinedReview(); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+        />
+      )}
+
+      {/* 术语精确定义面板 */}
+      {terminologyPanelOpen && (
+        <TerminologyPanel
+          onClose={() => { setTerminologyPanelOpen(false); clearCombinedReview(); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+          onGenerateFlashCards={(terms) => {
+            const now = Date.now();
+            const newCards: FlashCard[] = terms.map((t, i) => ({
+              id: `term-${now}-${i}`,
+              front: t.term,
+              back: t.definition,
+              createdAt: now
+            }));
+            setReviewFlashCards(prev => [...prev, ...newCards]);
+            setTerminologyPanelOpen(false);
+            setReviewModeChooserOpen(false);
+            setReviewPanel('flashcard');
+          }}
+        />
+      )}
+
+      {/* 刁钻教授面板 */}
+      {trickyProfessorPanelOpen && (
+        <TrickyProfessorPanel
+          onClose={() => { setTrickyProfessorPanelOpen(false); clearCombinedReview(); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+        />
+      )}
+
+      {/* 陷阱清单面板 */}
+      {trapListPanelOpen && (
+        <TrapListPanel
+          onClose={() => setTrapListPanelOpen(false)}
+          items={trapList}
+          onRemove={(id) => setTrapList(prev => prev.filter(t => t.id !== id))}
+        />
+      )}
+
+      {/* Study Guide 面板 */}
+      {studyGuidePanel && (
+        <StudyGuidePanel
+          onClose={() => { setStudyGuidePanel(false); clearCombinedReview(); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+          fileName={combinedReviewFileName ?? fileName}
+          existingGuide={studyGuide}
+          onSaveGuide={(guide) => {
+            setStudyGuide(guide);
+          }}
         />
       )}
 
@@ -819,15 +1145,20 @@ const App: React.FC = () => {
             hasPdfLoaded={!!fileName && slides.length > 0}
             onOpenQuiz={() => setReviewPanel('quiz')}
             onOpenFlashCard={() => setReviewPanel('flashcard')}
+            onOpenStudyGuide={() => setStudyGuidePanel(true)}
+            onOpenTrapList={() => setTrapListPanelOpen(true)}
+            trapCount={trapList.length}
             pageMarks={pageMarks}
             fileName={fileName}
             user={user}
             onLogin={handleLogin}
             onRestoreSession={handleRestoreCloudSession}
             onDeleteSession={handleDeleteSession}
+            onStartCombinedReview={handleStartCombinedReview}
           />
           
           <div 
+            ref={leftPanelRef}
             className="relative flex flex-col border-r border-stone-200 bg-[#E5E7EB] transition-[width] duration-0 ease-linear" 
             style={{ width: isImmersive ? (isSidePanelCollapsed ? '98%' : `${leftPanelWidth}%`) : '60%' }}
           >
@@ -859,7 +1190,7 @@ const App: React.FC = () => {
 
       {!isImmersive && (
         <>
-          <section className="bg-[#FFFBF7] pb-24 relative z-10">
+          <section className="bg-[#FFFBF7] pt-20 pb-24 relative z-10">
              <Notebook fileName={fileName} notes={fileName ? (notebookData[fileName] || {}) : {}} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />
              <footer className="mt-10 text-center text-stone-300 text-sm font-bold tracking-widest">逃课神器 · POWERED BY GEMINI 3.0 PRO</footer>
           </section>

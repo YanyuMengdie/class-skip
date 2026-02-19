@@ -5,8 +5,8 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType } from '../types';
-import { Rocket, Send, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move } from 'lucide-react';
-import { chatWithAdaptiveTutor, generateGatekeeperQuiz } from '../services/geminiService';
+import { Rocket, Send, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2 } from 'lucide-react';
+import { chatWithAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '../services/geminiService';
 
 interface SkimPanelProps {
   studyMap: StudyMap | null;
@@ -88,6 +88,15 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   // Quiz State
   const [quizSelectedOption, setQuizSelectedOption] = useState<number | null>(null);
   const [quizSubmitted, setQuizSubmitted] = useState(false);
+
+  // 本模块要点 & 模块小题（reading 阶段）
+  const [moduleTakeaways, setModuleTakeaways] = useState<string[] | null>(null);
+  const [moduleQuiz, setModuleQuiz] = useState<QuizData[] | null>(null);
+  const [takeawaysLoading, setTakeawaysLoading] = useState(false);
+  const [quizLoading, setQuizLoading] = useState(false);
+  const [moduleQuizIndex, setModuleQuizIndex] = useState(0);
+  const [moduleQuizSelected, setModuleQuizSelected] = useState<number | null>(null);
+  const [moduleQuizSubmitted, setModuleQuizSubmitted] = useState(false);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -260,6 +269,13 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       const content = pdfDataUrl || fullText;
 
       if (!textToSend.trim() || !content || isChatLoading) return;
+
+      // 进入下一模块或继续对话时清空本模块要点/小题
+      setModuleTakeaways(null);
+      setModuleQuiz(null);
+      setModuleQuizIndex(0);
+      setModuleQuizSelected(null);
+      setModuleQuizSubmitted(false);
       
       if (!textOverride) {
           const userMsg: ChatMessage = { role: 'user', text: textToSend, timestamp: Date.now() };
@@ -280,6 +296,48 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       } finally {
           setIsChatLoading(false);
       }
+  };
+
+  const handleShowTakeaways = async () => {
+      if (messages.length === 0 || takeawaysLoading) return;
+      setTakeawaysLoading(true);
+      setModuleTakeaways(null);
+      setModuleQuiz(null);
+      try {
+          const list = await generateModuleTakeaways(messages, docType);
+          setModuleTakeaways(list.length > 0 ? list : ['暂无提炼要点，可继续与导读交流后重试。']);
+      } catch (e) {
+          console.error(e);
+          setModuleTakeaways(['生成失败，请重试。']);
+      } finally {
+          setTakeawaysLoading(false);
+      }
+  };
+
+  const handleGenerateModuleQuiz = async () => {
+      if (quizLoading) return;
+      setQuizLoading(true);
+      setModuleQuiz(null);
+      setModuleQuizIndex(0);
+      setModuleQuizSelected(null);
+      setModuleQuizSubmitted(false);
+      try {
+          const takeawaysText = moduleTakeaways?.join('\n');
+          const items = await generateModuleQuiz(messages, takeawaysText);
+          setModuleQuiz(items.length > 0 ? items : null);
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setQuizLoading(false);
+      }
+  };
+
+  const currentModuleQuestion = moduleQuiz && moduleQuiz[moduleQuizIndex];
+  const finishModuleQuiz = () => {
+      setModuleQuiz(null);
+      setModuleQuizIndex(0);
+      setModuleQuizSelected(null);
+      setModuleQuizSubmitted(false);
   };
 
   if (isLoading) {
@@ -610,7 +668,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                      <p className="text-xs font-bold text-stone-400">请先在上方完成【知识准备】</p>
                  </div>
              ) : (
-                 messages.map((msg, idx) => (
+                 <>
+                 {messages.map((msg, idx) => (
                     <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                         <div className={`max-w-[90%] px-4 py-3 text-sm shadow-sm transition-all ${
                             msg.role === 'user' 
@@ -627,7 +686,122 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             </ReactMarkdown>
                         </div>
                     </div>
-                ))
+                 ))}
+
+                 {/* 本模块要点卡片（reading 阶段） */}
+                 {stage === 'reading' && moduleTakeaways !== null && (
+                     <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/80 p-4 space-y-3 animate-in fade-in slide-in-from-bottom-2">
+                         <div className="flex items-center gap-2 text-amber-800 font-bold">
+                             <ListChecks className="w-4 h-4" />
+                             <span>本模块要点 (Takeaways)</span>
+                         </div>
+                         <ul className="list-decimal list-inside space-y-2 text-sm text-slate-700">
+                             {moduleTakeaways.map((item, i) => (
+                                 <li key={i} className="leading-relaxed">{item}</li>
+                             ))}
+                         </ul>
+                         <div className="flex flex-wrap gap-2 pt-2">
+                             <button
+                                 type="button"
+                                 onClick={() => {
+                                     const text = moduleTakeaways.join('\n');
+                                     navigator.clipboard.writeText(text).catch(() => {});
+                                     if (onNotebookAdd) onNotebookAdd(`【本模块要点】\n${text}`, 'skim');
+                                 }}
+                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-amber-200 text-amber-800 text-xs font-bold hover:bg-amber-100 transition-colors"
+                             >
+                                 <ClipboardList className="w-3.5 h-3.5" />
+                                 复制并记到笔记
+                             </button>
+                             <button
+                                 type="button"
+                                 onClick={handleGenerateModuleQuiz}
+                                 disabled={quizLoading}
+                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                             >
+                                 {quizLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Lightbulb className="w-3.5 h-3.5" />}
+                                 针对本模块生成小题
+                             </button>
+                         </div>
+                     </div>
+                 )}
+
+                 {/* 本模块小题（2–3 道，逐题展示） */}
+                 {stage === 'reading' && moduleQuiz && moduleQuiz.length > 0 && currentModuleQuestion && (
+                     <div className="rounded-2xl border-2 border-violet-200 bg-violet-50/80 p-4 space-y-3 animate-in fade-in slide-in-from-bottom-2">
+                         <div className="flex items-center justify-between text-violet-800 font-bold text-sm">
+                             <span>本模块小题 ({moduleQuizIndex + 1}/{moduleQuiz.length})</span>
+                             <button type="button" onClick={finishModuleQuiz} className="text-xs font-medium text-violet-600 hover:underline">做完了，继续学习</button>
+                         </div>
+                         <p className="text-slate-800 font-medium">{currentModuleQuestion.question}</p>
+                         <div className="space-y-2">
+                             {currentModuleQuestion.options.map((opt, idx) => {
+                                 const isSelected = moduleQuizSelected === idx;
+                                 const isCorrect = idx === currentModuleQuestion.correctIndex;
+                                 const showResult = moduleQuizSubmitted;
+                                 let btnClass = "border-stone-200 hover:border-violet-300 hover:bg-violet-100/50 text-slate-700";
+                                 if (isSelected) btnClass = "border-violet-500 bg-violet-100 text-violet-800 ring-1 ring-violet-500";
+                                 if (showResult) {
+                                     if (isCorrect) btnClass = "border-emerald-500 bg-emerald-50 text-emerald-800";
+                                     else if (isSelected && !isCorrect) btnClass = "border-rose-500 bg-rose-50 text-rose-800";
+                                     else btnClass = "border-stone-100 text-stone-400";
+                                 }
+                                 return (
+                                     <button
+                                         key={idx}
+                                         disabled={moduleQuizSubmitted}
+                                         onClick={() => setModuleQuizSelected(idx)}
+                                         className={`w-full text-left p-3 rounded-xl border text-sm transition-all ${btnClass}`}
+                                     >
+                                         {opt}
+                                         {showResult && isCorrect && <CheckCircle2 className="w-4 h-4 inline-block ml-2 text-emerald-500" />}
+                                         {showResult && isSelected && !isCorrect && <AlertCircle className="w-4 h-4 inline-block ml-2 text-rose-500" />}
+                                     </button>
+                                 );
+                             })}
+                         </div>
+                         {!moduleQuizSubmitted ? (
+                             <button
+                                 onClick={() => setModuleQuizSubmitted(true)}
+                                 disabled={moduleQuizSelected === null}
+                                 className="w-full py-2 rounded-xl bg-violet-600 text-white text-sm font-bold hover:bg-violet-700 disabled:opacity-50 transition-colors"
+                             >
+                                 提交答案
+                             </button>
+                         ) : (
+                             <div className="space-y-2">
+                                 <div className="p-3 rounded-xl bg-white/80 text-sm text-slate-700 border border-violet-100">
+                                     <span className="font-bold text-violet-700">解析：</span> {currentModuleQuestion.explanation}
+                                 </div>
+                                 <div className="flex gap-2">
+                                     <button
+                                         type="button"
+                                         onClick={() => { setModuleQuizIndex(i => Math.max(0, i - 1)); setModuleQuizSelected(null); setModuleQuizSubmitted(false); }}
+                                         disabled={moduleQuizIndex === 0}
+                                         className="flex-1 py-2 rounded-xl border border-violet-200 text-violet-700 text-sm font-medium hover:bg-violet-100 disabled:opacity-50"
+                                     >
+                                         上一题
+                                     </button>
+                                     {moduleQuizIndex < moduleQuiz.length - 1 ? (
+                                         <button
+                                             type="button"
+                                             onClick={() => { setModuleQuizIndex(i => i + 1); setModuleQuizSelected(null); setModuleQuizSubmitted(false); }}
+                                             className="flex-1 py-2 rounded-xl bg-violet-600 text-white text-sm font-bold hover:bg-violet-700"
+                                         >
+                                             下一题
+                                         </button>
+                                     ) : (
+                                         <button type="button" onClick={finishModuleQuiz} className="flex-1 py-2 rounded-xl bg-slate-800 text-white text-sm font-bold hover:bg-slate-900">
+                                             完成，继续学习
+                                         </button>
+                                     )}
+                                 </div>
+                             </div>
+                         )}
+                     </div>
+                 )}
+
+                 </>
              )}
              {isChatLoading && (
                  <div className="flex justify-start">
@@ -642,7 +816,18 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
              )}
         </div>
 
-        <div className="p-4 border-t border-stone-50 bg-white shrink-0">
+        <div className="p-4 border-t border-stone-50 bg-white shrink-0 space-y-2">
+            {stage === 'reading' && messages.length > 0 && (
+                <button
+                    type="button"
+                    onClick={handleShowTakeaways}
+                    disabled={takeawaysLoading || isChatLoading}
+                    className="w-full flex items-center justify-center gap-2 py-2 rounded-xl bg-amber-100 text-amber-800 border border-amber-200 text-sm font-bold hover:bg-amber-200 disabled:opacity-50 transition-colors"
+                >
+                    {takeawaysLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
+                    <span>本模块读完了，看要点</span>
+                </button>
+            )}
             <div className="flex items-center space-x-2 bg-stone-50 p-1.5 rounded-full border border-stone-100 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
                 <input
                     type="text"

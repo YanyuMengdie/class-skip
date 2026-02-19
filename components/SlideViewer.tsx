@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Image as ImageIcon, Coffee, X, Download, StickyNote, GripHorizontal, Minus, Plus, Scaling, Move, Bold, ZoomIn, ZoomOut, Maximize2, ChevronDown } from 'lucide-react';
 import { Slide, SlideAnnotation } from '../types';
+import { plainTextToHtmlWithSupSub } from '../utils/textUtils';
 
 interface SlideViewerProps {
   slide: Slide | undefined;
@@ -11,6 +12,7 @@ interface SlideViewerProps {
   onExportPDF: () => void;
   onRequestUpload?: () => void;
   isImmersive?: boolean;
+  leftPanelRef?: React.RefObject<HTMLDivElement>; // 左侧面板的 ref，用于扩大拖拽范围
 }
 
 const COLORS = [
@@ -28,7 +30,8 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
   onDeleteAnnotation,
   onExportPDF,
   onRequestUpload: _onRequestUpload,
-  isImmersive = false
+  isImmersive = false,
+  leftPanelRef
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   
@@ -81,13 +84,13 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
     setIsDragOver(false);
     if (!slide || !containerRef.current) return;
     
-    // 优先获取 HTML 格式，如果没有则使用纯文本
+    // 优先获取 HTML 格式，如果没有则使用纯文本（并保留上标/下标如 ⁺⁻）
     let content = e.dataTransfer.getData("text/html");
     const plainText = e.dataTransfer.getData("text/plain");
     
     if (!content && plainText) {
-      // 如果没有 HTML，将纯文本转换为 HTML（保留换行）
-      content = plainText.replace(/\n/g, '<br>');
+      // 若无 HTML，将纯文本转为 HTML：保留换行，且将 Unicode 上标/下标转为 <sup>/<sub>，与「选中平移」格式一致
+      content = plainTextToHtmlWithSupSub(plainText);
     }
     
     if (!content) return;
@@ -130,10 +133,12 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
     initialNote.current = { x: note.x, y: note.y, w: note.width || 240, h: note.height || 100 };
 
     const onMove = (ev: MouseEvent) => {
-        if (!containerRef.current) return;
+        // 使用左侧面板容器（如果提供）来扩大拖拽范围，否则使用 slide 容器
+        const dragContainer = leftPanelRef?.current || containerRef.current;
+        if (!dragContainer) return;
         
-        // Rect of the slide container (visual)
-        const rect = containerRef.current.getBoundingClientRect();
+        // Rect of the drag container (左侧面板或 slide 容器)
+        const rect = dragContainer.getBoundingClientRect();
         
         const deltaX = ev.clientX - dragStartMouse.current.x;
         const deltaY = ev.clientY - dragStartMouse.current.y;
@@ -145,8 +150,19 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
         
         let newX = initialNote.current.x + deltaXPercent;
         let newY = initialNote.current.y + deltaYPercent;
-        newX = Math.max(0, Math.min(95, newX));
-        newY = Math.max(0, Math.min(95, newY));
+        
+        // 拖拽范围限制：
+        // - 左右（X）：严格限制在分界线左边，不能超过（0% 到 95%）
+        // - 上下（Y）：可以自由拖拽，扩大范围（-20% 到 120%），不限于 slide 周围
+        if (leftPanelRef?.current) {
+          // 使用左侧面板时：左右严格限制，上下扩大范围
+          newX = Math.max(0, Math.min(95, newX)); // 左右不能超过分界线
+          newY = Math.max(-20, Math.min(120, newY)); // 上下可以更大范围
+        } else {
+          // 不使用左侧面板时：保持原有逻辑
+          newX = Math.max(0, Math.min(95, newX));
+          newY = Math.max(0, Math.min(95, newY));
+        }
 
         onUpdateAnnotation(note.id, { x: newX, y: newY });
     };

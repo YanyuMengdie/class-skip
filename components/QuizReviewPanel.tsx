@@ -1,15 +1,24 @@
 import React, { useState, useMemo } from 'react';
-import { X, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Lightbulb, RotateCcw, PlusCircle, Loader2, BookOpen } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Lightbulb, RotateCcw, PlusCircle, Loader2, BookOpen, ListPlus } from 'lucide-react';
 import { QuizData, QuizRound } from '../types';
 import { generateQuizSet } from '../services/geminiService';
 
 type Step = 'choose' | 'generating' | 'doing' | 'done' | 'review';
+
+export interface AddToTrapData {
+  question: string;
+  options: string[];
+  correctIndex: number;
+  userSelectedIndex: number;
+  explanation: string;
+}
 
 interface QuizReviewPanelProps {
   onClose: () => void;
   pdfContent: string | null;
   existingRounds: QuizRound[];
   onSaveRounds: (rounds: QuizRound[]) => void;
+  onAddToTrap?: (data: AddToTrapData) => void;
 }
 
 const COUNT_OPTIONS = [5, 10, 15, 20];
@@ -18,7 +27,8 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
   onClose,
   pdfContent,
   existingRounds,
-  onSaveRounds
+  onSaveRounds,
+  onAddToTrap
 }) => {
   const [step, setStep] = useState<Step>(existingRounds.length === 0 ? 'choose' : 'choose');
   const [count, setCount] = useState(10);
@@ -28,6 +38,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [addedToTrapIds, setAddedToTrapIds] = useState<Set<string>>(new Set());
 
   const allItems = useMemo(() => {
     const fromRounds = existingRounds.flatMap(r => r.items);
@@ -51,6 +62,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
     setCurrentRoundAnswers(items.map(() => null));
     setCurrentRoundSubmitted(items.map(() => false));
     setCurrentIndex(0);
+    setAddedToTrapIds(new Set());
     setStep('doing');
   };
 
@@ -199,6 +211,26 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                     {isCorrect ? '回答正确' : '解析'}
                   </div>
                   <p className="leading-relaxed">{currentQ.explanation}</p>
+                  {!isCorrect && onAddToTrap && selected !== null && !addedToTrapIds.has(currentQ.question) && (
+                    <button
+                      onClick={() => {
+                        onAddToTrap({
+                          question: currentQ.question,
+                          options: currentQ.options,
+                          correctIndex: currentQ.correctIndex,
+                          userSelectedIndex: selected,
+                          explanation: currentQ.explanation
+                        });
+                        setAddedToTrapIds(prev => new Set(prev).add(currentQ.question));
+                      }}
+                      className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-100 text-amber-800 text-sm font-bold hover:bg-amber-200"
+                    >
+                      <ListPlus className="w-4 h-4" /> 记入陷阱清单
+                    </button>
+                  )}
+                  {!isCorrect && addedToTrapIds.has(currentQ.question) && (
+                    <p className="mt-3 text-amber-600 text-xs">已加入陷阱清单</p>
+                  )}
                 </div>
               )}
               <div className="flex justify-end gap-2">

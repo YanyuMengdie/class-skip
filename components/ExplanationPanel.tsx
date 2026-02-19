@@ -6,6 +6,8 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { Sparkles, RefreshCw, Send, Image as ImageIcon, MessageSquare, X, Heart, HelpCircle, Highlighter, Plus, GripHorizontal, Move, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ChatMessage } from '../types';
+import { plainTextToHtmlWithSupSub, normalizeSelectionText, dedupeHtml } from '../utils/textUtils';
+import { LoadingInteractiveContent } from './LoadingInteractiveContent';
 
 interface ExplanationPanelProps {
   explanation: string | undefined;
@@ -228,7 +230,8 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
           const rect = range.getBoundingClientRect();
           
           if (rect.width > 0) {
-              const text = selection.toString().trim();
+              const raw = selection.toString();
+              const text = normalizeSelectionText(raw);
               setSelectedText(text);
               
               // 获取选中区域的 HTML 内容（保留格式）
@@ -248,6 +251,65 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
                 return `__KATEX_PLACEHOLDER_${katexMatches.length - 1}__`;
               });
               
+              // 保护上标和下标格式（如 b⁻, a⁺ 等）
+              // 需要保护包含上标/下标字符的 <span> 标签，以及 <sup>/<sub> 标签
+              const superscriptMatches: string[] = [];
+              const subscriptMatches: string[] = [];
+              
+              // 先保护包含上标字符的 <span> 标签（react-markdown 可能会将上标字符包裹在 span 中）
+              // 匹配包含上标字符的 span：如 <span>⁻</span> 或 <span class="...">b⁻</span> 或 <span>a⁻,b⁻,c⁻</span>
+              // 先收集所有匹配，然后从后往前替换，避免索引错乱
+              const superscriptSpanPattern = /<span[^>]*>[\s\S]*?[\u2070-\u207F\u00B2\u00B3\u00B9][\s\S]*?<\/span>/gi;
+              const superscriptSpans: Array<{ match: string; index: number }> = [];
+              let match;
+              // 重置正则表达式的 lastIndex，确保从头开始匹配
+              superscriptSpanPattern.lastIndex = 0;
+              while ((match = superscriptSpanPattern.exec(html)) !== null) {
+                if (!match[0].includes('__KATEX_PLACEHOLDER_')) {
+                  superscriptSpans.push({ match: match[0], index: match.index });
+                }
+              }
+              // 从后往前替换，避免索引错乱
+              superscriptSpans.reverse().forEach(({ match: spanMatch }) => {
+                superscriptMatches.push(spanMatch);
+                html = html.replace(spanMatch, `__SUPERSCRIPT_PLACEHOLDER_${superscriptMatches.length - 1}__`);
+              });
+              
+              // 匹配 <sup> 标签及其内容
+              const supTagPattern = /<sup[^>]*>.*?<\/sup>/gi;
+              html = html.replace(supTagPattern, (match) => {
+                if (!match.includes('__SUPERSCRIPT_PLACEHOLDER_')) {
+                  superscriptMatches.push(match);
+                  return `__SUPERSCRIPT_PLACEHOLDER_${superscriptMatches.length - 1}__`;
+                }
+                return match;
+              });
+              
+              // 保护包含下标字符的 <span> 标签
+              const subscriptSpanPattern = /<span[^>]*>[\s\S]*?[\u2080-\u208F][\s\S]*?<\/span>/gi;
+              const subscriptSpans: Array<{ match: string; index: number }> = [];
+              while ((match = subscriptSpanPattern.exec(html)) !== null) {
+                const spanMatch = match[0];
+                if (!spanMatch.includes('__KATEX_PLACEHOLDER_') && !spanMatch.includes('__SUPERSCRIPT_PLACEHOLDER_')) {
+                  subscriptSpans.push({ match: spanMatch, index: match.index });
+                }
+              }
+              // 从后往前替换
+              subscriptSpans.reverse().forEach(({ match: spanMatch }) => {
+                subscriptMatches.push(spanMatch);
+                html = html.replace(spanMatch, `__SUBSCRIPT_PLACEHOLDER_${subscriptMatches.length - 1}__`);
+              });
+              
+              // 匹配 <sub> 标签及其内容
+              const subTagPattern = /<sub[^>]*>.*?<\/sub>/gi;
+              html = html.replace(subTagPattern, (match) => {
+                if (!match.includes('__SUBSCRIPT_PLACEHOLDER_')) {
+                  subscriptMatches.push(match);
+                  return `__SUBSCRIPT_PLACEHOLDER_${subscriptMatches.length - 1}__`;
+                }
+                return match;
+              });
+              
               // 保留换行：将 <p>、<div> 转换为换行，但保留 <br>
               html = html
                 .replace(/<\/p>/gi, '<br>')
@@ -265,10 +327,21 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
                 .replace(/<code[^>]*>/gi, '<code>')
                 .replace(/<\/code>/gi, '</code>');
               
-              // 处理普通 <span>：保留内容但去除样式（跳过已保护的 katex placeholder）
+              // 处理普通 <span>：保留内容但去除样式（跳过已保护的 katex、上标、下标 placeholder）
               html = html.replace(/<span[^>]*>(.*?)<\/span>/gi, (match, content) => {
                 // 如果是 placeholder，不处理
-                if (match.includes('__KATEX_PLACEHOLDER_')) return match;
+                if (match.includes('__KATEX_PLACEHOLDER_') || 
+                    match.includes('__SUPERSCRIPT_PLACEHOLDER_') || 
+                    match.includes('__SUBSCRIPT_PLACEHOLDER_')) {
+                  return match;
+                }
+                // 如果内容包含上标或下标字符，保留 <span> 标签但清理样式和类名
+                if (/[\u2070-\u207F\u00B2\u00B3\u00B9\u2080-\u208F]/.test(content)) {
+                  // 清理样式和类名，但保留标签结构
+                  return match.replace(/style="[^"]*"/gi, '').replace(/style='[^']*'/gi, '')
+                             .replace(/class="[^"]*"/gi, '').replace(/class='[^']*'/gi, '')
+                             .replace(/id="[^"]*"/gi, '').replace(/id='[^']*'/gi, '');
+                }
                 return content;
               });
               
@@ -291,15 +364,23 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
                 html = html.replace(`__KATEX_PLACEHOLDER_${idx}__`, match);
               });
               
+              // 恢复上标和下标（在清理完成后）
+              superscriptMatches.forEach((match, idx) => {
+                html = html.replace(`__SUPERSCRIPT_PLACEHOLDER_${idx}__`, match);
+              });
+              subscriptMatches.forEach((match, idx) => {
+                html = html.replace(`__SUBSCRIPT_PLACEHOLDER_${idx}__`, match);
+              });
+              
               // 清理多余的空白和换行（但保留公式周围的必要空格）
               html = html
                 .replace(/\s+/g, ' ') // 多个空格合并为一个
                 .replace(/<br>\s*<br>/gi, '<br>') // 多个 <br> 合并
                 .trim();
               
-              // 如果没有有效的 HTML 标签，使用纯文本并保留换行
+              // 如果没有有效的 HTML 标签，使用纯文本并保留换行及上标/下标（与拖拽便签显示一致）
               if (!/<[^>]+>/.test(html)) {
-                html = text.replace(/\n/g, '<br>');
+                html = plainTextToHtmlWithSupSub(text);
               }
               
               setSelectedHtml(html);
@@ -334,9 +415,9 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
   
   const handleDragStart = (e: React.DragEvent) => {
       if (selectedText) {
-          // 同时传递纯文本和 HTML 格式
+          // 同时传递纯文本和 HTML 格式；无 HTML 时用带上标/下标的转换，与「选中平移」格式一致
           e.dataTransfer.setData("text/plain", selectedText);
-          e.dataTransfer.setData("text/html", selectedHtml || selectedText.replace(/\n/g, '<br>'));
+          e.dataTransfer.setData("text/html", selectedHtml || plainTextToHtmlWithSupSub(selectedText));
           e.dataTransfer.effectAllowed = "copy";
       }
   };
@@ -346,9 +427,13 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
     e.stopPropagation();
     
     if (selectedText && onNotebookAdd) {
-        onNotebookAdd(selectedText);
+        const content = selectedHtml
+          ? dedupeHtml(selectedHtml)
+          : plainTextToHtmlWithSupSub(normalizeSelectionText(selectedText));
+        onNotebookAdd(content);
         setSelectionRect(null);
         setSelectedText('');
+        setSelectedHtml('');
         window.getSelection()?.removeAllRanges();
     }
   };
@@ -481,15 +566,7 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
 
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-white" ref={explanationRef}>
           {isLoadingExplanation ? (
-            <div className="flex flex-col items-center justify-center h-full space-y-6">
-              <div className="relative">
-                 <div className="w-16 h-16 bg-rose-100 rounded-full flex items-center justify-center animate-bounce">
-                    <Heart className="w-8 h-8 text-rose-400 fill-current" />
-                 </div>
-                 <div className="absolute -bottom-2 w-12 h-2 bg-rose-200 rounded-full blur-md opacity-50 left-1/2 -translate-x-1/2 animate-pulse"></div>
-              </div>
-              <p className="text-slate-400 font-medium text-sm animate-pulse">正在努力思考中...</p>
-            </div>
+            <LoadingInteractiveContent />
           ) : explanation ? (
             <div className="p-8 max-w-none">
                 <MarkdownView content={explanation} />

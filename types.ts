@@ -99,6 +99,18 @@ export interface FlashCard {
   createdAt: number;
 }
 
+/** 陷阱清单条目（错题/易错点） */
+export interface TrapItem {
+  id: string;
+  question: string;
+  options: string[];
+  correctIndex: number;
+  userSelectedIndex: number;
+  explanation: string;
+  source?: string;
+  createdAt: number;
+}
+
 export type ViewMode = 'deep' | 'skim';
 export type SkimStage = 'diagnosis' | 'tutoring' | 'quiz' | 'reading';
 
@@ -123,12 +135,82 @@ export interface PageMarks {
   };
 }
 
+// --- STUDY GUIDE TYPES ---
+export type StudyGuideFormat = 'outline' | 'detailed';
+
+export interface StudyGuideContent {
+  // 章节大纲
+  chapters: Array<{
+    title: string;
+    pageRange?: string; // "1-5"
+    subsections?: string[];
+  }>;
+  
+  // 核心概念
+  coreConcepts: Array<{
+    term: string;
+    definition: string;
+    importance: 'high' | 'medium' | 'low';
+  }>;
+  
+  // 学习路径
+  learningPath: Array<{
+    step: number;
+    title: string;
+    description: string;
+    suggestedPages?: number[];
+  }>;
+  
+  // 知识点树（层级结构）
+  knowledgeTree: {
+    root: string; // 主题
+    branches: Array<{
+      concept: string;
+      children?: Array<{
+        concept: string;
+        details?: string[];
+      }>;
+    }>;
+  };
+  
+  // 复习建议
+  reviewSuggestions: {
+    keyPoints: string[];
+    practiceTips: string[];
+    commonMistakes?: string[];
+  };
+  
+  // Markdown 格式的完整内容（用于渲染）
+  markdownContent: string;
+}
+
+export interface StudyGuide {
+  id: string;
+  fileName: string;
+  format: StudyGuideFormat;
+  content: StudyGuideContent;
+  createdAt: number;
+}
+
 // --- PERSONA TYPES ---
 export interface PersonaSettings {
   charName: string;
   userNickname: string;
   relationship: string;
   personality: string;
+}
+
+// --- 上课模式（路径 A：录音 + 转写 + 课后整理）---
+export interface LectureRecord {
+  id: string;
+  startedAt: number;
+  endedAt?: number;
+  /** 转写段落（带时间戳），或前端拼接为全文 */
+  transcript: { text: string; timestamp: number }[];
+  /** AI 整理结果（讲课逻辑、重点、风格），可选持久化 */
+  organizedSummary?: string;
+  /** 自定义名称（可选，默认使用时间） */
+  name?: string;
 }
 
 // --- PERSISTENCE TYPES ---
@@ -154,6 +236,8 @@ export interface FilePersistedState {
   flashCardEstimate?: number;
   /** 页面标记（重点标记） */
   pageMarks?: PageMarks;
+  /** Study Guide/Outline */
+  studyGuide?: StudyGuide;
   customAvatarUrl?: string | null;
   personaSettings?: PersonaSettings; 
 }
@@ -198,6 +282,7 @@ export interface CloudSession {
   reviewFlashCards?: FlashCard[];
   flashCardEstimate?: number;
   pageMarks?: PageMarks;
+  studyGuide?: StudyGuide;
   
   customAvatarUrl?: string | null;
   customBackgroundUrl?: string | null;

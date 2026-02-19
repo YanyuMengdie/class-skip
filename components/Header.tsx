@@ -1,5 +1,5 @@
 import React from 'react';
-import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, History, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star } from 'lucide-react';
+import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic } from 'lucide-react';
 import { MusicPlayer } from './MusicPlayer';
 import { ViewMode } from '../types';
 import { User } from 'firebase/auth'; 
@@ -63,6 +63,21 @@ interface HeaderProps {
   // Page Mark
   onOpenMarkPanel?: () => void;
   hasMarkOnCurrentPage?: boolean;
+
+  // 小憩区
+  onToggleBreakPanel?: () => void;
+  /** 白噪音面板受控打开（小憩区「打开白噪音」时设为 true） */
+  musicPanelOpen?: boolean;
+  onMusicPanelOpenChange?: (open: boolean) => void;
+
+  // 上课录音文本（有记录时显示入口）
+  hasLectureHistory?: boolean;
+  onOpenLectureTranscript?: () => void;
+
+  // 上课模式（录音+转写）
+  isClassroomMode?: boolean;
+  onStartClass?: () => void;
+  isTranscriptionSupported?: boolean;
 }
 
 const formatTime = (seconds: number) => {
@@ -110,7 +125,15 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleSidebar,
   onEnterEnergyMode,
   onOpenMarkPanel,
-  hasMarkOnCurrentPage
+  hasMarkOnCurrentPage,
+  onToggleBreakPanel,
+  musicPanelOpen,
+  onMusicPanelOpenChange,
+  hasLectureHistory,
+  onOpenLectureTranscript,
+  isClassroomMode,
+  onStartClass,
+  isTranscriptionSupported
 }) => {
   return (
     <header className={`${isImmersive ? 'bg-white border-b border-stone-200' : 'bg-white/80 backdrop-blur-md border-b border-stone-100'} shadow-sm z-30 relative flex flex-col transition-all`}>
@@ -207,6 +230,65 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Right: Tools */}
         <div className="flex items-center space-x-3 min-w-[200px] justify-end">
           
+           {/* 上课：仅未在上课时显示，点击开始录音+转写 */}
+           {onStartClass && !isClassroomMode && (
+              <button
+                onClick={onStartClass}
+                className="flex items-center space-x-1 px-3 py-1.5 bg-rose-100 text-rose-700 hover:bg-rose-200 rounded-xl transition-colors text-xs font-bold shadow-sm border border-rose-200 disabled:opacity-50"
+                title={isTranscriptionSupported === false ? '当前浏览器不支持语音识别，建议使用 Chrome' : '开始上课（录音+实时转写）'}
+                disabled={isTranscriptionSupported === false}
+              >
+                <Mic className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">上课</span>
+              </button>
+           )}
+           {isClassroomMode && (
+              <span className="flex items-center space-x-1 px-3 py-1.5 bg-rose-100 text-rose-700 rounded-xl text-xs font-bold border border-rose-200">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                <span className="hidden md:inline">上课中</span>
+              </span>
+           )}
+
+           {/* 上课录音文本 */}
+           {hasLectureHistory && onOpenLectureTranscript && (
+              <button
+                onClick={onOpenLectureTranscript}
+                className="flex items-center space-x-1 px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl transition-colors text-xs font-bold shadow-sm border border-rose-100"
+                title="查看上课转写与整理"
+              >
+                <Mic className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">上课录音文本</span>
+              </button>
+           )}
+
+           {/* 标记重点 */}
+           {onOpenMarkPanel && totalPages > 0 && (
+             <button
+               onClick={onOpenMarkPanel}
+               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
+                 hasMarkOnCurrentPage
+                   ? 'bg-amber-500 text-white shadow-amber-200 hover:bg-amber-600'
+                   : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
+               }`}
+               title="标记重点"
+             >
+               <Star className={`w-3.5 h-3.5 ${hasMarkOnCurrentPage ? 'fill-current' : ''}`} />
+               <span className="hidden md:inline">重点</span>
+             </button>
+           )}
+
+           {/* 小憩一下 */}
+           {onToggleBreakPanel && (
+              <button
+                onClick={onToggleBreakPanel}
+                className="flex items-center space-x-1 px-3 py-1.5 bg-sky-50 text-sky-600 hover:bg-sky-100 rounded-xl transition-colors text-xs font-bold shadow-sm border border-sky-100"
+                title="分心也在这一页"
+              >
+                <Sun className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">小憩一下</span>
+              </button>
+           )}
+
            {/* Energy Mode Button */}
            <button
               onClick={onEnterEnergyMode}
@@ -301,6 +383,8 @@ export const Header: React.FC<HeaderProps> = ({
             onVideoSelect={onVideoSelect} 
             onVolumeChange={onAudioVolumeChange}
             onTrackChange={onAudioTrackChange}
+            open={musicPanelOpen}
+            onOpenChange={onMusicPanelOpenChange}
           />
 
           {/* Upload Button */}

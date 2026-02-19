@@ -1,7 +1,7 @@
-
 import React, { useState } from 'react';
 import { Book, ChevronDown, ChevronRight, Download, Trash2, StickyNote, PenLine, Layers, Rocket } from 'lucide-react';
 import { PageNotes, Note } from '../types';
+import { normalizeSelectionText, noteDisplayWithSuperscript, stripHtml } from '../utils/textUtils';
 
 interface NotebookProps {
   fileName: string | null;
@@ -28,7 +28,7 @@ export const Notebook: React.FC<NotebookProps> = ({ fileName, notes, onUpdateNot
 
   const startEditing = (note: Note) => {
     setEditingNoteId(note.id);
-    setEditText(note.text);
+    setEditText(note.text.includes('<') ? stripHtml(note.text) : normalizeSelectionText(note.text));
   };
 
   const saveEdit = (page: number, noteId: string) => {
@@ -229,11 +229,14 @@ export const Notebook: React.FC<NotebookProps> = ({ fileName, notes, onUpdateNot
                                             </div>
                                         ) : (
                                             <div 
-                                                className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap cursor-text hover:text-slate-900 transition-colors"
+                                                className={`text-sm text-slate-600 leading-relaxed cursor-text hover:text-slate-900 transition-colors ${note.text.includes('<') ? 'prose prose-sm max-w-none' : ''}`}
                                                 onClick={() => startEditing(note)}
                                                 title="点击编辑"
                                             >
-                                                {note.text}
+                                                {note.text.includes('<')
+                                                  ? <span className="block" dangerouslySetInnerHTML={{ __html: note.text }} />
+                                                  : noteDisplayWithSuperscript(normalizeSelectionText(note.text))
+                                                }
                                             </div>
                                         )}
                                         <div className="mt-2 text-[10px] text-stone-300 font-medium opacity-0 group-hover:opacity-100 transition-opacity">

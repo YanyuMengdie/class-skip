@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Music, Play, Pause, Volume2, X, HelpCircle } from 'lucide-react';
+import { Music, Play, Pause, Volume2, X } from 'lucide-react';
 
 interface MusicPlayerProps {
   isPlaying: boolean;
@@ -9,14 +9,21 @@ interface MusicPlayerProps {
   onTrackChange: (url: string, name: string) => void;
   onVolumeChange: (val: number) => void;
   onVideoSelect?: (type: 'bilibili' | 'youtube', id: string) => void;
+  /** 受控：外部可打开/关闭白噪音面板（如小憩区「打开白噪音」） */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-// 使用 Google Actions Sound Library 和 Wikimedia Commons 的稳定资源
+// 使用 Google Actions Sound Library 官方直链，与雨声/咖啡馆同源
 const PRESETS = [
   { name: '雨声 (Rain)', url: 'https://actions.google.com/sounds/v1/weather/rain_heavy_loud.ogg' },
-  { name: '森林 (Forest)', url: 'https://actions.google.com/sounds/v1/ambiences/forest_morning.ogg' },
   { name: '咖啡馆 (Cafe)', url: 'https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg' },
-  { name: '舒缓钢琴 (Piano)', url: 'https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c4/Gymnopedie_No_1.ogg/Gymnopedie_No_1.ogg.mp3' }
+  { name: '轻雨 (Light Rain)', url: 'https://actions.google.com/sounds/v1/weather/light_rain.ogg' },
+  { name: '炉火 (Fire)', url: 'https://actions.google.com/sounds/v1/ambiences/fire.ogg' },
+  { name: '夏夜虫鸣 (Crickets)', url: 'https://actions.google.com/sounds/v1/ambiences/crickets_with_distant_traffic.ogg' },
+  { name: '微风 (Breeze)', url: 'https://actions.google.com/sounds/v1/weather/light_breeze.ogg' },
+  { name: '室内雨声 (Rain Interior)', url: 'https://actions.google.com/sounds/v1/weather/rain_heavy_quiet_interior.ogg' },
+  { name: '夏日森林 (Summer Forest)', url: 'https://actions.google.com/sounds/v1/ambiences/summer_forest.ogg' },
 ];
 
 export const MusicPlayer: React.FC<MusicPlayerProps> = ({
@@ -26,24 +33,23 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({
   onPlayPause,
   onTrackChange,
   onVolumeChange,
-  onVideoSelect
+  onVideoSelect,
+  open: controlledOpen,
+  onOpenChange
 }) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [customUrl, setCustomUrl] = useState('');
-  const [trackName, setTrackName] = useState<string>('选择背景音');
-
-  const handleCustomPlay = () => {
-    if (customUrl) {
-      onTrackChange(customUrl, '自定义音乐');
-      setTrackName('自定义音乐');
-      setCustomUrl('');
-    }
+  const [internalOpen, setInternalOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const isOpen = isControlled ? controlledOpen : internalOpen;
+  const setOpen = (v: boolean) => {
+    if (isControlled && onOpenChange) onOpenChange(v);
+    else setInternalOpen(v);
   };
+  const [trackName, setTrackName] = useState<string>('选择背景音');
 
   return (
     <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => setOpen(!isOpen)}
         className={`p-2 rounded-lg flex items-center space-x-2 transition-colors ${
           isPlaying ? 'bg-indigo-100 text-indigo-700' : 'hover:bg-gray-100 text-gray-600'
         }`}
@@ -60,7 +66,7 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({
               <Volume2 className="w-4 h-4 mr-2" />
               白噪音播放器
             </h3>
-            <button onClick={() => setIsOpen(false)} className="text-gray-400 hover:text-gray-600">
+            <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
               <X className="w-4 h-4" />
             </button>
           </div>
@@ -83,31 +89,6 @@ export const MusicPlayer: React.FC<MusicPlayerProps> = ({
                 {trackName === preset.name && isPlaying && <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />}
               </button>
             ))}
-          </div>
-
-          <div className="mb-4">
-            <label className="text-xs text-gray-500 mb-1 block">自定义音频链接 (MP3/OGG)</label>
-            <div className="flex space-x-2">
-              <input 
-                type="text" 
-                placeholder="输入音频 URL..." 
-                className="flex-1 text-xs border border-gray-300 rounded px-2 py-1"
-                value={customUrl}
-                onChange={(e) => setCustomUrl(e.target.value)}
-              />
-              <button 
-                onClick={handleCustomPlay}
-                className="text-xs bg-gray-900 text-white px-2 py-1 rounded hover:bg-gray-800"
-              >
-                播放
-              </button>
-            </div>
-            <div className="flex items-start mt-2 text-[10px] text-gray-400 bg-gray-50 p-2 rounded">
-                <HelpCircle className="w-3 h-3 mr-1 mt-0.5 flex-shrink-0" />
-                <span>
-                    注意：并非所有 URL 都能播放。如果链接有跨域限制 (CORS) 或防盗链，将无法播放。建议使用直链。
-                </span>
-            </div>
           </div>
 
           <div className="flex items-center space-x-3 pt-2 border-t border-gray-100">

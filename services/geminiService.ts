@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings } from "../types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat } from "../types";
 import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "../utils/prompts";
 
 // Ensure API Key exists or fail gracefully in logs (though process.env check is assumed handled elsewhere)
@@ -77,6 +77,40 @@ export const classifyDocument = async (docContent: string): Promise<DocType> => 
     // #endregion
     console.error("Classification failed, defaulting to STEM", error);
     return 'STEM';
+  }
+};
+
+/** 根据上课转写全文，用 Gemini 整理：讲课逻辑、重点、老师风格、以及如何理解这篇 lecture */
+export const organizeLectureFromTranscript = async (transcript: string): Promise<string> => {
+  if (!transcript || transcript.trim().length === 0) {
+    return '（暂无转写内容，无法整理）';
+  }
+  const systemInstruction = `
+你是一位善于归纳课堂内容的助教。用户会提供一堂课的语音转写全文（可能有不连贯或重复）。
+请用【简体中文】输出一份结构化整理，包含以下部分，每部分用清晰的标题和分段：
+
+1. **讲课逻辑与结构**：这节课的整体脉络（先讲什么、再讲什么、如何过渡），以及各部分的逻辑关系。
+2. **重点与考点**：老师明确或反复强调的概念、公式、结论、以及可能考察的点。
+3. **老师风格与习惯**：例如偏重推导还是结论、是否爱举例子、口头禅或表述习惯（便于学生回忆课堂）。
+4. **希望你怎样理解这篇 lecture**：从学生复习角度，建议怎样把握这节课、与前后内容的联系、易混点提醒等。
+
+要求：条理清晰、可直接用于课后复习，不要泛泛而谈；若转写过短或难以识别重点，可简要说明并给出有限结论。
+`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [
+        { role: 'user', parts: [{ text: `请整理以下课堂转写：\n\n${transcript.slice(0, 60000)}` }] }
+      ],
+      config: {
+        systemInstruction
+      }
+    });
+    return response.text?.trim() ?? '（整理结果为空）';
+  } catch (error) {
+    console.error('organizeLectureFromTranscript failed', error);
+    throw error;
   }
 };
 
@@ -447,8 +481,144 @@ export const runTaskHugChat = async (history: ChatMessage[], newMessage: string,
   return "加油！";
 };
 
-export const runChatHugAgent = async (history: ChatMessage[], newMessage: string, mode: any): Promise<string> => {
-  return "我在听。";
+/**
+ * 获取ChatHug不同模式的系统提示词
+ */
+const getChatHugSystemPrompt = (mode: 'emotional' | 'casual' | 'mindfulness' | 'coax'): string => {
+  switch (mode) {
+    case 'emotional':
+      return `你是一个温暖、理解的情绪陪伴助手。用户在学习累了、感到疲惫或压力大时来找你倾诉。
+
+你的任务：
+- 认真倾听用户的感受，给予共情和理解
+- 不要催促用户去学习，不要给建议（除非用户明确要求）
+- 用温暖、支持的语气回应
+- 让用户感到被理解和接纳
+- 可以分享一些鼓励的话语，但重点是理解
+
+回复要求：
+- 每次回复控制在2-4句话
+- 语气温暖、真诚
+- 用中文回复
+- 不要重复说"我在听"，要给出有意义的回应`;
+
+    case 'casual':
+      return `你是一个轻松、幽默的聊天伙伴。用户想要暂时放下学习，随便聊聊放松一下。
+
+你的任务：
+- 和用户进行轻松愉快的对话
+- 可以讲笑话、聊日常、分享有趣的话题
+- 不要涉及学习内容，不要催促学习
+- 让用户感到放松和快乐
+
+回复要求：
+- 每次回复控制在2-4句话
+- 语气轻松、幽默
+- 用中文回复
+- 可以适当使用表情符号`;
+
+    case 'mindfulness':
+      return `你是一个正念引导助手。用户感到焦虑、脑子乱，需要平静下来。
+
+你的任务：
+- 引导用户进行正念练习（深呼吸、观察当下等）
+- 用平静、温和的语气
+- 帮助用户专注于当下，放下杂念
+- 可以逐步引导，但不要强迫
+
+回复要求：
+- 每次回复控制在3-5句话
+- 语气平静、温和
+- 用中文回复
+- 可以给出具体的正念练习指导`;
+
+    case 'coax':
+      return `你是一个温柔、鼓励的学习伙伴。用户学习累了，想放弃但又还想学，需要一点力量。
+
+你的任务：
+- 理解用户的疲惫和挣扎
+- 温柔地给予鼓励和支持
+- 帮助用户找到继续学习的动力
+- 不要强迫，而是用理解和鼓励的方式
+- 可以提醒用户已经取得的进步
+
+回复要求：
+- 每次回复控制在3-5句话
+- 语气温柔、鼓励
+- 用中文回复
+- 给予具体的支持和力量`;
+
+    default:
+      return '你是一个温暖的支持助手。';
+  }
+};
+
+export const runChatHugAgent = async (
+  history: ChatMessage[], 
+  newMessage: string, 
+  mode: 'emotional' | 'casual' | 'mindfulness' | 'coax'
+): Promise<string> => {
+  try {
+    // 验证模式
+    if (!mode || !['emotional', 'casual', 'mindfulness', 'coax'].includes(mode)) {
+      console.warn('Invalid ChatHug mode:', mode);
+      mode = 'emotional'; // 默认使用情绪陪伴模式
+    }
+
+    const systemPrompt = getChatHugSystemPrompt(mode);
+    const contents = [];
+
+    // 限制对话历史长度，只保留最近15条消息（性能优化）
+    const recentHistory = history.slice(-15);
+
+    // 构建对话历史
+    recentHistory.forEach(msg => {
+      contents.push({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.text || '' }]
+      });
+    });
+
+    // 添加新消息
+    contents.push({
+      role: 'user',
+      parts: [{ text: newMessage || '' }]
+    });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: contents,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature: mode === 'casual' ? 0.9 : 0.7, // casual模式更随机有趣
+        topP: 0.95,
+        topK: 40
+      }
+    });
+
+    const responseText = response.text?.trim();
+    
+    // 如果回复为空或太短，返回友好的提示
+    if (!responseText || responseText.length < 2) {
+      return "抱歉，我现在有点卡住了，能再说一遍吗？";
+    }
+
+    return responseText;
+  } catch (error) {
+    console.error("ChatHug Error:", error);
+    
+    // 根据错误类型返回不同的友好提示
+    if (error instanceof Error) {
+      if (error.message.includes('timeout') || error.message.includes('网络')) {
+        return "抱歉，网络有点慢，稍等一下好吗？";
+      }
+      if (error.message.includes('quota') || error.message.includes('limit')) {
+        return "抱歉，我现在有点忙，稍后再试试好吗？";
+      }
+    }
+    
+    return "抱歉，我现在有点忙，稍等一下好吗？";
+  }
 };
 
 export const performPreFlightDiagnosis = async (docContent: string): Promise<StudyMap | null> => {
@@ -538,6 +708,107 @@ export const generateGatekeeperQuiz = async (docContent: string, topic: string):
   } catch (error) {
     console.error("Quiz Gen Error:", error);
     return null;
+  }
+};
+
+/** 根据当前阅读阶段对话，生成本模块 3–5 条要点（关键要记下来的）。 */
+export const generateModuleTakeaways = async (
+  readingMessages: ChatMessage[],
+  docType: DocType
+): Promise<string[]> => {
+  try {
+    const convoText = readingMessages
+      .map((m) => `${m.role === 'user' ? '用户' : '导读'}: ${m.text}`)
+      .join('\n\n');
+    if (!convoText.trim()) return [];
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `你正在做${docType === 'HUMANITIES' ? '社科/人文' : '理科'}文档的导读。以下是当前模块的对话记录。请根据对话内容，提炼出 3–5 条「本模块关键要点」，适合用户记下来或复述以加深记忆。每条一句话，直接、可背诵。\n\n【对话记录】\n${convoText.slice(-12000)}\n\n请返回 JSON：{ "takeaways": ["要点1", "要点2", ...] }`
+            }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            takeaways: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ["takeaways"]
+        }
+      }
+    });
+    if (!response.text) return [];
+    const parsed = JSON.parse(response.text) as { takeaways: string[] };
+    return Array.isArray(parsed.takeaways) ? parsed.takeaways : [];
+  } catch (error) {
+    console.error("generateModuleTakeaways Error:", error);
+    return [];
+  }
+};
+
+/** 根据当前模块对话或 takeaways 文本，生成 2–3 道小题。 */
+export const generateModuleQuiz = async (
+  readingMessages: ChatMessage[],
+  takeawaysText?: string
+): Promise<QuizData[]> => {
+  try {
+    const convoText = readingMessages
+      .map((m) => `${m.role === 'user' ? '用户' : '导读'}: ${m.text}`)
+      .join('\n\n');
+    const source = takeawaysText
+      ? `【本模块要点】\n${takeawaysText}\n\n（可结合要点与对话出题）`
+      : `【对话记录】\n${convoText.slice(-12000)}`;
+    if (!convoText.trim() && !takeawaysText) return [];
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `${source}\n\n请根据以上内容，生成 2–3 道中文选择题（每道 4 个选项，单选），用于巩固本模块理解。返回 JSON：{ "items": [ { "question": "...", "options": ["A", "B", "C", "D"], "correctIndex": 0, "explanation": "解析..." }, ... ] }`
+            }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  question: { type: Type.STRING },
+                  options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                  correctIndex: { type: Type.INTEGER },
+                  explanation: { type: Type.STRING }
+                },
+                required: ["question", "options", "correctIndex", "explanation"]
+              }
+            }
+          },
+          required: ["items"]
+        }
+      }
+    });
+    if (!response.text) return [];
+    const parsed = JSON.parse(response.text) as { items: QuizData[] };
+    return Array.isArray(parsed.items) ? parsed.items : [];
+  } catch (error) {
+    console.error("generateModuleQuiz Error:", error);
+    return [];
   }
 };
 
@@ -685,6 +956,169 @@ export const generateFlashCards = async (
   }
 };
 
+/** 费曼检验：用大白话解释文档内容，便于自测是否真懂 */
+export const generateFeynmanExplanation = async (docContent: string): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 40000));
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `请用「费曼技巧」把这份文档的核心内容，用**完全不懂的人也能听懂的大白话**解释一遍。要求：
+1. 少用专业术语；若必须用，立刻用一句话解释该术语。
+2. 用生活类比或简单逻辑链把结论串起来。
+3. 分块说明（可加小标题），每块不要太长。
+直接输出 Markdown，不要 JSON。`
+            }
+          ]
+        }
+      ]
+    });
+    return response.text?.trim() || "生成失败，请重试。";
+  } catch (error) {
+    console.error("generateFeynmanExplanation Error:", error);
+    return "生成失败，请重试。";
+  }
+};
+
+/** 考前速览：核心要点 + 易错点 + 高频考点（Markdown） */
+export const generateExamSummary = async (docContent: string): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 50000));
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `请根据文档内容，生成一份「考前速览」Markdown，包含三部分，用中文输出：
+1. **核心要点**：5～8 条必须掌握的核心结论或公式，每条一句话。
+2. **易错点**：3～5 个常被忽略或容易混淆的坑，简要说明。
+3. **高频考点**：3～5 个最可能考到的方向或题型提示。
+
+直接输出 Markdown，不要 JSON。`
+            }
+          ]
+        }
+      ]
+    });
+    return response.text?.trim() || "生成失败，请重试。";
+  } catch (error) {
+    console.error("generateExamSummary Error:", error);
+    return "生成失败，请重试。";
+  }
+};
+
+/** 考点与陷阱：考点列表 + 陷阱描述 + 易错题提示（Markdown） */
+export const generateExamTraps = async (docContent: string): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 50000));
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `请根据文档内容，生成一份「考点与陷阱」Markdown，用中文输出，包含：
+1. **核心考点**：5～8 个必考知识点，每条一句话概括。
+2. **常见陷阱**：3～5 个易错/易混淆点，说明错误思路与正确区分方式。
+3. **陷阱题提示**：2～4 道典型陷阱题的题干要点与易错选项特征（不要求完整选项，只写“容易误选…因为…”即可）。
+
+直接输出 Markdown，不要 JSON。`
+            }
+          ]
+        }
+      ]
+    });
+    return response.text?.trim() || "生成失败，请重试。";
+  } catch (error) {
+    console.error("generateExamTraps Error:", error);
+    return "生成失败，请重试。";
+  }
+};
+
+export interface TerminologyItem {
+  term: string;
+  definition: string;
+  keyWords?: string[];
+}
+
+/** 术语精确定义：从文档抽取术语及定义，返回结构化列表 */
+export const extractTerminology = async (docContent: string): Promise<TerminologyItem[]> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 50000));
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `请从文档中抽取重要术语及其精确定义，用 JSON 数组输出，每个元素格式：
+{"term": "术语名", "definition": "一句话精确定义", "keyWords": ["关键词1", "关键词2"]}
+keyWords 可选，为定义中的关键限定词。抽取 8～15 个术语，只输出 JSON 数组，不要其他文字。`
+            }
+          ]
+        }
+      ]
+    });
+    const raw = response.text?.trim() || "[]";
+    const cleaned = cleanJsonString(raw);
+    const parsed = JSON.parse(cleaned) as TerminologyItem[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error("extractTerminology Error:", error);
+    return [];
+  }
+};
+
+/** 刁钻教授：根据文档与用户薄弱点生成易考易错的刁钻题（Markdown） */
+export const generateTrickyQuestions = async (docContent: string, weakPoints?: string): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 50000));
+    const userHint = weakPoints?.trim()
+      ? `\n用户特别说明的薄弱点或易错点：${weakPoints}\n请针对这些地方多出刁钻题。`
+      : '';
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `请扮演「刁钻教授」，根据文档内容出 3～5 道**易错、易混淆、考细节**的题目。${userHint}
+
+要求：每题包含题干、选项（4 个）、正确答案索引（0-based）、简要解析。用 Markdown 输出，格式示例：
+## 第 1 题
+**题干** ...
+- A. ...
+- B. ...
+- **答案**：B（索引 1）
+**解析**：...
+
+直接输出 Markdown，不要 JSON。`
+            }
+          ]
+        }
+      ]
+    });
+    return response.text?.trim() || "生成失败，请重试。";
+  } catch (error) {
+    console.error("generateTrickyQuestions Error:", error);
+    return "生成失败，请重试。";
+  }
+};
+
 export const chatWithAdaptiveTutor = async (
     docContent: string,
     history: ChatMessage[],
@@ -724,6 +1158,189 @@ export const chatWithAdaptiveTutor = async (
         console.error("Adaptive Tutor Error:", error);
         return "通信中断，请重试。";
     }
+};
+
+/** 生成 Study Guide/Outline */
+export const generateStudyGuide = async (
+  docContent: string,
+  options: { format: StudyGuideFormat }
+): Promise<StudyGuideContent | null> => {
+  try {
+    const contentPart = getContentPart(docContent);
+    
+    const isDetailed = options.format === 'detailed';
+    
+    const prompt = isDetailed 
+      ? `根据整个文档内容，生成一份**详细的学习指南 (Detailed Study Guide)**。要求：
+
+**1. 章节大纲 (Chapters)**
+- 识别文档的所有主要章节和子章节
+- 为每个章节标注大致页码范围（如"第1-5页"）
+- 列出每个章节下的关键子主题
+
+**2. 核心概念 (Core Concepts)**
+- 提取文档中最重要的概念和术语（至少10-15个）
+- 为每个概念提供清晰的定义
+- 标注重要性等级（high/medium/low）
+
+**3. 学习路径 (Learning Path)**
+- 设计一个循序渐进的学习顺序（5-8个步骤）
+- 每个步骤包含：标题、详细描述、建议阅读的页码
+- 确保步骤之间有逻辑递进关系
+
+**4. 知识点树 (Knowledge Tree)**
+- 构建知识点的层级结构
+- 根节点：文档的核心主题
+- 分支：主要知识领域
+- 子分支：具体知识点和细节
+
+**5. 复习建议 (Review Suggestions)**
+- 关键要点：列出最重要的复习重点（5-8条）
+- 练习建议：提供具体的复习方法和练习方向
+- 常见错误：列出学习时容易混淆或出错的地方（可选）
+
+**6. Markdown 格式内容**
+- 生成一份完整的 Markdown 格式学习指南
+- 包含所有上述内容，格式清晰，层次分明
+- 使用 Markdown 语法（标题、列表、表格、代码块等）
+- 支持数学公式（使用 LaTeX 格式）
+
+请用中文输出，内容要详细、全面、实用。`
+      : `根据整个文档内容，生成一份**简洁的学习大纲 (Outline)**。要求：
+
+**1. 章节大纲 (Chapters)**
+- 识别文档的主要章节结构
+- 为每个章节标注页码范围
+- 列出关键子主题
+
+**2. 核心概念 (Core Concepts)**
+- 提取最重要的概念和术语（8-12个）
+- 为每个概念提供简洁定义
+- 标注重要性等级（high/medium/low）
+
+**3. Markdown 格式内容**
+- 生成一份简洁的 Markdown 格式大纲
+- 重点突出章节结构和核心概念
+- 格式清晰，便于快速浏览
+
+请用中文输出，内容要简洁、清晰、重点突出。`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            { text: prompt }
+          ]
+        }
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            chapters: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  title: { type: Type.STRING },
+                  pageRange: { type: Type.STRING },
+                  subsections: { type: Type.ARRAY, items: { type: Type.STRING } }
+                },
+                required: ["title"]
+              }
+            },
+            coreConcepts: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  term: { type: Type.STRING },
+                  definition: { type: Type.STRING },
+                  importance: { type: Type.STRING, enum: ['high', 'medium', 'low'] }
+                },
+                required: ["term", "definition", "importance"]
+              }
+            },
+            learningPath: isDetailed ? {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  step: { type: Type.INTEGER },
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  suggestedPages: { type: Type.ARRAY, items: { type: Type.INTEGER } }
+                },
+                required: ["step", "title", "description"]
+              }
+            } : { type: Type.ARRAY, items: { type: Type.OBJECT } },
+            knowledgeTree: isDetailed ? {
+              type: Type.OBJECT,
+              properties: {
+                root: { type: Type.STRING },
+                branches: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      concept: { type: Type.STRING },
+                      children: {
+                        type: Type.ARRAY,
+                        items: {
+                          type: Type.OBJECT,
+                          properties: {
+                            concept: { type: Type.STRING },
+                            details: { type: Type.ARRAY, items: { type: Type.STRING } }
+                          },
+                          required: ["concept"]
+                        }
+                      }
+                    },
+                    required: ["concept"]
+                  }
+                }
+              },
+              required: ["root", "branches"]
+            } : { type: Type.OBJECT },
+            reviewSuggestions: isDetailed ? {
+              type: Type.OBJECT,
+              properties: {
+                keyPoints: { type: Type.ARRAY, items: { type: Type.STRING } },
+                practiceTips: { type: Type.ARRAY, items: { type: Type.STRING } },
+                commonMistakes: { type: Type.ARRAY, items: { type: Type.STRING } }
+              },
+              required: ["keyPoints", "practiceTips"]
+            } : { type: Type.OBJECT },
+            markdownContent: { type: Type.STRING }
+          },
+          required: ["chapters", "coreConcepts", "markdownContent"]
+        }
+      }
+    });
+
+    if (!response.text) return null;
+    
+    const parsed = JSON.parse(response.text) as StudyGuideContent;
+    
+    // 确保所有必需字段都存在，为缺失字段提供默认值
+    const result: StudyGuideContent = {
+      chapters: parsed.chapters || [],
+      coreConcepts: parsed.coreConcepts || [],
+      learningPath: isDetailed ? (parsed.learningPath || []) : [],
+      knowledgeTree: isDetailed ? (parsed.knowledgeTree || { root: '', branches: [] }) : { root: '', branches: [] },
+      reviewSuggestions: isDetailed ? (parsed.reviewSuggestions || { keyPoints: [], practiceTips: [] }) : { keyPoints: [], practiceTips: [] },
+      markdownContent: parsed.markdownContent || ''
+    };
+    
+    return result;
+  } catch (error) {
+    console.error("generateStudyGuide Error:", error);
+    return null;
+  }
 };
 
 // --- NEW: SIDE QUEST AGENT ---
