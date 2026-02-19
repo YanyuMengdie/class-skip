@@ -783,9 +783,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <div className="text-center mt-20 text-stone-300 space-y-2"><Cloud className="w-12 h-12 mx-auto opacity-20" /><p className="text-xs">暂无笔记本分区</p></div>
                   ) : (
                       <>
-                          <div className="pb-24 min-h-[300px]">{renderTree(fileTree)}</div>
+                          <div className="pb-4 min-h-[300px]">{renderTree(fileTree)}</div>
                           {selectedFileSessions.length >= 2 && onStartCombinedReview && (
-                              <div className="sticky bottom-0 left-0 right-0 p-2 bg-[#F9F9F9] border-t border-stone-200 z-10">
+                              <div className="p-2 bg-[#F9F9F9] border-t border-stone-200">
                                   <button
                                       onClick={handleStartCombinedReview}
                                       className="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 shadow-md flex items-center justify-center gap-2"

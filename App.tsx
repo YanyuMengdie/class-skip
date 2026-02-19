@@ -142,6 +142,14 @@ const App: React.FC = () => {
   const [reviewModeChooserOpen, setReviewModeChooserOpen] = useState(false);
   const [isCombinedReviewLoading, setIsCombinedReviewLoading] = useState(false);
   const [examSummaryPanelOpen, setExamSummaryPanelOpen] = useState(false);
+  const [examSummaryCache, setExamSummaryCache] = useState<Record<string, string>>({});
+  const examSummaryContentKey = useMemo(() => {
+    const c = combinedReviewContent ?? pdfDataUrl ?? fullPdfText;
+    if (!c || typeof c !== 'string' || c.length === 0) return '';
+    let h = 0;
+    for (let i = 0; i < Math.min(c.length, 30000); i++) h = ((h << 5) - h + c.charCodeAt(i)) | 0;
+    return `exam-${h}`;
+  }, [combinedReviewContent, pdfDataUrl, fullPdfText]);
   const [feynmanPanelOpen, setFeynmanPanelOpen] = useState(false);
   const [examTrapsPanelOpen, setExamTrapsPanelOpen] = useState(false);
   const [terminologyPanelOpen, setTerminologyPanelOpen] = useState(false);
@@ -1017,6 +1025,10 @@ const App: React.FC = () => {
         <ExamSummaryPanel
           onClose={() => { setExamSummaryPanelOpen(false); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+          initialMarkdown={examSummaryContentKey ? examSummaryCache[examSummaryContentKey] : null}
+          onGenerated={(markdown) => {
+            if (examSummaryContentKey) setExamSummaryCache((prev) => ({ ...prev, [examSummaryContentKey]: markdown }));
+          }}
         />
       )}
 
