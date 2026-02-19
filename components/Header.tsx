@@ -1,5 +1,5 @@
 import React from 'react';
-import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic } from 'lucide-react';
+import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen } from 'lucide-react';
 import { MusicPlayer } from './MusicPlayer';
 import { ViewMode } from '../types';
 import { User } from 'firebase/auth'; 
@@ -78,6 +78,9 @@ interface HeaderProps {
   isClassroomMode?: boolean;
   onStartClass?: () => void;
   isTranscriptionSupported?: boolean;
+
+  // 独立复习入口（选 1 个或多个 PDF 进行复习）
+  onOpenReview?: () => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -133,7 +136,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenLectureTranscript,
   isClassroomMode,
   onStartClass,
-  isTranscriptionSupported
+  isTranscriptionSupported,
+  onOpenReview
 }) => {
   return (
     <header className={`${isImmersive ? 'bg-white border-b border-stone-200' : 'bg-white/80 backdrop-blur-md border-b border-stone-100'} shadow-sm z-30 relative flex flex-col transition-all`}>
@@ -286,6 +290,18 @@ export const Header: React.FC<HeaderProps> = ({
               >
                 <Sun className="w-3.5 h-3.5" />
                 <span className="hidden md:inline">小憩一下</span>
+              </button>
+           )}
+
+           {/* 复习：独立页面，可选 1 个或多个 PDF */}
+           {onOpenReview && (
+              <button
+                onClick={onOpenReview}
+                className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-xl transition-colors text-xs font-bold shadow-sm"
+                title="选择文档进行测验、闪卡、考前速览等"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span className="hidden md:inline">复习</span>
               </button>
            )}
 

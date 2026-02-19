@@ -27,6 +27,7 @@ import { TrickyProfessorPanel } from './components/TrickyProfessorPanel';
 import { BreakPanel } from './components/BreakPanel';
 import { ClassroomPanel } from './components/ClassroomPanel';
 import { LectureTranscriptPage } from './components/LectureTranscriptPage';
+import { ReviewPage, ReviewType } from './components/ReviewPage';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from './utils/pdfUtils';
 import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript } from './services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from './services/transcriptionService';
@@ -142,6 +143,7 @@ const App: React.FC = () => {
   const [reviewModeChooserOpen, setReviewModeChooserOpen] = useState(false);
   const [isCombinedReviewLoading, setIsCombinedReviewLoading] = useState(false);
   const [examSummaryPanelOpen, setExamSummaryPanelOpen] = useState(false);
+  const [reviewPageOpen, setReviewPageOpen] = useState(false);
   const [examSummaryCache, setExamSummaryCache] = useState<Record<string, string>>({});
   const examSummaryContentKey = useMemo(() => {
     const c = combinedReviewContent ?? pdfDataUrl ?? fullPdfText;
@@ -496,7 +498,7 @@ const App: React.FC = () => {
   };
 
   const handleStartCombinedReview = async (sessions: CloudSession[]) => {
-    if (!user || sessions.length < 2) return;
+    if (!user || sessions.length < 1) return;
     setIsCombinedReviewLoading(true);
     setCombinedReviewContent(null);
     setCombinedReviewFileName(null);
@@ -511,13 +513,82 @@ const App: React.FC = () => {
       }
       const merged = parts.join('\n\n').slice(0, 60000);
       setCombinedReviewContent(merged);
-      setCombinedReviewFileName(`多文档合并 (${sessions.length} 个文件)`);
+      setCombinedReviewFileName(sessions.length === 1 ? sessions[0].fileName : `多文档合并 (${sessions.length} 个文件)`);
       setReviewModeChooserOpen(true);
     } catch (e) {
       console.error("Combined review load failed:", e);
       alert("拉取或合并文件失败，请重试。");
     } finally {
       setIsCombinedReviewLoading(false);
+    }
+  };
+
+  const handleStartReview = async (sessions: CloudSession[] | null, type: ReviewType) => {
+    setReviewPageOpen(false);
+    if (sessions === null) {
+      const content = fullPdfText || pdfDataUrl;
+      if (!content) {
+        alert('当前没有已打开的文档');
+        return;
+      }
+      setCombinedReviewContent(content);
+      setCombinedReviewFileName(fileName || '当前文档');
+      openReviewPanelByType(type);
+      return;
+    }
+    if (sessions.length < 1) return;
+    setIsCombinedReviewLoading(true);
+    setCombinedReviewContent(null);
+    setCombinedReviewFileName(null);
+    try {
+      const parts: string[] = [];
+      for (const session of sessions) {
+        if (!session.fileUrl || session.type !== 'file') continue;
+        const file = await fetchFileFromUrl(session.fileUrl, session.fileName);
+        const texts = await extractPdfText(file);
+        parts.push(`【${session.fileName}】\n${texts.join('\n')}`);
+      }
+      const merged = parts.join('\n\n').slice(0, 60000);
+      setCombinedReviewContent(merged);
+      setCombinedReviewFileName(sessions.length === 1 ? sessions[0].fileName : `多文档合并 (${sessions.length} 个文件)`);
+      openReviewPanelByType(type);
+    } catch (e) {
+      console.error("Review load failed:", e);
+      alert("拉取或合并文件失败，请重试。");
+    } finally {
+      setIsCombinedReviewLoading(false);
+    }
+  };
+
+  const openReviewPanelByType = (type: ReviewType) => {
+    switch (type) {
+      case 'quiz':
+        setReviewPanel('quiz');
+        break;
+      case 'flashcard':
+        setReviewPanel('flashcard');
+        break;
+      case 'studyGuide':
+        setStudyGuidePanel(true);
+        break;
+      case 'examSummary':
+        setExamSummaryPanelOpen(true);
+        break;
+      case 'feynman':
+        setFeynmanPanelOpen(true);
+        break;
+      case 'examTraps':
+        setExamTrapsPanelOpen(true);
+        break;
+      case 'terminology':
+        setTerminologyPanelOpen(true);
+        break;
+      case 'trickyProfessor':
+        setTrickyProfessorPanelOpen(true);
+        break;
+      case 'trapList':
+        setTrapListPanelOpen(true);
+        break;
     }
   };
 
@@ -777,6 +848,7 @@ const App: React.FC = () => {
       isClassroomMode={isClassroomMode}
       onStartClass={handleStartClass}
       isTranscriptionSupported={transcriptionSupported}
+      onOpenReview={() => setReviewPageOpen(true)}
     />
   );
   
@@ -882,6 +954,17 @@ const App: React.FC = () => {
           organizingId={organizingLectureId}
           onDelete={handleDeleteLecture}
           onRename={handleRenameLecture}
+        />
+      )}
+
+      {reviewPageOpen && (
+        <ReviewPage
+          user={user}
+          hasCurrentDoc={!!(fullPdfText || pdfDataUrl)}
+          currentDocName={fileName}
+          onClose={() => setReviewPageOpen(false)}
+          onStartReview={handleStartReview}
+          trapCount={trapList.length}
         />
       )}
       
@@ -1166,7 +1249,6 @@ const App: React.FC = () => {
             onLogin={handleLogin}
             onRestoreSession={handleRestoreCloudSession}
             onDeleteSession={handleDeleteSession}
-            onStartCombinedReview={handleStartCombinedReview}
           />
           
           <div 

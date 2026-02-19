@@ -28,8 +28,6 @@ interface SidebarProps {
   onLogin: () => void;
   onRestoreSession: (session: CloudSession) => void;
   onDeleteSession?: (session: CloudSession) => Promise<boolean>;
-  /** 多选后「一起复习」：传入选中的文件 sessions */
-  onStartCombinedReview?: (sessions: CloudSession[]) => void;
 }
 
 type Tab = 'pages' | 'cloud' | 'calendar' | 'memo';
@@ -112,8 +110,6 @@ interface FileTreeItemProps {
     onDelete: (node: CloudSession) => void;
     onDropMove: (draggedId: string, targetId: string | null) => void;
     onCreateSubFolder: (parentId: string) => void;
-    selectedSessionIds?: Set<string>;
-    onToggleSelect?: (id: string) => void;
 }
 
 const FileTreeItem: React.FC<FileTreeItemProps> = ({ 
@@ -126,9 +122,7 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
     onRename,
     onDelete,
     onDropMove,
-    onCreateSubFolder,
-    selectedSessionIds,
-    onToggleSelect
+    onCreateSubFolder
 }) => {
     const [isDragOver, setIsDragOver] = useState(false);
     const [showMenu, setShowMenu] = useState(false);
@@ -186,11 +180,6 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
                 }}
             >
                 <div className="flex items-center space-x-2 min-w-0 flex-1 pl-2">
-                    {!isFolder && selectedSessionIds && onToggleSelect && (
-                        <div className="shrink-0" onClick={e => { e.stopPropagation(); onToggleSelect(node.id); }}>
-                            <input type="checkbox" checked={selectedSessionIds.has(node.id)} readOnly className="rounded border-stone-300 text-indigo-600 focus:ring-indigo-500 w-3.5 h-3.5 cursor-pointer" />
-                        </div>
-                    )}
                     <div className={`shrink-0 ${isFolder ? 'text-slate-600' : 'text-stone-400'}`}>
                         {isFolder ? (isExpanded ? <FolderOpen className="w-4 h-4" /> : <Folder className="w-4 h-4" />) : (<FileText className="w-3.5 h-3.5" />)}
                     </div>
@@ -234,7 +223,6 @@ const FileTreeItem: React.FC<FileTreeItemProps> = ({
                                 isExpanded={expandedIds.has(child.id)} onToggle={onToggle} expandedIds={expandedIds}
                                 onSelect={onSelect} onRename={onRename} onDelete={onDelete} onDropMove={onDropMove}
                                 onCreateSubFolder={onCreateSubFolder}
-                                selectedSessionIds={selectedSessionIds} onToggleSelect={onToggleSelect}
                             />
                         ))
                     ) : (
@@ -276,8 +264,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   user,
   onLogin,
   onRestoreSession,
-  onDeleteSession,
-  onStartCombinedReview
+  onDeleteSession
 }) => {
   const [activeTab, setActiveTab] = useState<Tab>('pages');
   const [sessions, setSessions] = useState<CloudSession[]>([]);
@@ -307,20 +294,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // --- PAGE MARK FILTER STATE ---
   const [markFilter, setMarkFilter] = useState<MarkType | 'all' | 'priority-high'>('all');
-
-  // --- 多选：一起复习 ---
-  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(new Set());
-  const handleToggleSelect = (id: string) => {
-    setSelectedSessionIds(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  };
-  const selectedFileSessions = useMemo(() => sessions.filter(s => s.type === 'file' && selectedSessionIds.has(s.id)), [sessions, selectedSessionIds]);
-  const handleStartCombinedReview = () => {
-    if (selectedFileSessions.length >= 2 && onStartCombinedReview) onStartCombinedReview(selectedFileSessions);
-  };
 
   // --- DATA SYNC EFFECT ---
   useEffect(() => {
@@ -509,7 +482,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             isExpanded={expandedIds.has(node.id)} onToggle={handleToggleFolder} expandedIds={expandedIds}
             onSelect={onRestoreSession} onRename={node => { setRenamingId(node.id); setRenameValue(node.customTitle || node.fileName); }}
             onDelete={handleDelete} onDropMove={handleDropMove} onCreateSubFolder={handleInitiateCreateFolder}
-            selectedSessionIds={selectedSessionIds} onToggleSelect={handleToggleSelect}
           />
       ));
   };
@@ -784,17 +756,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ) : (
                       <>
                           <div className="pb-4 min-h-[300px]">{renderTree(fileTree)}</div>
-                          {selectedFileSessions.length >= 2 && onStartCombinedReview && (
-                              <div className="p-2 bg-[#F9F9F9] border-t border-stone-200">
-                                  <button
-                                      onClick={handleStartCombinedReview}
-                                      className="w-full py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-bold hover:bg-indigo-700 shadow-md flex items-center justify-center gap-2"
-                                  >
-                                      <BookOpen className="w-4 h-4" />
-                                      一起复习 ({selectedFileSessions.length} 个文件)
-                                  </button>
-                              </div>
-                          )}
                       </>
                   )}
               </div>
