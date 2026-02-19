@@ -293,15 +293,15 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
            )}
 
-           {/* 复习：独立页面，可选 1 个或多个 PDF */}
+           {/* 复习：独立页面，可选 1 个或多个 PDF（与学不动了并列显眼） */}
            {onOpenReview && (
               <button
                 onClick={onOpenReview}
-                className="flex items-center space-x-1 px-3 py-1.5 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 rounded-xl transition-colors text-xs font-bold shadow-sm"
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl transition-colors text-xs font-bold shadow-sm border border-indigo-400"
                 title="选择文档进行测验、闪卡、考前速览等"
               >
                 <BookOpen className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">复习</span>
+                <span>复习</span>
               </button>
            )}
 
