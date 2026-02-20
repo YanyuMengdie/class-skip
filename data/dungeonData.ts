@@ -4,26 +4,26 @@ export const INITIAL_ROOMS: DungeonRoom[] = [
   {
     id: 'room-1',
     name: '无光城堡',
-    description: '你已找回古老的专注卷轴。',
+    description: '你的地牢探索之旅从这里开始。使用 D20 骰子探索房间，获得奖励！',
     unlocked: true,
-    cleared: true,
+    cleared: false,
     icon: 'castle',
     color: 'indigo'
   },
   {
     id: 'room-2',
     name: '哥布林营地',
-    description: '你已击败分心巡逻队。',
-    unlocked: true,
-    cleared: true,
+    description: '分心哥布林在此游荡。击败它们需要专注和运气。',
+    unlocked: false,
+    cleared: false,
     icon: 'shield',
     color: 'emerald'
   },
   {
     id: 'room-3',
     name: '秘法档案馆',
-    description: '此处寂静如金。完成专注学习即可探索。',
-    unlocked: true,
+    description: '古老的智慧在此沉睡。解开谜题可获得珍贵道具。',
+    unlocked: false,
     cleared: false,
     icon: 'library_books',
     color: 'violet'
@@ -146,7 +146,7 @@ export const DUNGEON_STORIES: DungeonStory[] = [
     id: 'story-2',
     title: '首次胜利',
     content: '分心的哥布林在你坚定的专注力面前倒下。你感到更强大、更专注。前方的道路现在更清晰了。',
-    unlocked: true,
+    unlocked: false, // 初始未解锁，需要完成第一个房间才能解锁
     chapter: 2
   },
   {

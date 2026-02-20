@@ -341,6 +341,9 @@ export const DungeonPanel: React.FC<DungeonPanelProps> = ({
 
               <p className="mt-4 text-xs text-slate-400 text-center">
                 已学习: {formatStudyTime(totalStudyMinutes)} • 已清理房间: {clearedRooms}/{state.rooms.length}
+                {state.dicePool > 0 && state.dicePool === 3 && totalStudyMinutes === 0 && (
+                  <span className="block mt-2 text-indigo-400">✨ 新手福利：已获得 3 个初始骰子，快来试试探索吧！</span>
+                )}
               </p>
             </div>
           )}

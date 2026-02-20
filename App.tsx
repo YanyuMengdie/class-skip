@@ -351,12 +351,12 @@ const App: React.FC = () => {
       } else {
         // 初始化默认状态
         const initialState: DungeonState = {
-          currentRoomId: 'room-3',
+          currentRoomId: 'room-1', // 从第一个房间开始
           rooms: INITIAL_ROOMS,
           items: [],
           stories: DUNGEON_STORIES,
           gold: 0,
-          dicePool: 0,
+          dicePool: 3, // 给新用户 3 个初始骰子用于试玩
           level: 1,
           xp: 0,
           xpToNextLevel: 1000,
@@ -378,12 +378,12 @@ const App: React.FC = () => {
       } else {
         // 云端没有数据，初始化默认状态
         const initialState: DungeonState = {
-          currentRoomId: 'room-3',
+          currentRoomId: 'room-1', // 从第一个房间开始
           rooms: INITIAL_ROOMS,
           items: [],
           stories: DUNGEON_STORIES,
           gold: 0,
-          dicePool: 0,
+          dicePool: 3, // 给新用户 3 个初始骰子用于试玩
           level: 1,
           xp: 0,
           xpToNextLevel: 1000,
