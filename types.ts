@@ -372,4 +372,5 @@ export interface DungeonState {
   exploring: boolean; // 是否正在探索（等待事件）
   eventStartTime: number | null; // 开始探索的时间
   totalStudyMinutes: number; // 累计学习时间（分钟），用于计算骰子概率
+  version?: string; // 数据版本号，用于迁移
 }

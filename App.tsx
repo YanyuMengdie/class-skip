@@ -339,32 +339,67 @@ const App: React.FC = () => {
 
   // --- DUNGEON STATE INITIALIZATION & CLOUD SYNC ---
   useEffect(() => {
+    const CURRENT_VERSION = '2.0.0'; // 当前数据版本
+    
+    // 创建默认初始状态
+    const createInitialState = (): DungeonState => ({
+      currentRoomId: 'room-1',
+      rooms: INITIAL_ROOMS,
+      items: [],
+      stories: DUNGEON_STORIES,
+      gold: 0,
+      dicePool: 3, // 给新用户 3 个初始骰子用于试玩
+      level: 1,
+      xp: 0,
+      xpToNextLevel: 1000,
+      lastEventTime: null,
+      exploring: false,
+      eventStartTime: null,
+      totalStudyMinutes: 0,
+      version: CURRENT_VERSION
+    });
+
+    // 迁移旧数据到新版本
+    const migrateState = (oldState: any): DungeonState => {
+      const migrated: DungeonState = {
+        ...oldState,
+        version: CURRENT_VERSION,
+        // 强制重置房间状态：所有房间未清理，只有第一个解锁
+        rooms: INITIAL_ROOMS.map((room, idx) => ({
+          ...room,
+          cleared: false, // 强制未清理
+          unlocked: idx === 0 // 只有第一个房间解锁
+        })),
+        // 如果骰子为0且总学习时间为0，给3个初始骰子
+        dicePool: (oldState.dicePool === 0 && oldState.totalStudyMinutes === 0) ? 3 : oldState.dicePool,
+        currentRoomId: 'room-1' // 强制从第一个房间开始
+      };
+      return migrated;
+    };
+
     if (!user) {
       // 未登录时使用本地存储
       const localState = localStorage.getItem('dungeonState');
       if (localState) {
         try {
-          setDungeonState(JSON.parse(localState));
+          const parsed = JSON.parse(localState);
+          // 检查版本，如果版本不匹配或不存在，进行迁移
+          if (!parsed.version || parsed.version !== CURRENT_VERSION) {
+            const migrated = migrateState(parsed);
+            setDungeonState(migrated);
+            localStorage.setItem('dungeonState', JSON.stringify(migrated));
+          } else {
+            setDungeonState(parsed);
+          }
         } catch (e) {
           console.error('[Dungeon] Failed to load local state:', e);
+          const initialState = createInitialState();
+          setDungeonState(initialState);
+          localStorage.setItem('dungeonState', JSON.stringify(initialState));
         }
       } else {
         // 初始化默认状态
-        const initialState: DungeonState = {
-          currentRoomId: 'room-1', // 从第一个房间开始
-          rooms: INITIAL_ROOMS,
-          items: [],
-          stories: DUNGEON_STORIES,
-          gold: 0,
-          dicePool: 3, // 给新用户 3 个初始骰子用于试玩
-          level: 1,
-          xp: 0,
-          xpToNextLevel: 1000,
-          lastEventTime: null,
-          exploring: false,
-          eventStartTime: null,
-          totalStudyMinutes: 0
-        };
+        const initialState = createInitialState();
         setDungeonState(initialState);
         localStorage.setItem('dungeonState', JSON.stringify(initialState));
       }
@@ -374,24 +409,17 @@ const App: React.FC = () => {
     // 登录用户：从云端加载
     loadDungeonState(user).then((cloudState) => {
       if (cloudState) {
-        setDungeonState(cloudState);
+        // 检查版本，如果版本不匹配，进行迁移
+        if (!cloudState.version || cloudState.version !== CURRENT_VERSION) {
+          const migrated = migrateState(cloudState);
+          setDungeonState(migrated);
+          saveDungeonState(user, migrated);
+        } else {
+          setDungeonState(cloudState);
+        }
       } else {
         // 云端没有数据，初始化默认状态
-        const initialState: DungeonState = {
-          currentRoomId: 'room-1', // 从第一个房间开始
-          rooms: INITIAL_ROOMS,
-          items: [],
-          stories: DUNGEON_STORIES,
-          gold: 0,
-          dicePool: 3, // 给新用户 3 个初始骰子用于试玩
-          level: 1,
-          xp: 0,
-          xpToNextLevel: 1000,
-          lastEventTime: null,
-          exploring: false,
-          eventStartTime: null,
-          totalStudyMinutes: 0
-        };
+        const initialState = createInitialState();
         setDungeonState(initialState);
         saveDungeonState(user, initialState);
       }
