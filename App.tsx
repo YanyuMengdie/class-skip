@@ -350,7 +350,6 @@ const App: React.FC = () => {
         }
       } else {
         // 初始化默认状态
-        const { INITIAL_ROOMS, DUNGEON_STORIES } = require('./data/dungeonData');
         const initialState: DungeonState = {
           currentRoomId: 'room-3',
           rooms: INITIAL_ROOMS,
