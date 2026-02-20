@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Music, Coffee, Youtube, Tv, Timer, ExternalLink, ClipboardPaste } from 'lucide-react';
+import { X, Music, Coffee, Timer } from 'lucide-react';
 
 /** 从粘贴内容中解析 B站 BV 号（支持链接或纯 BV） */
 function parseBilibiliId(input: string): string | null {
@@ -22,21 +22,16 @@ interface BreakPanelProps {
   onOpenMusicPlayer: () => void;
   /** 进入能量补给站（学不动了） */
   onEnterEnergyMode: () => void;
-  /** 在本页小窗播放 B站/YouTube，分心也在这一页 */
-  onVideoSelect?: (type: 'bilibili' | 'youtube', id: string) => void;
 }
 
 export const BreakPanel: React.FC<BreakPanelProps> = ({
   isOpen,
   onClose,
   onOpenMusicPlayer,
-  onEnterEnergyMode,
-  onVideoSelect
+  onEnterEnergyMode
 }) => {
   const [restMinutes, setRestMinutes] = useState(5);
   const [countdownSec, setCountdownSec] = useState<number | null>(null);
-  const [videoType, setVideoType] = useState<'bilibili' | 'youtube'>('bilibili');
-  const [videoId, setVideoId] = useState('');
 
   useEffect(() => {
     if (countdownSec === null || countdownSec > 0) return;
@@ -59,47 +54,6 @@ export const BreakPanel: React.FC<BreakPanelProps> = ({
 
   const handleOpenMusic = () => {
     onOpenMusicPlayer();
-  };
-
-  const resolveVideoId = (): string | null => {
-    const raw = videoId.trim();
-    if (!raw) return null;
-    if (videoType === 'bilibili') return parseBilibiliId(raw) || (/^BV[\w]+$/i.test(raw) ? raw : null);
-    return parseYoutubeId(raw) || (/^[\w-]{11}$/.test(raw) ? raw : null);
-  };
-
-  const handlePlayVideo = () => {
-    const id = resolveVideoId();
-    if (!id || !onVideoSelect) {
-      if (videoType === 'bilibili') alert('请粘贴 B站链接或 BV 号');
-      else alert('请粘贴 YouTube 链接或视频 ID');
-      return;
-    }
-    onVideoSelect(videoType, id);
-    setVideoId('');
-  };
-
-  const handlePasteAndPlay = async () => {
-    try {
-      const text = await navigator.clipboard.readText();
-      const bv = parseBilibiliId(text);
-      const yt = parseYoutubeId(text);
-      if (bv && onVideoSelect) {
-        onVideoSelect('bilibili', bv);
-        return;
-      }
-      if (yt && onVideoSelect) {
-        onVideoSelect('youtube', yt);
-        return;
-      }
-      setVideoId(text);
-    } catch {
-      alert('无法读取剪贴板，请手动粘贴到输入框');
-    }
-  };
-
-  const openBilibiliInPopup = () => {
-    window.open('https://www.bilibili.com', '_blank', 'width=960,height=700,noopener');
   };
 
   if (!isOpen) return null;
@@ -157,82 +111,6 @@ export const BreakPanel: React.FC<BreakPanelProps> = ({
               <p className="text-xs text-slate-500 mt-0.5">任务拆解、倾诉、深呼吸</p>
             </div>
           </button>
-
-          {/* 看个视频：先刷推荐，再粘贴在本页播 */}
-          {onVideoSelect && (
-            <div className="p-4 rounded-xl bg-stone-50 border border-stone-100 space-y-4">
-              <p className="font-semibold text-slate-800 flex items-center gap-2">
-                <Tv className="w-4 h-4 text-rose-500" />
-                看个视频
-              </p>
-
-              {/* 在本页刷 B站：小窗打开，不占主标签 */}
-              <div className="space-y-2">
-                <p className="text-xs text-slate-600">不知道看啥？先刷推荐，再复制链接回来播</p>
-                <button
-                  type="button"
-                  onClick={openBilibiliInPopup}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-rose-500 text-white text-sm font-medium hover:bg-rose-600 transition-colors"
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  在小窗打开 B站（刷推荐）
-                </button>
-                <p className="text-[10px] text-slate-400">小窗里刷到想看的，复制链接回来粘贴即可在本页播</p>
-              </div>
-
-              {/* 粘贴链接或 BV，在本页播放 */}
-              <div className="space-y-2">
-                <p className="text-xs text-slate-600">粘贴 B站链接或 BV 号 / YouTube 链接</p>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setVideoType('bilibili')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${videoType === 'bilibili' ? 'bg-rose-500 text-white' : 'bg-white border border-stone-200 text-slate-600'}`}
-                  >
-                    B站
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setVideoType('youtube')}
-                    className={`flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors ${videoType === 'youtube' ? 'bg-red-600 text-white' : 'bg-white border border-stone-200 text-slate-600'}`}
-                  >
-                    YouTube
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  placeholder={videoType === 'bilibili' ? '粘贴 B站链接或 BV 号' : '粘贴 YouTube 链接或视频 ID'}
-                  value={videoId}
-                  onChange={(e) => setVideoId(e.target.value)}
-                  onPaste={(e) => {
-                    const raw = (e.clipboardData?.getData('text') || '').trim();
-                    if (videoType === 'bilibili' && parseBilibiliId(raw)) setVideoId(parseBilibiliId(raw)!);
-                    else if (videoType === 'youtube' && parseYoutubeId(raw)) setVideoId(parseYoutubeId(raw)!);
-                  }}
-                  className="w-full px-3 py-2 rounded-lg border border-stone-200 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-300 outline-none"
-                />
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={handlePasteAndPlay}
-                    className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg border border-stone-200 text-slate-600 text-xs font-medium hover:bg-stone-100 transition-colors"
-                  >
-                    <ClipboardPaste className="w-3.5 h-3.5" />
-                    从剪贴板粘贴并播放
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handlePlayVideo}
-                    disabled={!videoId.trim()}
-                    className="flex-1 py-2 rounded-lg bg-slate-800 text-white text-sm font-medium hover:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
-                  >
-                    <Youtube className="w-4 h-4" />
-                    在本页播放
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
 
           {/* 休息倒计时 */}
           <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-100 space-y-3">

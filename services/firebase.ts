@@ -19,7 +19,7 @@ import {
   enableIndexedDbPersistence 
 } from 'firebase/firestore';
 
-import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo } from '../types';
+import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, DungeonState } from '../types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC0_saRd3L2zIxOfG1FQinjYpyCGs_B9ls",
@@ -406,6 +406,38 @@ export const deleteMemo = async (userId: string, memoId: string): Promise<void> 
     } catch (e) {
         console.error("Delete Memo Failed", e);
         throw e;
+    }
+};
+
+// --- Dungeon State Cloud Functions (User-level) ---
+
+export const saveDungeonState = async (user: User, state: DungeonState): Promise<void> => {
+    try {
+        const dungeonRef = doc(db, "users", user.uid, "dungeon", "state");
+        await setDoc(dungeonRef, {
+            ...state,
+            lastSaved: Timestamp.now()
+        }, { merge: true });
+    } catch (e) {
+        console.error("[Firebase] Save Dungeon State Failed:", e);
+        throw e;
+    }
+};
+
+export const loadDungeonState = async (user: User): Promise<DungeonState | null> => {
+    try {
+        const dungeonRef = doc(db, "users", user.uid, "dungeon", "state");
+        const snapshot = await getDoc(dungeonRef);
+        if (snapshot.exists()) {
+            const data = snapshot.data();
+            // Remove Firestore timestamp fields
+            const { lastSaved, ...state } = data;
+            return state as DungeonState;
+        }
+        return null;
+    } catch (e) {
+        console.error("[Firebase] Load Dungeon State Failed:", e);
+        return null;
     }
 };
 

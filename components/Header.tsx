@@ -1,5 +1,5 @@
 import React from 'react';
-import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen } from 'lucide-react';
+import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen, Swords } from 'lucide-react';
 import { MusicPlayer } from './MusicPlayer';
 import { ViewMode } from '../types';
 import { User } from 'firebase/auth'; 
@@ -81,6 +81,9 @@ interface HeaderProps {
 
   // 独立复习入口（选 1 个或多个 PDF 进行复习）
   onOpenReview?: () => void;
+
+  // 地牢学习游戏入口
+  onOpenDungeon?: () => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -137,7 +140,8 @@ export const Header: React.FC<HeaderProps> = ({
   isClassroomMode,
   onStartClass,
   isTranscriptionSupported,
-  onOpenReview
+  onOpenReview,
+  onOpenDungeon
 }) => {
   return (
     <header className={`${isImmersive ? 'bg-white border-b border-stone-200' : 'bg-white/80 backdrop-blur-md border-b border-stone-100'} shadow-sm z-30 relative flex flex-col transition-all`}>
@@ -294,7 +298,7 @@ export const Header: React.FC<HeaderProps> = ({
            )}
 
            {/* 复习：独立页面，可选 1 个或多个 PDF（与学不动了并列显眼） */}
-           {onOpenReview && (
+          {onOpenReview && (
               <button
                 onClick={onOpenReview}
                 className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl transition-colors text-xs font-bold shadow-sm border border-indigo-400"
@@ -303,7 +307,18 @@ export const Header: React.FC<HeaderProps> = ({
                 <BookOpen className="w-3.5 h-3.5" />
                 <span>复习</span>
               </button>
-           )}
+            )}
+
+          {onOpenDungeon && (
+              <button
+                onClick={onOpenDungeon}
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-purple-600 text-white hover:bg-purple-700 rounded-xl transition-colors text-xs font-bold shadow-sm border border-purple-500"
+                title="探索地牢：学习获得 D20 骰子，探索房间获得奖励"
+              >
+                <Swords className="w-3.5 h-3.5" />
+                <span>探索地牢</span>
+              </button>
+            )}
 
            {/* Energy Mode Button */}
            <button

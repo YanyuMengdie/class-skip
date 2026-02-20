@@ -314,3 +314,62 @@ export interface SideQuestState {
   messages: ChatMessage[];
   isLoading: boolean;
 }
+
+// --- DUNGEON STUDY GAME TYPES ---
+export interface DungeonRoom {
+  id: string;
+  name: string;
+  description: string;
+  unlocked: boolean;
+  cleared: boolean;
+  icon: string; // Material icon name
+  color: string; // Tailwind color class
+}
+
+export interface DungeonItem {
+  id: string;
+  name: string;
+  description: string;
+  rarity: 'common' | 'rare' | 'epic' | 'legendary';
+  icon: string;
+  count?: number;
+}
+
+export interface DungeonStory {
+  id: string;
+  title: string;
+  content: string;
+  unlocked: boolean;
+  chapter: number;
+}
+
+export interface DungeonEvent {
+  id: string;
+  type: 'combat' | 'puzzle' | 'treasure' | 'encounter';
+  title: string;
+  description: string;
+  difficultyClass: number; // DC for D20 roll
+  requiredStudyMinutes: number; // 需要学习多少分钟才能获得骰子
+  rewards: {
+    gold?: number;
+    itemId?: string;
+    storyId?: string;
+    roomId?: string;
+  };
+}
+
+export interface DungeonState {
+  currentRoomId: string;
+  rooms: DungeonRoom[];
+  items: DungeonItem[];
+  stories: DungeonStory[];
+  gold: number;
+  dicePool: number; // 可用 D20 数量
+  level: number;
+  xp: number;
+  xpToNextLevel: number;
+  lastEventTime: number | null; // 上次事件触发时间（用于 2-3 分钟倒计时）
+  exploring: boolean; // 是否正在探索（等待事件）
+  eventStartTime: number | null; // 开始探索的时间
+  totalStudyMinutes: number; // 累计学习时间（分钟），用于计算骰子概率
+}

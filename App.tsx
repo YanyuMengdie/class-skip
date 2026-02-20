@@ -28,13 +28,15 @@ import { BreakPanel } from './components/BreakPanel';
 import { ClassroomPanel } from './components/ClassroomPanel';
 import { LectureTranscriptPage } from './components/LectureTranscriptPage';
 import { ReviewPage, ReviewType } from './components/ReviewPage';
+import { DungeonPanel } from './components/DungeonPanel';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from './utils/pdfUtils';
 import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript } from './services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from './services/transcriptionService';
 import { storageService } from './services/storageService';
-import { auth, loginWithGoogle, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails } from './services/firebase';
+import { auth, loginWithGoogle, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, saveDungeonState, loadDungeonState } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord } from './types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, DungeonState } from './types';
+import { INITIAL_ROOMS, DUNGEON_STORIES } from './data/dungeonData';
 import { Sparkles, X, ChevronDown, Loader2, Wand2 } from 'lucide-react';
 
 // #region agent log
@@ -118,6 +120,10 @@ const App: React.FC = () => {
   // --- 小憩区 & 白噪音面板受控 ---
   const [isBreakPanelOpen, setIsBreakPanelOpen] = useState(false);
   const [isMusicPanelOpen, setIsMusicPanelOpen] = useState(false);
+
+  // --- DUNGEON STATE ---
+  const [isDungeonPanelOpen, setIsDungeonPanelOpen] = useState(false);
+  const [dungeonState, setDungeonState] = useState<DungeonState | null>(null);
 
   // --- SIDE QUEST STATE (NEW) ---
   const [sideQuest, setSideQuest] = useState<SideQuestState>({ isActive: false, anchorText: '', messages: [], isLoading: false });
@@ -330,6 +336,86 @@ const App: React.FC = () => {
       if (selectionTimeoutRef.current) clearTimeout(selectionTimeoutRef.current);
     };
   }, []);
+
+  // --- DUNGEON STATE INITIALIZATION & CLOUD SYNC ---
+  useEffect(() => {
+    if (!user) {
+      // 未登录时使用本地存储
+      const localState = localStorage.getItem('dungeonState');
+      if (localState) {
+        try {
+          setDungeonState(JSON.parse(localState));
+        } catch (e) {
+          console.error('[Dungeon] Failed to load local state:', e);
+        }
+      } else {
+        // 初始化默认状态
+        const { INITIAL_ROOMS, DUNGEON_STORIES } = require('./data/dungeonData');
+        const initialState: DungeonState = {
+          currentRoomId: 'room-3',
+          rooms: INITIAL_ROOMS,
+          items: [],
+          stories: DUNGEON_STORIES,
+          gold: 0,
+          dicePool: 0,
+          level: 1,
+          xp: 0,
+          xpToNextLevel: 1000,
+          lastEventTime: null,
+          exploring: false,
+          eventStartTime: null,
+          totalStudyMinutes: 0
+        };
+        setDungeonState(initialState);
+        localStorage.setItem('dungeonState', JSON.stringify(initialState));
+      }
+      return;
+    }
+
+    // 登录用户：从云端加载
+    loadDungeonState(user).then((cloudState) => {
+      if (cloudState) {
+        setDungeonState(cloudState);
+      } else {
+        // 云端没有数据，初始化默认状态
+        const initialState: DungeonState = {
+          currentRoomId: 'room-3',
+          rooms: INITIAL_ROOMS,
+          items: [],
+          stories: DUNGEON_STORIES,
+          gold: 0,
+          dicePool: 0,
+          level: 1,
+          xp: 0,
+          xpToNextLevel: 1000,
+          lastEventTime: null,
+          exploring: false,
+          eventStartTime: null,
+          totalStudyMinutes: 0
+        };
+        setDungeonState(initialState);
+        saveDungeonState(user, initialState);
+      }
+    });
+  }, [user]);
+
+  // 地牢状态更新时保存到云端
+  useEffect(() => {
+    if (!dungeonState) return;
+    
+    if (user) {
+      // 云端保存（防抖）
+      const saveTimeout = setTimeout(() => {
+        saveDungeonState(user, dungeonState).catch((e) => {
+          console.error('[Dungeon] Failed to save to cloud:', e);
+        });
+      }, 1000);
+      return () => clearTimeout(saveTimeout);
+    } else {
+      // 本地保存
+      localStorage.setItem('dungeonState', JSON.stringify(dungeonState));
+    }
+  }, [dungeonState, user]);
 
   // --- AUTH LISTENER ---
   useEffect(() => {
@@ -849,6 +935,7 @@ const App: React.FC = () => {
       onStartClass={handleStartClass}
       isTranscriptionSupported={transcriptionSupported}
       onOpenReview={() => setReviewPageOpen(true)}
+      onOpenDungeon={() => setIsDungeonPanelOpen(true)}
     />
   );
   
@@ -1171,6 +1258,19 @@ const App: React.FC = () => {
           onSaveGuide={(guide) => {
             setStudyGuide(guide);
           }}
+        />
+      )}
+
+      {/* Dungeon Panel */}
+      {isDungeonPanelOpen && dungeonState && (
+        <DungeonPanel
+          isOpen={isDungeonPanelOpen}
+          onClose={() => setIsDungeonPanelOpen(false)}
+          state={dungeonState}
+          onUpdateState={(updates) => {
+            setDungeonState((prev) => prev ? { ...prev, ...updates } : null);
+          }}
+          studyTimeSeconds={studyTime}
         />
       )}
 
