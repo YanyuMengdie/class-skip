@@ -3,8 +3,8 @@ import { DungeonRoom, DungeonItem, DungeonStory } from '../types';
 export const INITIAL_ROOMS: DungeonRoom[] = [
   {
     id: 'room-1',
-    name: 'The Sunless Citadel',
-    description: 'Recovered the ancient scroll of focusing.',
+    name: '无光城堡',
+    description: '你已找回古老的专注卷轴。',
     unlocked: true,
     cleared: true,
     icon: 'castle',
@@ -12,8 +12,8 @@ export const INITIAL_ROOMS: DungeonRoom[] = [
   },
   {
     id: 'room-2',
-    name: 'Goblin Camp',
-    description: 'Defeated the distractions patrol.',
+    name: '哥布林营地',
+    description: '你已击败分心巡逻队。',
     unlocked: true,
     cleared: true,
     icon: 'shield',
@@ -21,8 +21,8 @@ export const INITIAL_ROOMS: DungeonRoom[] = [
   },
   {
     id: 'room-3',
-    name: 'Arcane Archives',
-    description: 'Silence is golden here. Complete focus session to explore.',
+    name: '秘法档案馆',
+    description: '此处寂静如金。完成专注学习即可探索。',
     unlocked: true,
     cleared: false,
     icon: 'library_books',
@@ -30,8 +30,8 @@ export const INITIAL_ROOMS: DungeonRoom[] = [
   },
   {
     id: 'room-4',
-    name: "Dragon's Lair",
-    description: 'The path is obscured by fog...',
+    name: '巨龙巢穴',
+    description: '前路被迷雾遮蔽...',
     unlocked: false,
     cleared: false,
     icon: 'diamond',
@@ -39,8 +39,8 @@ export const INITIAL_ROOMS: DungeonRoom[] = [
   },
   {
     id: 'room-5',
-    name: 'The Deep Dark',
-    description: 'Unknown depths await...',
+    name: '深渊暗域',
+    description: '未知的深度等待着你...',
     unlocked: false,
     cleared: false,
     icon: 'nightlight',
@@ -48,8 +48,8 @@ export const INITIAL_ROOMS: DungeonRoom[] = [
   },
   {
     id: 'room-6',
-    name: 'Crystal Caverns',
-    description: 'Where knowledge crystallizes...',
+    name: '水晶洞窟',
+    description: '知识在此结晶...',
     unlocked: false,
     cleared: false,
     icon: 'auto_awesome',
@@ -57,8 +57,8 @@ export const INITIAL_ROOMS: DungeonRoom[] = [
   },
   {
     id: 'room-7',
-    name: 'The Forbidden Library',
-    description: 'Ancient texts whisper secrets...',
+    name: '禁书图书馆',
+    description: '古老的文字低语着秘密...',
     unlocked: false,
     cleared: false,
     icon: 'menu_book',
@@ -66,8 +66,8 @@ export const INITIAL_ROOMS: DungeonRoom[] = [
   },
   {
     id: 'room-8',
-    name: 'Tower of Mastery',
-    description: 'The ultimate test of focus...',
+    name: '精通之塔',
+    description: '专注的终极考验...',
     unlocked: false,
     cleared: false,
     icon: 'tower',
@@ -78,57 +78,57 @@ export const INITIAL_ROOMS: DungeonRoom[] = [
 export const DUNGEON_ITEMS: DungeonItem[] = [
   {
     id: 'item-scroll-wisdom',
-    name: 'Scroll of Wisdom',
-    description: 'Ancient knowledge fills your mind.',
+    name: '智慧卷轴',
+    description: '古老的知识充盈你的脑海。',
     rarity: 'common',
     icon: 'history_edu'
   },
   {
     id: 'item-potion-clarity',
-    name: 'Potion of Clarity',
-    description: 'Reduces distraction chance by 50% for 1h.',
+    name: '清晰药水',
+    description: '在 1 小时内减少 50% 的分心概率。',
     rarity: 'common',
     icon: 'science'
   },
   {
     id: 'item-helmet-focus',
-    name: 'Helmet of Focus',
-    description: 'Prevents distractions for 30m.',
+    name: '专注头盔',
+    description: '在 30 分钟内防止分心。',
     rarity: 'rare',
     icon: 'shield'
   },
   {
     id: 'item-sword-focus',
-    name: 'Sword of Focus',
-    description: '+20% Focus retention for next session.',
+    name: '专注之剑',
+    description: '下次学习时专注力保留 +20%。',
     rarity: 'legendary',
     icon: 'swords'
   },
   {
     id: 'item-key-knowledge',
-    name: 'Key of Knowledge',
-    description: 'Unlocks hidden rooms.',
+    name: '知识之钥',
+    description: '解锁隐藏房间。',
     rarity: 'rare',
     icon: 'key'
   },
   {
     id: 'item-crown-mastery',
-    name: 'Crown of Mastery',
-    description: 'Increases XP gain by 30%.',
+    name: '精通王冠',
+    description: '经验值获得 +30%。',
     rarity: 'legendary',
     icon: 'workspace_premium'
   },
   {
     id: 'item-boots-persistence',
-    name: 'Boots of Persistence',
-    description: 'Reduces fatigue accumulation.',
+    name: '坚持之靴',
+    description: '减少疲劳积累。',
     rarity: 'common',
     icon: 'hiking'
   },
   {
     id: 'item-ring-concentration',
-    name: 'Ring of Concentration',
-    description: '+2 to D20 rolls after 1 hour of focus.',
+    name: '专注之戒',
+    description: '学习 1 小时后，D20 投掷结果 +2。',
     rarity: 'epic',
     icon: 'diamond'
   }
@@ -137,36 +137,36 @@ export const DUNGEON_ITEMS: DungeonItem[] = [
 export const DUNGEON_STORIES: DungeonStory[] = [
   {
     id: 'story-1',
-    title: 'The Awakening',
-    content: 'You awaken in a dimly lit chamber. Ancient runes glow faintly on the walls, whispering secrets of focus and determination. This is where your journey begins.',
+    title: '觉醒',
+    content: '你在昏暗的房间里醒来。古老的符文在墙上发出微弱的光芒，低语着专注与决心的秘密。这就是你旅程的开始。',
     unlocked: true,
     chapter: 1
   },
   {
     id: 'story-2',
-    title: 'First Victory',
-    content: 'The goblins of distraction fall before your unwavering concentration. You feel stronger, more focused. The path ahead is clearer now.',
+    title: '首次胜利',
+    content: '分心的哥布林在你坚定的专注力面前倒下。你感到更强大、更专注。前方的道路现在更清晰了。',
     unlocked: true,
     chapter: 2
   },
   {
     id: 'story-3',
-    title: 'The Archives',
-    content: 'In the Arcane Archives, silence is not empty—it is full of answers. Each moment of focus unlocks deeper understanding.',
+    title: '档案馆',
+    content: '在秘法档案馆中，寂静并非空虚——它充满了答案。每一刻的专注都解锁更深层的理解。',
     unlocked: false,
     chapter: 3
   },
   {
     id: 'story-4',
-    title: 'Dragon\'s Challenge',
-    content: 'The dragon of procrastination guards the deepest chambers. Only true mastery can overcome its influence.',
+    title: '巨龙的挑战',
+    content: '拖延的巨龙守护着最深的房间。只有真正的精通才能克服它的影响。',
     unlocked: false,
     chapter: 4
   },
   {
     id: 'story-5',
-    title: 'Mastery Achieved',
-    content: 'You have become the master of your own mind. The dungeon bows to your will, and knowledge flows freely.',
+    title: '达成精通',
+    content: '你已成为自己心灵的主人。地牢臣服于你的意志，知识自由流淌。',
     unlocked: false,
     chapter: 5
   }

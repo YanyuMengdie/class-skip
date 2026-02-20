@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Map, Swords, Lock, CheckCircle2, Clock, Dice1, Sparkles, Trophy, Coins, Package } from 'lucide-react';
+import { X, Map, Swords, Lock, CheckCircle2, Clock, Dice1, Sparkles, Trophy, Coins, Package, BookOpen, HelpCircle } from 'lucide-react';
 import { DungeonState, DungeonRoom, DungeonItem, DungeonEvent } from '../types';
 import { INITIAL_ROOMS, DUNGEON_ITEMS, DUNGEON_STORIES } from '../data/dungeonData';
 import { rollD20, formatStudyTime, calculateDiceEarned } from '../utils/dungeonUtils';
@@ -24,6 +24,7 @@ export const DungeonPanel: React.FC<DungeonPanelProps> = ({
   const [diceResult, setDiceResult] = useState<number | null>(null);
   const [eventResult, setEventResult] = useState<string | null>(null);
   const [isRolling, setIsRolling] = useState(false);
+  const [showRules, setShowRules] = useState(false);
   const exploreIntervalRef = useRef<number | null>(null);
 
   const studyMinutes = Math.floor(studyTimeSeconds / 60);
@@ -151,17 +152,26 @@ export const DungeonPanel: React.FC<DungeonPanelProps> = ({
       {/* Header */}
       <header className="flex items-center justify-between border-b border-slate-700 bg-slate-800/50 px-6 py-3 shrink-0">
         <div className="flex items-center gap-3">
-          <div className="size-8 rounded bg-primary/20 flex items-center justify-center text-primary">
+          <div className="size-8 rounded bg-indigo-500/20 flex items-center justify-center text-indigo-400">
             <Swords className="w-5 h-5" />
           </div>
           <h1 className="text-lg font-bold tracking-tight">无尽地牢</h1>
         </div>
-        <button
-          onClick={onClose}
-          className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
-        >
-          <X className="w-5 h-5" />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowRules(true)}
+            className="p-2 hover:bg-slate-700 rounded-lg transition-colors text-slate-300 hover:text-white"
+            title="游戏规则"
+          >
+            <HelpCircle className="w-5 h-5" />
+          </button>
+          <button
+            onClick={onClose}
+            className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 flex overflow-hidden">
@@ -207,13 +217,13 @@ export const DungeonPanel: React.FC<DungeonPanelProps> = ({
                         {room.name}
                       </h3>
                       {room.cleared && (
-                        <span className="text-xs font-mono text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded">CLEARED</span>
+                        <span className="text-xs font-mono text-indigo-400 bg-indigo-500/10 px-1.5 py-0.5 rounded">已清理</span>
                       )}
                       {isCurrent && (
-                        <span className="text-xs font-mono text-slate-100 bg-indigo-500 px-1.5 py-0.5 rounded">CURRENT</span>
+                        <span className="text-xs font-mono text-slate-100 bg-indigo-500 px-1.5 py-0.5 rounded">当前</span>
                       )}
                       {!room.unlocked && (
-                        <span className="text-xs font-mono text-slate-400 bg-slate-700/50 px-1.5 py-0.5 rounded">LOCKED</span>
+                        <span className="text-xs font-mono text-slate-400 bg-slate-700/50 px-1.5 py-0.5 rounded">已锁定</span>
                       )}
                     </div>
                     <p className="text-xs text-slate-400">{room.description}</p>
@@ -239,7 +249,9 @@ export const DungeonPanel: React.FC<DungeonPanelProps> = ({
                 
                 <div className="mb-6">
                   <span className="px-2 py-0.5 rounded text-xs uppercase tracking-widest font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
-                    {currentEvent.type.toUpperCase()}
+                    {currentEvent.type === 'combat' ? '战斗' : 
+                     currentEvent.type === 'puzzle' ? '谜题' :
+                     currentEvent.type === 'treasure' ? '宝藏' : '奇遇'}
                   </span>
                   <span className="ml-3 text-slate-400 text-xs">难度等级 {currentEvent.difficultyClass}</span>
                 </div>
@@ -393,6 +405,86 @@ export const DungeonPanel: React.FC<DungeonPanelProps> = ({
           </div>
         </aside>
       </div>
+
+      {/* 游戏规则说明面板 */}
+      {showRules && (
+        <div className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-xl max-w-2xl w-full max-h-[80vh] overflow-y-auto p-8 relative">
+            <button
+              onClick={() => setShowRules(false)}
+              className="absolute top-4 right-4 p-2 hover:bg-slate-700 rounded-lg"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+              <BookOpen className="w-6 h-6 text-indigo-400" />
+              游戏规则
+            </h2>
+
+            <div className="space-y-6 text-slate-300">
+              <section>
+                <h3 className="text-lg font-bold text-white mb-3">🎯 核心玩法</h3>
+                <p className="mb-2">这是一个将学习时间转化为游戏奖励的系统。你学习的时间越长，获得的奖励越多！</p>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-bold text-white mb-3">🎲 D20 骰子系统</h3>
+                <ul className="list-disc list-inside space-y-2 ml-2">
+                  <li><strong className="text-white">获得骰子：</strong>每学习 25 分钟可获得 1 个 D20 骰子</li>
+                  <li><strong className="text-white">骰子概率：</strong>学习时间越长，投出高点数（15-20）的概率越高</li>
+                  <li><strong className="text-white">使用骰子：</strong>探索房间时遇到事件，需要投掷 D20 来挑战</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-bold text-white mb-3">🗺️ 探索系统</h3>
+                <ol className="list-decimal list-inside space-y-2 ml-2">
+                  <li>点击<strong className="text-white">「探索下一个房间」</strong>按钮开始探索</li>
+                  <li>等待 2-3 分钟后，会随机触发一个事件（战斗、谜题、宝藏或奇遇）</li>
+                  <li>事件出现后，消耗 1 个 D20 骰子进行投掷</li>
+                  <li>如果骰子结果 ≥ 难度等级（DC），则挑战成功，获得奖励</li>
+                  <li>如果失败，则没有奖励，但可以继续探索</li>
+                </ol>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-bold text-white mb-3">💰 奖励系统</h3>
+                <ul className="list-disc list-inside space-y-2 ml-2">
+                  <li><strong className="text-yellow-400">金币：</strong>成功完成事件可获得金币</li>
+                  <li><strong className="text-indigo-400">道具：</strong>可能获得各种稀有度的道具（普通、稀有、史诗、传说）</li>
+                  <li><strong className="text-purple-400">房间解锁：</strong>某些道具可以解锁新的房间</li>
+                  <li><strong className="text-green-400">剧情：</strong>完成特定事件可解锁剧情章节</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-bold text-white mb-3">📊 等级与经验</h3>
+                <ul className="list-disc list-inside space-y-2 ml-2">
+                  <li>完成事件可获得经验值（XP）</li>
+                  <li>经验值达到上限后，等级提升</li>
+                  <li>等级越高，解锁的内容越多</li>
+                </ul>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-bold text-white mb-3">💾 云端保存</h3>
+                <p>登录 Google 账号后，你的游戏进度会自动保存到云端。即使更换设备或刷新页面，进度也不会丢失。</p>
+              </section>
+
+              <section>
+                <h3 className="text-lg font-bold text-white mb-3">💡 小贴士</h3>
+                <ul className="list-disc list-inside space-y-2 ml-2">
+                  <li>学习时间越长，骰子投出高点的概率越高，更容易成功</li>
+                  <li>不同事件有不同的难度等级，难度越高奖励越好</li>
+                  <li>收集道具可以增强你的能力，帮助你更好地探索</li>
+                  <li>这是一个无尽地牢，可以一直探索下去！</li>
+                </ul>
+              </section>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
