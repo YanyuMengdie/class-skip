@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat } from "../types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle } from "../types";
 import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "../utils/prompts";
 
 // Ensure API Key exists or fail gracefully in logs (though process.env check is assumed handled elsewhere)
@@ -1391,5 +1391,99 @@ export const runSideQuestAgent = async (
     } catch (error) {
         console.error("Side Quest Error:", error);
         return "支线任务连接失败...";
+    }
+};
+
+// --- 海龟汤 ---
+export const generateTurtleSoupPuzzle = async (): Promise<TurtleSoupPuzzle> => {
+    const prompt = `你是一个「海龟汤」出题人。请生成一道海龟汤谜题。
+输出仅一个 JSON 对象，不要 markdown 包裹：
+{ "situation": "汤面", "hiddenStory": "汤底" }
+
+要求：
+- situation（汤面）：一段简短的、有悬念的情境描述（2～4 句话），让人想用是非题推理真相。不要直接给出答案。
+- hiddenStory（汤底）：完整的真相/故事，解释汤面中令人疑惑的部分。可以有一点反转或冷幽默。
+请直接输出 JSON。`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        situation: { type: Type.STRING },
+                        hiddenStory: { type: Type.STRING }
+                    },
+                    required: ['situation', 'hiddenStory']
+                }
+            }
+        });
+        const raw = response.text?.trim() || '{}';
+        const parsed = JSON.parse(raw.replace(/^```\w*\n?|\n?```$/g, '').trim()) as TurtleSoupPuzzle;
+        if (!parsed.situation) parsed.situation = '一个人走进房间，然后死了。为什么？';
+        if (!parsed.hiddenStory) parsed.hiddenStory = '房间里有毒气，他是被毒死的。';
+        return parsed;
+    } catch (e) {
+        console.error('generateTurtleSoupPuzzle failed', e);
+        return {
+            situation: '一个人走进房间，然后死了。为什么？',
+            hiddenStory: '房间里有毒气，他是被毒死的。'
+        };
+    }
+};
+
+export const answerTurtleSoupQuestion = async (
+    puzzle: TurtleSoupPuzzle,
+    question: string,
+    questionHistory?: { q: string; a: string }[]
+): Promise<string> => {
+    const systemInstruction = `你是海龟汤主持人。你只知道「汤底」真相，对玩家的问题只能回答以下四种之一：是、否、与剧情无关、部分正确。不要解释，不要剧透汤底。
+汤底（仅你可见）：${puzzle.hiddenStory}
+
+${questionHistory?.length ? `已有问答：\n${questionHistory.map(h => `Q: ${h.q}\nA: ${h.a}`).join('\n')}` : ''}
+
+请根据玩家的问题，只回复一个词：是、否、与剧情无关、部分正确。`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: [{ role: 'user', parts: [{ text: question }] }],
+            config: { systemInstruction }
+        });
+        const raw = (response.text?.trim() || '').replace(/["\s]/g, '');
+        if (/^是$/.test(raw)) return '是';
+        if (/^否$/.test(raw)) return '否';
+        if (/^与剧情无关$/.test(raw)) return '与剧情无关';
+        if (/^部分正确$/.test(raw)) return '部分正确';
+        return raw || '与剧情无关';
+    } catch (e) {
+        console.error('answerTurtleSoupQuestion failed', e);
+        return '与剧情无关';
+    }
+};
+
+export const generateTurtleSoupHint = async (
+    hiddenStory: string,
+    hintsSoFar: string[]
+): Promise<string> => {
+    const systemInstruction = `你是海龟汤主持人。根据汤底，给玩家一条新提示。提示要能推进推理，但不要直接说出关键反转或结局。
+汤底：${hiddenStory}
+已有提示：${hintsSoFar.length ? hintsSoFar.join('；') : '无'}
+
+请只输出一条简短的提示（1～2 句话），不要前缀「提示：」。`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: [{ role: 'user', parts: [{ text: '请给一条新提示。' }] }],
+            config: { systemInstruction }
+        });
+        return (response.text?.trim() || '再想想。').slice(0, 200);
+    } catch (e) {
+        console.error('generateTurtleSoupHint failed', e);
+        return '再想想。';
     }
 };

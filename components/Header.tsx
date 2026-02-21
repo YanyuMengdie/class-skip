@@ -82,8 +82,9 @@ interface HeaderProps {
   // 独立复习入口（选 1 个或多个 PDF 进行复习）
   onOpenReview?: () => void;
 
-  // 地牢学习游戏入口
-  onOpenDungeon?: () => void;
+  // 海龟汤 & 猎奇盲盒
+  onOpenTurtleSoup?: () => void;
+  onOpenJigsaw?: () => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -141,7 +142,8 @@ export const Header: React.FC<HeaderProps> = ({
   onStartClass,
   isTranscriptionSupported,
   onOpenReview,
-  onOpenDungeon
+  onOpenTurtleSoup,
+  onOpenJigsaw
 }) => {
   return (
     <header className={`${isImmersive ? 'bg-white border-b border-stone-200' : 'bg-white/80 backdrop-blur-md border-b border-stone-100'} shadow-sm z-30 relative flex flex-col transition-all`}>
@@ -309,14 +311,24 @@ export const Header: React.FC<HeaderProps> = ({
               </button>
             )}
 
-          {onOpenDungeon && (
+          {onOpenTurtleSoup && (
               <button
-                onClick={onOpenDungeon}
-                className="flex items-center space-x-1.5 px-3 py-1.5 bg-purple-600 text-white hover:bg-purple-700 rounded-xl transition-colors text-xs font-bold shadow-sm border border-purple-500"
-                title="探索地牢：学习获得 D20 骰子，探索房间获得奖励"
+                onClick={onOpenTurtleSoup}
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-700 text-white hover:bg-amber-600 rounded-xl transition-colors text-xs font-bold shadow-sm border border-amber-600"
+                title="海龟汤：学完一段得提示，每回合 5 次是非题"
               >
                 <Swords className="w-3.5 h-3.5" />
-                <span>探索地牢</span>
+                <span>海龟汤</span>
+              </button>
+            )}
+            {onOpenJigsaw && (
+              <button
+                onClick={onOpenJigsaw}
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-violet-600 text-white hover:bg-violet-500 rounded-xl transition-colors text-xs font-bold shadow-sm border border-violet-500"
+                title="猎奇盲盒：学完一段发一块拼图"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>猎奇盲盒</span>
               </button>
             )}
 
