@@ -64,6 +64,20 @@ export interface AnnotationCache {
   [slideId: string]: SlideAnnotation[];
 }
 
+/** 幻灯片下方「本页注释」单条 */
+export interface SlidePageComment {
+  id: string;
+  text: string;
+  orderIndex: number;
+  /** 文本框高度（px），可拖拽调节，默认 80 */
+  height?: number;
+}
+
+/** 按 slideId 存储的本页注释列表 */
+export interface PageCommentsCache {
+  [slideId: string]: SlidePageComment[];
+}
+
 export interface Prerequisite {
   id: string;
   concept: string;
@@ -110,6 +124,117 @@ export interface TrapItem {
   source?: string;
   createdAt: number;
 }
+
+// --- MIND MAP TYPES ---
+/** 思维导图树节点 */
+export interface MindMapNode {
+  id: string;
+  /** 主标签，中文或英文均可 */
+  label: string;
+  /** 中英对照：另一语种标签，如 label 为中文则填英文，反之亦然 */
+  labelEn?: string;
+  children?: MindMapNode[];
+}
+
+/** 多文档思维导图：每文档一棵树 + 文档间关联 */
+export interface MindMapMultiResult {
+  perDoc: Array<{ fileName: string; tree: MindMapNode }>;
+  crossDoc: Array<{ docA: string; docB: string; similarities: string[] }>;
+}
+
+/** 自建导图：AI 评判与补充的返回 */
+export interface MindMapEvaluateResult {
+  feedback: string;
+  suggestedNodes: Array<{ parentId: string; node: MindMapNode }>;
+}
+
+// --- L-SAP 考前预测 ---
+/** 知识组件（考点） */
+export interface LSAPKnowledgeComponent {
+  id: string;
+  concept: string;
+  definition: string;
+  sourcePages: number[];
+  sourceExcerpt?: string;
+  /** 复习重点（一句话，用于复习模式清单展示） */
+  reviewFocus?: string;
+  examWeight: number;
+  bloomTargetLevel: number;
+}
+
+/** 考点图谱 */
+export interface LSAPContentMap {
+  id: string;
+  sourceKey: string;
+  kcs: LSAPKnowledgeComponent[];
+  createdAt: number;
+}
+
+/** 单轮探测记录（证据链） */
+export interface ProbeRecord {
+  kcId: string;
+  bloomLevel: number;
+  question: string;
+  userAnswer: string;
+  correct: boolean | 'partial';
+  evidence?: string;
+  sourcePage?: number;
+  timestamp: number;
+}
+
+/** BKT 掌握概率：kcId -> pMastery (0-1) */
+export type LSAPBKTState = Record<string, number>;
+
+/** 考前预测状态 */
+export interface LSAPState {
+  contentMapId: string;
+  bktState: LSAPBKTState;
+  probeHistory: ProbeRecord[];
+  lastPredictedScore: number;
+  lastUpdated: number;
+  /** 上次使用的面板模式，恢复时默认进入该模式 */
+  lastPanelMode?: 'probe' | 'review';
+}
+
+// --- STUDIO / SAVED ARTIFACTS (NotebookLM-style) ---
+/** 术语项（与 geminiService.TerminologyItem 一致，用于 artifact 存储） */
+export interface TerminologyItemForArtifact {
+  term: string;
+  definition: string;
+  keyWords?: string[];
+}
+
+export type SavedArtifactType =
+  | 'studyGuide'
+  | 'examSummary'
+  | 'examTraps'
+  | 'feynman'
+  | 'trickyProfessor'
+  | 'terminology'
+  | 'mindMap'
+  | 'quiz'
+  | 'flashcard'
+  | 'trapList';
+
+export interface SavedArtifactBase {
+  id: string;
+  type: SavedArtifactType;
+  title: string;
+  createdAt: number;
+  sourceLabel?: string;
+}
+
+export type SavedArtifact =
+  | (SavedArtifactBase & { type: 'studyGuide'; payload: StudyGuide })
+  | (SavedArtifactBase & { type: 'examSummary'; payload: { markdown: string } })
+  | (SavedArtifactBase & { type: 'examTraps'; payload: { markdown: string } })
+  | (SavedArtifactBase & { type: 'feynman'; payload: { markdown: string } })
+  | (SavedArtifactBase & { type: 'trickyProfessor'; payload: { markdown: string } })
+  | (SavedArtifactBase & { type: 'terminology'; payload: { terms: TerminologyItemForArtifact[] } })
+  | (SavedArtifactBase & { type: 'mindMap'; payload: { tree: MindMapNode } | { multiResult: MindMapMultiResult } })
+  | (SavedArtifactBase & { type: 'quiz'; payload: { roundIndex: number; questionCount?: number } })
+  | (SavedArtifactBase & { type: 'flashcard'; payload: { count: number } })
+  | (SavedArtifactBase & { type: 'trapList'; payload: { itemIds: string[] } });
 
 export type ViewMode = 'deep' | 'skim';
 export type SkimStage = 'diagnosis' | 'tutoring' | 'quiz' | 'reading';
@@ -238,8 +363,16 @@ export interface FilePersistedState {
   pageMarks?: PageMarks;
   /** Study Guide/Outline */
   studyGuide?: StudyGuide;
+  /** Studio 已生成条目（学习指南、考前速览、考点与陷阱等） */
+  savedArtifacts?: SavedArtifact[];
   customAvatarUrl?: string | null;
-  personaSettings?: PersonaSettings; 
+  personaSettings?: PersonaSettings;
+  /** 幻灯片下方本页注释 */
+  pageComments?: PageCommentsCache;
+  /** L-SAP 考前预测：考点图谱 */
+  lsapContentMap?: LSAPContentMap;
+  /** L-SAP 考前预测：BKT 与探测历史 */
+  lsapState?: LSAPState;
 }
 
 export interface FileHistoryItem {
@@ -283,10 +416,13 @@ export interface CloudSession {
   flashCardEstimate?: number;
   pageMarks?: PageMarks;
   studyGuide?: StudyGuide;
-  
+  savedArtifacts?: SavedArtifact[];
   customAvatarUrl?: string | null;
   customBackgroundUrl?: string | null;
   personaSettings?: PersonaSettings;
+  pageComments?: PageCommentsCache;
+  lsapContentMap?: LSAPContentMap;
+  lsapState?: LSAPState;
 }
 
 // --- NEW: CALENDAR & MEMO TYPES ---
@@ -298,6 +434,117 @@ export interface CalendarEvent {
     endTime: string;   // "11:30"
     type: 'study' | 'exam' | 'break';
     dateStr: string;   // "2023-10-27"
+    /** 可选：关联的考试中心 Exam id（Firestore）*/
+    linkedExamId?: string;
+}
+
+// --- 考试中心（Exam Hub）---
+export interface Exam {
+  id: string;
+  userId: string;
+  title: string;
+  /** 考试日期（当日 0 点的 UTC 时间戳或本地日期毫秒，按保存约定）；null 表示日期待定 */
+  examAt: number | null;
+  color?: string;
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type ExamMaterialSourceType = 'fileHash' | 'sessionId';
+
+/** 考试与材料的关联（Firestore `examMaterials`）*/
+export interface ExamMaterialLink {
+  id: string;
+  userId: string;
+  examId: string;
+  sourceType: ExamMaterialSourceType;
+  fileHash?: string;
+  cloudSessionId?: string;
+  fileName: string;
+  sortIndex?: number;
+  addedAt: number;
+}
+
+// --- 今日学习分段 ---
+export type DailySegmentKind =
+  | 'slide_review'
+  | 'lsap_probe'
+  | 'flashcard_batch'
+  | 'trap_review'
+  | 'feynman_chunk'
+  | 'study_guide_section'
+  | 'generic';
+
+export interface DailySegment {
+  id: string;
+  examId: string;
+  examTitle: string;
+  fileHash?: string;
+  cloudSessionId?: string;
+  fileName: string;
+  kind: DailySegmentKind;
+  title: string;
+  description?: string;
+  estimatedMinutes: number;
+  kcId?: string;
+  pageFrom?: number;
+  pageTo?: number;
+  payload?: Record<string, unknown>;
+  /** P1：可选关联情境流程 */
+  flowTemplateId?: string;
+  flowStepIndex?: number;
+}
+
+export interface DailyPlanCacheDoc {
+  userId: string;
+  date: string;
+  selectedExamIds: string[];
+  segments: DailySegment[];
+  generatedAt: number;
+  budgetMinutes: number;
+  version: number;
+}
+
+// --- 情境化复习编排（Study Flow）---
+export type MaterialFamiliarity = 'never_seen' | 'learned_once' | 'reviewed_before';
+export type UrgencyBand = 'd1_2' | 'd3_7' | 'd8_plus' | 'no_exam';
+export type AffectState = 'good' | 'tired' | 'anxious';
+
+export type StudyFlowPanelTarget =
+  | 'studyGuide'
+  | 'examSummary'
+  | 'feynman'
+  | 'terminology'
+  | 'trapList'
+  | 'flashcard'
+  | 'mindMap'
+  | 'fiveMin'
+  | 'break'
+  | 'skim'
+  | 'deep'
+  | 'examPrediction'
+  | 'trickyProfessor'
+  | 'quiz';
+
+export type StudyFlowStepAction = 'open_panel' | 'lsap_session' | 'slide_skim' | 'rest';
+
+export interface StudyFlowStep {
+  id: string;
+  order: number;
+  label: string;
+  description: string;
+  action: StudyFlowStepAction;
+  target?: StudyFlowPanelTarget | string;
+  estimatedMinutes: number;
+  skippable: boolean;
+  reasonForUser: string;
+}
+
+export interface StudyFlowTemplate {
+  scenarioKey: string;
+  title: string;
+  steps: StudyFlowStep[];
 }
 
 export interface Memo {
@@ -330,15 +577,3 @@ export interface TurtleSoupState {
   questionHistory?: { q: string; a: string }[];
 }
 
-// --- 猎奇盲盒（气笑拼图）---
-export interface JigsawState {
-  imageUrl: string;
-  pieces: number;
-  pieceRevealed: number;
-  pieceImages: string[];
-  rotations: number[];
-  assembled: boolean;
-  studyDurationMinutes: number;
-  restCount: number;
-  startedAt?: number;
-}

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { jsPDF } from 'jspdf';
 import { Header } from './components/Header';
 import { SlideViewer } from './components/SlideViewer';
+import { SlidePageComments } from './components/SlidePageComments';
 import { ExplanationPanel } from './components/ExplanationPanel';
 import { SkimPanel } from './components/SkimPanel';
 import { Sidebar } from './components/Sidebar';
@@ -24,19 +25,25 @@ import { ExamTrapsPanel } from './components/ExamTrapsPanel';
 import { TerminologyPanel } from './components/TerminologyPanel';
 import { TrapListPanel } from './components/TrapListPanel';
 import { TrickyProfessorPanel } from './components/TrickyProfessorPanel';
-import { BreakPanel } from './components/BreakPanel';
+import { MindMapPanel } from './components/MindMapPanel';
+import { MultiDocQAPanel, getMultiDocQAConversationKey, loadMultiDocQAMessages, saveMultiDocQAMessages } from './components/MultiDocQAPanel';
+import { StudioPanel, ArtifactFullView } from './components/StudioPanel';
+import { MoodDialog } from './components/MoodDialog';
+import { LoginModal } from './components/LoginModal';
+import { FiveMinFlowPanel } from './components/FiveMinFlowPanel';
 import { ClassroomPanel } from './components/ClassroomPanel';
 import { LectureTranscriptPage } from './components/LectureTranscriptPage';
 import { ReviewPage, ReviewType } from './components/ReviewPage';
 import { TurtleSoupPanel } from './components/TurtleSoupPanel';
-import { JigsawPanel } from './components/JigsawPanel';
+import { ExamPredictionPanel } from './components/ExamPredictionPanel';
+import { ExamHubModal } from './components/ExamHubModal';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from './utils/pdfUtils';
 import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript } from './services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from './services/transcriptionService';
 import { storageService } from './services/storageService';
-import { auth, loginWithGoogle, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails } from './services/firebase';
+import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, JigsawState } from './types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, DailySegment, StudyFlowStep } from './types';
 import { Sparkles, X, ChevronDown, Loader2, Wand2 } from 'lucide-react';
 
 // #region agent log
@@ -72,6 +79,7 @@ const App: React.FC = () => {
   const [explanations, setExplanations] = useState<ExplanationCache>({});
   const [chatCache, setChatCache] = useState<ChatCache>({});
   const [annotations, setAnnotations] = useState<AnnotationCache>({});
+  const [pageComments, setPageComments] = useState<PageCommentsCache>({});
   const [skimMessages, setSkimMessages] = useState<ChatMessage[]>([]);
   const [skimTopHeight, setSkimTopHeight] = useState(60);
   const [viewMode, setViewMode] = useState<ViewMode>('deep');
@@ -96,12 +104,17 @@ const App: React.FC = () => {
   const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
   const [studyMap, setStudyMap] = useState<StudyMap | null>(null);
+  const [studyMapModuleCount, setStudyMapModuleCount] = useState<number | null>(null);
   const [fullPdfText, setFullPdfText] = useState<string | null>(null); 
   const [isStudyMapLoading, setIsStudyMapLoading] = useState<boolean>(false);
   
   const [isImmersive, setIsImmersive] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(60);
   const [isSidePanelCollapsed, setIsSidePanelCollapsed] = useState(false);
+  /** 本页注释区域高度占左侧面板的百分比（可拖拽调节），默认 25%，范围 15–65 */
+  const [notesPanelHeightPercent, setNotesPanelHeightPercent] = useState(25);
+  /** 本页注释区域默认收起，需要记笔记时再展开 */
+  const [notesPanelCollapsed, setNotesPanelCollapsed] = useState(true);
   
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [historyItems, setHistoryItems] = useState<FileHistoryItem[]>([]);
@@ -113,19 +126,17 @@ const App: React.FC = () => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   // --- ENERGY MODE STATE ---
   const [isEnergyMode, setIsEnergyMode] = useState(false);
 
-  // --- 小憩区 & 白噪音面板受控 ---
-  const [isBreakPanelOpen, setIsBreakPanelOpen] = useState(false);
+  // --- 白噪音面板受控（休息改为顶栏下方弹层，不再用独立面板）---
   const [isMusicPanelOpen, setIsMusicPanelOpen] = useState(false);
 
-  // --- 海龟汤 & 猎奇盲盒 ---
+  // --- 海龟汤 ---
   const [turtleSoupOpen, setTurtleSoupOpen] = useState(false);
   const [turtleSoupState, setTurtleSoupState] = useState<TurtleSoupState | null>(null);
-  const [jigsawOpen, setJigsawOpen] = useState(false);
-  const [jigsawState, setJigsawState] = useState<JigsawState | null>(null);
 
   // --- SIDE QUEST STATE (NEW) ---
   const [sideQuest, setSideQuest] = useState<SideQuestState>({ isActive: false, anchorText: '', messages: [], isLoading: false });
@@ -145,9 +156,15 @@ const App: React.FC = () => {
   const [studyGuide, setStudyGuide] = useState<StudyGuide | null>(null);
   const [studyGuidePanel, setStudyGuidePanel] = useState(false);
 
+  // --- Studio 已生成条目（NotebookLM 式右侧持久化）---
+  const [savedArtifacts, setSavedArtifacts] = useState<SavedArtifact[]>([]);
+  const [studioExpandedId, setStudioExpandedId] = useState<string | null>(null);
+  const [studioCollapsed, setStudioCollapsed] = useState(false);
+
   // --- 一起复习：多选合并内容与方式选择 ---
   const [combinedReviewContent, setCombinedReviewContent] = useState<string | null>(null);
   const [combinedReviewFileName, setCombinedReviewFileName] = useState<string | null>(null);
+  const [combinedReviewFileNames, setCombinedReviewFileNames] = useState<string[] | null>(null);
   const [reviewModeChooserOpen, setReviewModeChooserOpen] = useState(false);
   const [isCombinedReviewLoading, setIsCombinedReviewLoading] = useState(false);
   const [examSummaryPanelOpen, setExamSummaryPanelOpen] = useState(false);
@@ -165,6 +182,19 @@ const App: React.FC = () => {
   const [terminologyPanelOpen, setTerminologyPanelOpen] = useState(false);
   const [trapListPanelOpen, setTrapListPanelOpen] = useState(false);
   const [trickyProfessorPanelOpen, setTrickyProfessorPanelOpen] = useState(false);
+  const [mindMapPanelOpen, setMindMapPanelOpen] = useState(false);
+  const [examPredictionPanelOpen, setExamPredictionPanelOpen] = useState(false);
+  const [examPredictionInitialKCId, setExamPredictionInitialKCId] = useState<string | null>(null);
+  const [examHubOpen, setExamHubOpen] = useState(false);
+  const [examHubInitialTab, setExamHubInitialTab] = useState<'exams' | 'daily' | 'flow'>('exams');
+  const [lsapContentMap, setLsapContentMap] = useState<LSAPContentMap | null>(null);
+  const [lsapState, setLsapState] = useState<LSAPState | null>(null);
+  const [multiDocQAPanelOpen, setMultiDocQAPanelOpen] = useState(false);
+  const [multiDocQAConversationKey, setMultiDocQAConversationKey] = useState<string | null>(null);
+  const multiDocQAInitialMessages = useMemo(() => multiDocQAConversationKey ? loadMultiDocQAMessages(multiDocQAConversationKey) : [], [multiDocQAConversationKey]);
+  // 学习兴致弹窗 & 5 分钟模式
+  const [moodDialogOpen, setMoodDialogOpen] = useState(false);
+  const [fiveMinFlowOpen, setFiveMinFlowOpen] = useState(false);
   const [isClassroomMode, setIsClassroomMode] = useState(false);
   const [currentLecture, setCurrentLecture] = useState<LectureRecord | null>(null);
   const [lectureHistory, setLectureHistory] = useState<LectureRecord[]>(() => {
@@ -208,12 +238,22 @@ const App: React.FC = () => {
   
   const [studyTime, setStudyTime] = useState<number>(0);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
+
+  // --- 番茄钟（与「我学完一段」打通）---
+  const [pomodoroSegmentSeconds, setPomodoroSegmentSeconds] = useState<number>(25 * 60);
+  const [pomodoroBreakSeconds, setPomodoroBreakSeconds] = useState<number>(5 * 60);
+  const [pomodoroPhase, setPomodoroPhase] = useState<'idle' | 'study' | 'break'>('idle');
+  const [pomodoroRemainingSeconds, setPomodoroRemainingSeconds] = useState<number>(25 * 60);
+  const [completedSegmentsCount, setCompletedSegmentsCount] = useState<number>(0);
   
   const splitterRef = useRef<boolean>(false);
+  const notesSplitterRef = useRef<boolean>(false);
   const pageEntryTime = useRef<number>(Date.now());
   const hasEncouragedOnPage = useRef<boolean>(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const hiddenFileInputRef = useRef<HTMLInputElement>(null);
+  const pendingNavSegmentRef = useRef<DailySegment | null>(null);
+  const applyDailySegRef = useRef<(seg: DailySegment) => void>(() => {});
   const selectionTimeoutRef = useRef<number | null>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
   
@@ -258,7 +298,31 @@ const App: React.FC = () => {
       }, 1000);
     }
     return () => { if (interval) clearInterval(interval); };
-  }, [isTimerRunning, slides.length]); 
+  }, [isTimerRunning, slides.length]);
+
+  // --- 番茄钟倒计时 ---
+  const pomodoroPhaseRef = useRef(pomodoroPhase);
+  pomodoroPhaseRef.current = pomodoroPhase;
+  useEffect(() => {
+    if (pomodoroPhase !== 'study' && pomodoroPhase !== 'break') return;
+    const interval = window.setInterval(() => {
+      setPomodoroRemainingSeconds((prev) => {
+        if (prev <= 0) {
+          const phase = pomodoroPhaseRef.current;
+          if (phase === 'study') {
+            setCompletedSegmentsCount((c) => c + 1);
+            setPomodoroPhase('break');
+            return pomodoroBreakSeconds;
+          } else {
+            setPomodoroPhase('study');
+            return pomodoroSegmentSeconds;
+          }
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [pomodoroPhase, pomodoroSegmentSeconds, pomodoroBreakSeconds]);
 
   // --- SIDE QUEST SELECTION LISTENER (FIXED) ---
   useEffect(() => {
@@ -353,19 +417,25 @@ const App: React.FC = () => {
     if (turtleSoupState) localStorage.setItem('turtleSoupState', JSON.stringify(turtleSoupState));
   }, [turtleSoupState]);
 
-  // --- 猎奇盲盒：从本地加载 ---
+  // --- 邮件链接登录回调：用户点击邮件中的链接后会打开本页，在此完成登录 ---
   useEffect(() => {
-    const raw = localStorage.getItem('jigsawState');
-    if (raw) {
-      try {
-        setJigsawState(JSON.parse(raw));
-      } catch (_) {}
+    if (typeof window === 'undefined') return;
+    const href = window.location.href;
+    if (!isEmailLinkSignIn(href)) return;
+    const email = window.localStorage.getItem('emailForSignIn');
+    if (!email) {
+      console.warn("[Auth] Email link sign-in: no email in storage");
+      return;
     }
+    (async () => {
+      try {
+        await completeEmailLinkSignIn(email, href);
+        window.history.replaceState({}, document.title, window.location.pathname || '/');
+      } catch (e) {
+        console.error("[Auth] Email link sign-in failed:", e);
+      }
+    })();
   }, []);
-
-  useEffect(() => {
-    if (jigsawState) localStorage.setItem('jigsawState', JSON.stringify(jigsawState));
-  }, [jigsawState]);
 
   // --- AUTH LISTENER ---
   useEffect(() => {
@@ -397,7 +467,8 @@ const App: React.FC = () => {
             chatCache,
             skimMessages,
             annotations,
-            notebookData, 
+            notebookData,
+            pageComments,
             currentIndex,
             viewMode,
             skimTopHeight,
@@ -412,7 +483,11 @@ const App: React.FC = () => {
             reviewFlashCards,
             flashCardEstimate,
             pageMarks,
-            studyGuide
+            studyGuide,
+            savedArtifacts,
+            ...(lsapContentMap?.sourceKey === examSummaryContentKey && lsapContentMap && lsapState
+              ? { lsapContentMap, lsapState }
+              : {})
           }
         };
         await storageService.saveFileState(item);
@@ -420,21 +495,30 @@ const App: React.FC = () => {
       } catch (e) { console.warn('Auto-save failed:', e); }
     }, 2000);
     return () => clearTimeout(saveTimeout);
-  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, currentIndex, viewMode, skimTopHeight, studyMap, skimStage, quizData, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide]);
+  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, studyMap, skimStage, quizData, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState, examSummaryContentKey]);
 
   useEffect(() => {
     if (!currentSessionId || !user) return;
     const cloudSaveTimeout = setTimeout(() => {
       updateCloudSessionState(currentSessionId, {
-        explanations, chatCache, annotations, notebookData, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide
+        explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
       });
     }, 3000);
     return () => clearTimeout(cloudSaveTimeout);
-  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, viewMode, studyMap, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide]);
+  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
 
+
+  const addArtifact = useCallback((artifact: SavedArtifact) => {
+    setSavedArtifacts((prev) => [...prev, artifact]);
+  }, []);
+
+  const removeArtifact = useCallback((id: string) => {
+    setSavedArtifacts((prev) => prev.filter((a) => a.id !== id));
+    if (studioExpandedId === id) setStudioExpandedId(null);
+  }, [studioExpandedId]);
 
   // --- HANDLERS ---
-  const handleLogin = async () => { await loginWithGoogle(); };
+  const handleLogin = () => { setLoginModalOpen(true); };
   const handleLogout = async () => { if (window.confirm("确定要退出登录吗？")) await logoutUser(); };
 
   const handleOpenHistory = async () => { setHistoryItems(await storageService.getAllHistory()); setIsHistoryOpen(true); };
@@ -456,37 +540,48 @@ const App: React.FC = () => {
       // #endregion
       const newSlides: Slide[] = images.map((img, idx) => ({ id: `slide-${hash}-${idx}`, imageUrl: img, pageNumber: idx + 1 }));
       const fullText = pdfText.join('\n');
-      setFileName(file.name); setSlides(newSlides); setFullPdfText(fullText); setStudyTime(0); setIsTimerRunning(true); pageEntryTime.current = Date.now();
+      setFileName(file.name); setSlides(newSlides); setFullPdfText(fullText); setStudyTime(0); pageEntryTime.current = Date.now();
       const existingRecord = await storageService.getFileState(hash);
       const stateToRestore = restoreData || (existingRecord ? existingRecord.state : null);
       if (stateToRestore) {
-        setExplanations(stateToRestore.explanations || {}); setChatCache(stateToRestore.chatCache || {}); setSkimMessages(stateToRestore.skimMessages || []); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData);
-        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setSkimTopHeight(stateToRestore.skimTopHeight || 60); setStudyMap(stateToRestore.studyMap || null); setSkimStage(stateToRestore.skimStage || 'diagnosis'); setQuizData(stateToRestore.quizData || null); setDocType(stateToRestore.docType || 'STEM');
+        setExplanations(stateToRestore.explanations || {}); setChatCache(stateToRestore.chatCache || {}); setSkimMessages(stateToRestore.skimMessages || []); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
+        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setSkimTopHeight(stateToRestore.skimTopHeight || 60); setStudyMap(stateToRestore.studyMap || null); setStudyMapModuleCount(null); setSkimStage(stateToRestore.skimStage || 'diagnosis'); setQuizData(stateToRestore.quizData || null); setDocType(stateToRestore.docType || 'STEM');
         setReviewQuizRounds(stateToRestore.reviewQuizRounds || []); setReviewFlashCards(stateToRestore.reviewFlashCards || []); setFlashCardEstimate(stateToRestore.flashCardEstimate);
         setPageMarks(stateToRestore.pageMarks || {});
         setStudyGuide(stateToRestore.studyGuide || null);
+        setSavedArtifacts(stateToRestore.savedArtifacts || []);
+        setLsapContentMap(stateToRestore.lsapContentMap ?? null); setLsapState(stateToRestore.lsapState ?? null);
         if (restoredAvatar) setCustomAvatarUrl(restoredAvatar); else if (stateToRestore.customAvatarUrl) setCustomAvatarUrl(stateToRestore.customAvatarUrl);
         if (restoredBg) setCustomBackgroundUrl(restoredBg); else if (stateToRestore.galgameBackgroundUrl) setCustomBackgroundUrl(stateToRestore.galgameBackgroundUrl);
         if (stateToRestore.personaSettings) setPersonaSettings(stateToRestore.personaSettings);
       } else {
-        setExplanations({}); setChatCache({}); setSkimMessages([]); setAnnotations({}); setCurrentIndex(0); setViewMode('deep'); setSkimTopHeight(60); setStudyMap(null); setSkimStage('diagnosis'); setQuizData(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null);
+        setExplanations({}); setChatCache({}); setSkimMessages([]); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('deep'); setSkimTopHeight(60); setStudyMap(null); setStudyMapModuleCount(null); setSkimStage('diagnosis'); setQuizData(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
       }
       if (!stateToRestore?.studyMap) {
         setIsStudyMapLoading(true); const diagnosisContent = rawPdfData || fullText;
         // #region agent log
         _debugLog('App.tsx:processFile', 'before diagnosis (background)', {});
         // #endregion
-        const diagnosisPromise = Promise.all([performPreFlightDiagnosis(diagnosisContent), (!existingRecord && !restoreData) ? classifyDocument(diagnosisContent) : Promise.resolve(stateToRestore?.docType || 'STEM')]);
+        const diagnosisPromise = Promise.all([performPreFlightDiagnosis(diagnosisContent, { moduleCount: 4 }), (!existingRecord && !restoreData) ? classifyDocument(diagnosisContent) : Promise.resolve(stateToRestore?.docType || 'STEM')]);
         const timeoutMs = 90000;
         const timeoutPromise = new Promise<[StudyMap | null, DocType]>((resolve) => setTimeout(() => resolve([null, 'STEM']), timeoutMs));
         Promise.race([diagnosisPromise, timeoutPromise])
           .then(([map, type]) => {
             _debugLog('App.tsx:processFile', 'after Promise.all diagnosis', { hasMap: !!map });
-            if (map) setStudyMap(map); if (!existingRecord && !restoreData) setDocType(type);
+            if (map) { setStudyMap(map); setStudyMapModuleCount(4); }
+            if (!existingRecord && !restoreData) setDocType(type);
           })
           .catch(() => {})
           .finally(() => setIsStudyMapLoading(false));
       }
+      const pendLoc = pendingNavSegmentRef.current;
+      if (pendLoc && pendLoc.fileHash === hash) {
+        pendingNavSegmentRef.current = null;
+        window.setTimeout(() => applyDailySegRef.current(pendLoc), 120);
+      }
+      // 本页注释默认收起；文档加载完成后弹出一次「学习兴致」选择对话框
+      setNotesPanelCollapsed(true);
+      setMoodDialogOpen(true);
     } catch (error) {
       // #region agent log
       _debugLog('App.tsx:processFile', 'catch', { err: String(error) });
@@ -525,8 +620,51 @@ const App: React.FC = () => {
   };
 
   const handleRestoreCloudSession = async (session: CloudSession) => {
-    if (!user) return; setIsProcessingFile(true);
-    try { if (!session.fileUrl) throw new Error("File URL missing"); const heavyDetails = await fetchSessionDetails(session.id); const file = await fetchFileFromUrl(session.fileUrl, session.fileName); const fullData = { ...session, ...heavyDetails }; const restoreData: Partial<FilePersistedState> = { explanations: fullData.explanations, chatCache: fullData.chatCache, annotations: fullData.annotations, notebookData: fullData.notebookData, skimMessages: fullData.skimMessages, viewMode: fullData.viewMode, studyMap: fullData.studyMap, skimStage: fullData.skimStage, quizData: fullData.quizData, docType: fullData.docType, skimTopHeight: fullData.skimTopHeight, currentIndex: fullData.currentIndex, personaSettings: fullData.personaSettings, reviewQuizRounds: fullData.reviewQuizRounds, reviewFlashCards: fullData.reviewFlashCards, flashCardEstimate: fullData.flashCardEstimate, pageMarks: fullData.pageMarks, studyGuide: fullData.studyGuide }; await processFile(file, restoreData, fullData.customAvatarUrl, fullData.customBackgroundUrl); setCurrentSessionId(session.id); setIsSyncing(true); } catch (e) { console.error("Restore failed:", e); alert("无法从云端恢复，请重试。"); } finally { setIsProcessingFile(false); }
+    if (!user) return;
+    setIsProcessingFile(true);
+    try {
+      if (!session.fileUrl) throw new Error('File URL missing');
+      const heavyDetails = await fetchSessionDetails(session.id);
+      const file = await fetchFileFromUrl(session.fileUrl, session.fileName);
+      const fullData = { ...session, ...heavyDetails };
+      const restoreData: Partial<FilePersistedState> = {
+        explanations: fullData.explanations,
+        chatCache: fullData.chatCache,
+        annotations: fullData.annotations,
+        notebookData: fullData.notebookData,
+        pageComments: fullData.pageComments,
+        skimMessages: fullData.skimMessages,
+        viewMode: fullData.viewMode,
+        studyMap: fullData.studyMap,
+        skimStage: fullData.skimStage,
+        quizData: fullData.quizData,
+        docType: fullData.docType,
+        skimTopHeight: fullData.skimTopHeight,
+        currentIndex: fullData.currentIndex,
+        personaSettings: fullData.personaSettings,
+        reviewQuizRounds: fullData.reviewQuizRounds,
+        reviewFlashCards: fullData.reviewFlashCards,
+        flashCardEstimate: fullData.flashCardEstimate,
+        pageMarks: fullData.pageMarks,
+        studyGuide: fullData.studyGuide,
+        savedArtifacts: fullData.savedArtifacts,
+        lsapContentMap: fullData.lsapContentMap,
+        lsapState: fullData.lsapState,
+      };
+      await processFile(file, restoreData, fullData.customAvatarUrl, fullData.customBackgroundUrl);
+      setCurrentSessionId(session.id);
+      setIsSyncing(true);
+      const pendCloud = pendingNavSegmentRef.current;
+      if (pendCloud && pendCloud.cloudSessionId === session.id) {
+        pendingNavSegmentRef.current = null;
+        window.setTimeout(() => applyDailySegRef.current(pendCloud), 120);
+      }
+    } catch (e) {
+      console.error('Restore failed:', e);
+      alert('无法从云端恢复，请重试。');
+    } finally {
+      setIsProcessingFile(false);
+    }
   };
 
   const handleDeleteSession = async (session: CloudSession): Promise<boolean> => {
@@ -569,6 +707,7 @@ const App: React.FC = () => {
       }
       setCombinedReviewContent(content);
       setCombinedReviewFileName(fileName || '当前文档');
+      setCombinedReviewFileNames(null);
       openReviewPanelByType(type);
       return;
     }
@@ -576,17 +715,21 @@ const App: React.FC = () => {
     setIsCombinedReviewLoading(true);
     setCombinedReviewContent(null);
     setCombinedReviewFileName(null);
+    setCombinedReviewFileNames(null);
     try {
       const parts: string[] = [];
+      const names: string[] = [];
       for (const session of sessions) {
         if (!session.fileUrl || session.type !== 'file') continue;
         const file = await fetchFileFromUrl(session.fileUrl, session.fileName);
         const texts = await extractPdfText(file);
         parts.push(`【${session.fileName}】\n${texts.join('\n')}`);
+        names.push(session.fileName);
       }
       const merged = parts.join('\n\n').slice(0, 60000);
       setCombinedReviewContent(merged);
       setCombinedReviewFileName(sessions.length === 1 ? sessions[0].fileName : `多文档合并 (${sessions.length} 个文件)`);
+      setCombinedReviewFileNames(names);
       openReviewPanelByType(type);
     } catch (e) {
       console.error("Review load failed:", e);
@@ -625,14 +768,212 @@ const App: React.FC = () => {
       case 'trapList':
         setTrapListPanelOpen(true);
         break;
+      case 'mindMap':
+        setMindMapPanelOpen(true);
+        break;
+      case 'examPrediction':
+        setExamPredictionInitialKCId(null);
+        setExamPredictionPanelOpen(true);
+        break;
+      case 'multiDocQA':
+        setMultiDocQAConversationKey(getMultiDocQAConversationKey(combinedReviewFileName ?? '当前文档', combinedReviewFileNames));
+        setMultiDocQAPanelOpen(true);
+        break;
     }
   };
 
   const clearCombinedReview = () => {
     setCombinedReviewContent(null);
     setCombinedReviewFileName(null);
+    setCombinedReviewFileNames(null);
     setReviewModeChooserOpen(false);
   };
+
+  const applyDailySegmentNavigation = useCallback(
+    (seg: DailySegment) => {
+      if (!seg.payload?.useLastIndex && seg.pageFrom != null && slides.length > 0) {
+        const from = Math.max(0, seg.pageFrom - 1);
+        setCurrentIndex(Math.min(slides.length - 1, from));
+      }
+      setExamPredictionInitialKCId(seg.kcId ?? null);
+      switch (seg.kind) {
+        case 'slide_review':
+          setViewMode('deep');
+          break;
+        case 'lsap_probe':
+          setExamPredictionPanelOpen(true);
+          if (!seg.kcId) window.alert('未指定薄弱考点，请在考前预测中手动选择复习单元');
+          break;
+        case 'flashcard_batch':
+          setReviewPanel('flashcard');
+          break;
+        case 'trap_review':
+          setTrapListPanelOpen(true);
+          break;
+        case 'feynman_chunk':
+          setFeynmanPanelOpen(true);
+          break;
+        case 'study_guide_section':
+          setStudyGuidePanel(true);
+          break;
+        default:
+          setViewMode('deep');
+          window.alert('该任务将打开精读模式；若需其他功能请从「复习」进入');
+      }
+    },
+    [slides.length]
+  );
+
+  applyDailySegRef.current = applyDailySegmentNavigation;
+
+  const navigateToSegment = useCallback(
+    async (seg: DailySegment) => {
+      const sameLocal = !!(seg.fileHash && seg.fileHash === fileHash);
+      const sameCloud = !!(seg.cloudSessionId && seg.cloudSessionId === currentSessionId);
+      if (sameLocal || sameCloud) {
+        applyDailySegmentNavigation(seg);
+        return;
+      }
+      if (seg.cloudSessionId && user) {
+        const sessions = await getUserSessions(user);
+        const s = sessions.find((x) => x.id === seg.cloudSessionId && x.type === 'file' && x.fileUrl);
+        if (s) {
+          pendingNavSegmentRef.current = seg;
+          await handleRestoreCloudSession(s);
+          return;
+        }
+        window.alert('未找到对应的云端存档或文件不可用');
+        return;
+      }
+      if (seg.fileHash) {
+        const item = await storageService.getFileState(seg.fileHash);
+        if (!item) {
+          window.alert('本地无该文件记录，请上传同一文件或从历史恢复');
+          return;
+        }
+        pendingNavSegmentRef.current = seg;
+        window.alert(`请重新选择文件「${item.name}」以继续今日任务`);
+        hiddenFileInputRef.current?.click();
+        return;
+      }
+      window.alert('无法定位该学习任务对应的文件');
+    },
+    [user, fileHash, currentSessionId, applyDailySegmentNavigation]
+  );
+
+  const navigateStudyFlowStep = useCallback((step: StudyFlowStep) => {
+    if (step.action === 'rest') {
+      setIsEnergyMode(true);
+      return;
+    }
+    if (step.action === 'slide_skim') {
+      setViewMode(step.target === 'skim' ? 'skim' : 'deep');
+      return;
+    }
+    if (step.action === 'lsap_session') {
+      setExamPredictionInitialKCId(null);
+      setExamPredictionPanelOpen(true);
+      return;
+    }
+    if (step.action === 'open_panel') {
+      switch (step.target) {
+        case 'studyGuide':
+          setStudyGuidePanel(true);
+          break;
+        case 'examSummary':
+          setExamSummaryPanelOpen(true);
+          break;
+        case 'feynman':
+          setFeynmanPanelOpen(true);
+          break;
+        case 'terminology':
+          setTerminologyPanelOpen(true);
+          break;
+        case 'trapList':
+          setTrapListPanelOpen(true);
+          break;
+        case 'flashcard':
+          setReviewPanel('flashcard');
+          break;
+        case 'mindMap':
+          setMindMapPanelOpen(true);
+          break;
+        case 'fiveMin':
+          setFiveMinFlowOpen(true);
+          break;
+        case 'break':
+          setIsEnergyMode(true);
+          break;
+        case 'examPrediction':
+          setExamPredictionInitialKCId(null);
+          setExamPredictionPanelOpen(true);
+          break;
+        case 'trickyProfessor':
+          setTrickyProfessorPanelOpen(true);
+          break;
+        case 'quiz':
+          setReviewPanel('quiz');
+          break;
+        default:
+          window.alert(`「${String(step.target)}」暂未接入导航`);
+      }
+    }
+  }, []);
+
+  const filePersistedSnapshot: FilePersistedState | null = useMemo(() => {
+    if (!fileHash && !fileName) return null;
+    return {
+      explanations,
+      chatCache,
+      skimMessages,
+      annotations,
+      notebookData,
+      currentIndex,
+      viewMode,
+      skimTopHeight,
+      studyMap,
+      skimStage,
+      quizData,
+      docType,
+      reviewQuizRounds,
+      reviewFlashCards,
+      flashCardEstimate,
+      pageMarks,
+      studyGuide,
+      savedArtifacts,
+      customAvatarUrl,
+      personaSettings,
+      pageComments,
+      lsapContentMap,
+      lsapState,
+    };
+  }, [
+    fileHash,
+    fileName,
+    explanations,
+    chatCache,
+    skimMessages,
+    annotations,
+    notebookData,
+    currentIndex,
+    viewMode,
+    skimTopHeight,
+    studyMap,
+    skimStage,
+    quizData,
+    docType,
+    reviewQuizRounds,
+    reviewFlashCards,
+    flashCardEstimate,
+    pageMarks,
+    studyGuide,
+    savedArtifacts,
+    customAvatarUrl,
+    personaSettings,
+    pageComments,
+    lsapContentMap,
+    lsapState,
+  ]);
 
   const handleStartClass = async () => {
     try {
@@ -672,6 +1013,7 @@ const App: React.FC = () => {
       return null;
     });
     setIsClassroomMode(false);
+    setLectureTranscriptPageOpen(true);
   };
 
   const handleOrganizeLecture = useCallback(async (lecture: LectureRecord) => {
@@ -738,6 +1080,47 @@ const App: React.FC = () => {
   const handleUpdateAnnotation = (id: string, updates: Partial<SlideAnnotation>) => { if (!slides[currentIndex]) return; const slideId = slides[currentIndex].id; setAnnotations(prev => ({ ...prev, [slideId]: (prev[slideId] || []).map(a => a.id === id ? { ...a, ...updates } : a) })); };
   const handleDeleteAnnotation = (id: string) => { if (!slides[currentIndex]) return; const slideId = slides[currentIndex].id; setAnnotations(prev => ({ ...prev, [slideId]: (prev[slideId] || []).filter(a => a.id !== id) })); };
 
+  const handleAddPageComment = () => {
+    if (!slides[currentIndex]) return;
+    const slideId = slides[currentIndex].id;
+    const list = pageComments[slideId] || [];
+    const nextOrder = list.length === 0 ? 0 : Math.max(...list.map(c => c.orderIndex), -1) + 1;
+    const newComment: SlidePageComment = { id: `pcomment-${Date.now()}`, text: '', orderIndex: nextOrder, height: 80 };
+    setPageComments(prev => ({ ...prev, [slideId]: [...(prev[slideId] || []), newComment] }));
+  };
+  const handleUpdatePageComment = (id: string, text: string) => {
+    if (!slides[currentIndex]) return;
+    const slideId = slides[currentIndex].id;
+    setPageComments(prev => ({ ...prev, [slideId]: (prev[slideId] || []).map(c => c.id === id ? { ...c, text } : c) }));
+  };
+  const handleDeletePageComment = (id: string) => {
+    if (!slides[currentIndex]) return;
+    const slideId = slides[currentIndex].id;
+    setPageComments(prev => ({ ...prev, [slideId]: (prev[slideId] || []).filter(c => c.id !== id) }));
+  };
+  const handleReorderPageComments = (fromIndex: number, toIndex: number) => {
+    if (!slides[currentIndex]) return;
+    const slideId = slides[currentIndex].id;
+    const list = [...(pageComments[slideId] || [])].sort((a, b) => a.orderIndex - b.orderIndex);
+    if (fromIndex < 0 || fromIndex >= list.length || toIndex < 0 || toIndex >= list.length) return;
+    const [removed] = list.splice(fromIndex, 1);
+    list.splice(toIndex, 0, removed);
+    const reordered = list.map((c, i) => ({ ...c, orderIndex: i }));
+    setPageComments(prev => ({ ...prev, [slideId]: reordered }));
+  };
+  const handleResizePageComment = (id: string, height: number) => {
+    if (!slides[currentIndex]) return;
+    const slideId = slides[currentIndex].id;
+    setPageComments(prev => ({ ...prev, [slideId]: (prev[slideId] || []).map(c => c.id === id ? { ...c, height } : c) }));
+  };
+
+  const handleRegenerateStudyMap = async (moduleCount: number) => {
+    const content = pdfDataUrl || fullPdfText;
+    if (!content) return;
+    const map = await performPreFlightDiagnosis(content, { moduleCount });
+    if (map) { setStudyMap(map); setStudyMapModuleCount(moduleCount); }
+  };
+
   const handleRetryExplanation = useCallback(() => { 
       if (!slides.length || !slides[currentIndex]) return;
       // 清除当前页面的解释，强制重新生成
@@ -779,6 +1162,17 @@ const App: React.FC = () => {
   const handleDragSplitterStart = (e: React.MouseEvent) => { e.preventDefault(); splitterRef.current = true; document.addEventListener('mousemove', handleDragSplitterMove); document.addEventListener('mouseup', handleDragSplitterEnd); document.body.style.cursor = 'col-resize'; document.body.style.userSelect = 'none'; };
   const handleDragSplitterMove = (e: MouseEvent) => { if (!splitterRef.current) return; const newLeftWidth = (e.clientX / window.innerWidth) * 100; if (newLeftWidth > 30 && newLeftWidth < 70) setLeftPanelWidth(newLeftWidth); };
   const handleDragSplitterEnd = () => { splitterRef.current = false; document.removeEventListener('mousemove', handleDragSplitterMove); document.removeEventListener('mouseup', handleDragSplitterEnd); document.body.style.cursor = ''; document.body.style.userSelect = ''; };
+
+  const handleNotesSplitterStart = (e: React.MouseEvent) => { e.preventDefault(); notesSplitterRef.current = true; document.addEventListener('mousemove', handleNotesSplitterMove); document.addEventListener('mouseup', handleNotesSplitterEnd); document.body.style.cursor = 'row-resize'; document.body.style.userSelect = 'none'; };
+  const handleNotesSplitterMove = (e: MouseEvent) => {
+    if (!notesSplitterRef.current || !leftPanelRef.current) return;
+    const rect = leftPanelRef.current.getBoundingClientRect();
+    const fromBottom = rect.bottom - e.clientY;
+    const percent = (fromBottom / rect.height) * 100;
+    const clamped = Math.max(15, Math.min(65, percent));
+    setNotesPanelHeightPercent(clamped);
+  };
+  const handleNotesSplitterEnd = () => { notesSplitterRef.current = false; document.removeEventListener('mousemove', handleNotesSplitterMove); document.removeEventListener('mouseup', handleNotesSplitterEnd); document.body.style.cursor = ''; document.body.style.userSelect = ''; };
 
   // --- NEW: SIDE QUEST LOGIC ---
   const handleTriggerSideQuest = async () => {
@@ -876,7 +1270,6 @@ const App: React.FC = () => {
       onEnterEnergyMode={() => setIsEnergyMode(true)}
       onOpenMarkPanel={() => setIsMarkPanelOpen(true)}
       hasMarkOnCurrentPage={fileName && pageMarks[fileName] && pageMarks[fileName][currentIndex + 1] ? pageMarks[fileName][currentIndex + 1].length > 0 : false}
-      onToggleBreakPanel={() => setIsBreakPanelOpen((v) => !v)}
       musicPanelOpen={isMusicPanelOpen}
       onMusicPanelOpenChange={setIsMusicPanelOpen}
       hasLectureHistory={lectureHistory.length > 0}
@@ -885,8 +1278,25 @@ const App: React.FC = () => {
       onStartClass={handleStartClass}
       isTranscriptionSupported={transcriptionSupported}
       onOpenReview={() => setReviewPageOpen(true)}
+      onOpenExamHub={() => {
+        if (!user) {
+          setLoginModalOpen(true);
+          return;
+        }
+        setExamHubInitialTab('exams');
+        setExamHubOpen(true);
+      }}
+      onOpenFiveMin={() => setFiveMinFlowOpen(true)}
       onOpenTurtleSoup={() => setTurtleSoupOpen(true)}
-      onOpenJigsaw={() => setJigsawOpen(true)}
+      pomodoroSegmentSeconds={pomodoroSegmentSeconds}
+      pomodoroBreakSeconds={pomodoroBreakSeconds}
+      onPomodoroSegmentChange={setPomodoroSegmentSeconds}
+      onPomodoroBreakChange={setPomodoroBreakSeconds}
+      pomodoroPhase={pomodoroPhase}
+      pomodoroRemainingSeconds={pomodoroRemainingSeconds}
+      completedSegmentsCount={completedSegmentsCount}
+      onPomodoroStart={() => { setPomodoroPhase('study'); setPomodoroRemainingSeconds(pomodoroSegmentSeconds); }}
+      onPomodoroStop={() => setPomodoroPhase('idle')}
     />
   );
   
@@ -927,7 +1337,9 @@ const App: React.FC = () => {
       setQuizData={setQuizData}
       docType={docType}
       onToggleDocType={() => setDocType(prev => prev === 'STEM' ? 'HUMANITIES' : 'STEM')}
-      onNotebookAdd={handleAddNote} 
+      onNotebookAdd={handleAddNote}
+      onRegenerateStudyMap={handleRegenerateStudyMap}
+      studyMapModuleCount={studyMapModuleCount}
     />
   ) : (
     <ExplanationPanel 
@@ -968,13 +1380,22 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <BreakPanel
-        isOpen={isBreakPanelOpen}
-        onClose={() => setIsBreakPanelOpen(false)}
-        onOpenMusicPlayer={() => setIsMusicPanelOpen(true)}
-        onEnterEnergyMode={() => setIsEnergyMode(true)}
-        onVideoSelect={handleVideoSelect}
-      />
+      <LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
+
+      {user && examHubOpen && (
+        <ExamHubModal
+          open={examHubOpen}
+          onClose={() => setExamHubOpen(false)}
+          user={user}
+          initialTab={examHubInitialTab}
+          fileHash={fileHash}
+          cloudSessionId={currentSessionId}
+          fileName={fileName}
+          filePersistedState={filePersistedSnapshot}
+          onNavigateSegment={navigateToSegment}
+          onExecuteFlowStep={navigateStudyFlowStep}
+        />
+      )}
 
       <HistoryModal 
         isOpen={isHistoryOpen}
@@ -1005,7 +1426,39 @@ const App: React.FC = () => {
           trapCount={trapList.length}
         />
       )}
-      
+
+      {/* 学习兴致弹窗 */}
+      {moodDialogOpen && (
+        <MoodDialog
+          open={moodDialogOpen}
+          onSelectLowEnergy={() => {
+            setMoodDialogOpen(false);
+            setFiveMinFlowOpen(true);
+          }}
+          onSelectHighEnergy={() => {
+            setMoodDialogOpen(false);
+          }}
+        />
+      )}
+
+      {/* 5 分钟学习模式 */}
+      {fiveMinFlowOpen && (
+        <FiveMinFlowPanel
+          docContent={fullPdfText || pdfDataUrl || ''}
+          docLabel={fileName || '当前文档'}
+          onClose={() => setFiveMinFlowOpen(false)}
+          onExtend={() => {
+            setFiveMinFlowOpen(false);
+            const content = fullPdfText || pdfDataUrl;
+            if (!content) return;
+            setCombinedReviewContent(content);
+            setCombinedReviewFileName(fileName || '当前文档');
+            setCombinedReviewFileNames(null);
+            setReviewModeChooserOpen(true);
+          }}
+        />
+      )}
+
       <GalgameSettings 
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
@@ -1058,20 +1511,55 @@ const App: React.FC = () => {
       {/* 复习方式选择（多选一起复习后） */}
       {reviewModeChooserOpen && (
         <div className="fixed inset-0 z-[200] bg-black/30 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl border border-stone-200 max-w-lg w-full p-6 animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-2xl shadow-xl border border-stone-200 max-w-lg w-full p-6 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
             <h3 className="text-lg font-bold text-slate-800 mb-2">选择复习方式</h3>
             <p className="text-sm text-slate-500 mb-4">基于 {combinedReviewFileName} 进行复习</p>
-            <div className="grid grid-cols-2 gap-2">
-              <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('quiz'); }} className="py-3 px-4 rounded-xl bg-violet-100 text-violet-800 font-bold text-sm hover:bg-violet-200 transition-colors">测验</button>
-              <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('flashcard'); }} className="py-3 px-4 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors">闪卡</button>
-              <button onClick={() => { setReviewModeChooserOpen(false); setStudyGuidePanel(true); }} className="py-3 px-4 rounded-xl bg-indigo-100 text-indigo-800 font-bold text-sm hover:bg-indigo-200 transition-colors">学习指南</button>
-              <button onClick={() => { setReviewModeChooserOpen(false); setExamSummaryPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-emerald-100 text-emerald-800 font-bold text-sm hover:bg-emerald-200 transition-colors">考前速览</button>
-              <button onClick={() => { setReviewModeChooserOpen(false); setFeynmanPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-sky-100 text-sky-800 font-bold text-sm hover:bg-sky-200 transition-colors">费曼检验</button>
-              <button onClick={() => { setReviewModeChooserOpen(false); setExamTrapsPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-rose-100 text-rose-800 font-bold text-sm hover:bg-rose-200 transition-colors">考点与陷阱</button>
-              <button onClick={() => { setReviewModeChooserOpen(false); setTerminologyPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-cyan-100 text-cyan-800 font-bold text-sm hover:bg-cyan-200 transition-colors">术语精确定义</button>
-              <button onClick={() => { setReviewModeChooserOpen(false); setTrickyProfessorPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-orange-100 text-orange-800 font-bold text-sm hover:bg-orange-200 transition-colors">刁钻教授</button>
+
+            <div className="space-y-4">
+              <section>
+                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">推荐</h4>
+                <div className="flex flex-wrap gap-2">
+                  <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('quiz'); }} className="py-2.5 px-3 rounded-xl bg-violet-100 text-violet-800 font-bold text-sm hover:bg-violet-200 transition-colors">测验</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('flashcard'); }} className="py-2.5 px-3 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors">闪卡</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setStudyGuidePanel(true); }} className="py-2.5 px-3 rounded-xl bg-indigo-100 text-indigo-800 font-bold text-sm hover:bg-indigo-200 transition-colors">学习指南</button>
+                </div>
+              </section>
+
+              <section>
+                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">巩固记忆</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('flashcard'); }} className="py-3 px-4 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors">闪卡</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setStudyGuidePanel(true); }} className="py-3 px-4 rounded-xl bg-indigo-100 text-indigo-800 font-bold text-sm hover:bg-indigo-200 transition-colors">学习指南</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setTerminologyPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-cyan-100 text-cyan-800 font-bold text-sm hover:bg-cyan-200 transition-colors">术语精确定义</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setMindMapPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-teal-100 text-teal-800 font-bold text-sm hover:bg-teal-200 transition-colors">思维导图</button>
+                </div>
+              </section>
+
+              <section>
+                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">自我检测</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('quiz'); }} className="py-3 px-4 rounded-xl bg-violet-100 text-violet-800 font-bold text-sm hover:bg-violet-200 transition-colors">测验</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setFeynmanPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-sky-100 text-sky-800 font-bold text-sm hover:bg-sky-200 transition-colors">费曼检验</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setTrickyProfessorPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-orange-100 text-orange-800 font-bold text-sm hover:bg-orange-200 transition-colors">刁钻教授</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setTrapListPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors w-full col-span-2">我的陷阱清单{trapList.length > 0 ? ` (${trapList.length})` : ''}</button>
+                </div>
+              </section>
+
+              <section>
+                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">考前冲刺</h4>
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => { setReviewModeChooserOpen(false); setExamSummaryPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-emerald-100 text-emerald-800 font-bold text-sm hover:bg-emerald-200 transition-colors">考前速览</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setExamTrapsPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-rose-100 text-rose-800 font-bold text-sm hover:bg-rose-200 transition-colors">考点与陷阱</button>
+                  <button onClick={() => { setReviewModeChooserOpen(false); setExamPredictionInitialKCId(null); setExamPredictionPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors col-span-2">考前预测</button>
+                </div>
+              </section>
+
+              <section>
+                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">自由问答</h4>
+                <button onClick={() => { setReviewModeChooserOpen(false); setMultiDocQAConversationKey(getMultiDocQAConversationKey(combinedReviewFileName ?? '当前文档', combinedReviewFileNames)); setMultiDocQAPanelOpen(true); }} className="w-full py-3 px-4 rounded-xl bg-indigo-100 text-indigo-800 font-bold text-sm hover:bg-indigo-200 transition-colors">多文档问答</button>
+              </section>
             </div>
-            <button onClick={() => { setReviewModeChooserOpen(false); setTrapListPanelOpen(true); }} className="mt-2 text-amber-600 text-sm font-medium hover:underline">我的陷阱清单{trapList.length > 0 ? ` (${trapList.length})` : ''}</button>
+
             <button onClick={clearCombinedReview} className="mt-4 w-full py-2 text-slate-500 text-sm hover:text-slate-700">取消</button>
           </div>
         </div>
@@ -1083,7 +1571,19 @@ const App: React.FC = () => {
           onClose={() => { setReviewPanel(null); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
           existingRounds={reviewQuizRounds}
-          onSaveRounds={setReviewQuizRounds}
+          onSaveRounds={(rounds) => {
+            setReviewQuizRounds(rounds);
+            const sourceName = combinedReviewFileName || fileName || '文档';
+            const lastRound = rounds[rounds.length - 1];
+            addArtifact({
+              id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'quiz',
+              title: `测验 · ${sourceName}`,
+              createdAt: Date.now(),
+              sourceLabel: '1个来源',
+              payload: { roundIndex: rounds.length - 1, questionCount: lastRound?.items?.length ?? 0 }
+            });
+          }}
           onAddToTrap={(data) => {
             const trap: TrapItem = {
               id: `trap-${Date.now()}`,
@@ -1107,7 +1607,18 @@ const App: React.FC = () => {
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
           existingCards={reviewFlashCards}
           savedEstimate={flashCardEstimate}
-          onSaveCards={setReviewFlashCards}
+          onSaveCards={(cards) => {
+            setReviewFlashCards(cards);
+            const sourceName = combinedReviewFileName || fileName || '文档';
+            addArtifact({
+              id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'flashcard',
+              title: `闪卡 · ${sourceName}`,
+              createdAt: Date.now(),
+              sourceLabel: '1个来源',
+              payload: { count: cards.length }
+            });
+          }}
           onSaveEstimate={setFlashCardEstimate}
         />
       )}
@@ -1138,6 +1649,17 @@ const App: React.FC = () => {
         <FeynmanPanel
           onClose={() => { setFeynmanPanelOpen(false); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+          onSaveToStudio={(markdown, title) => {
+            const sourceName = combinedReviewFileName || fileName || '文档';
+            addArtifact({
+              id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'feynman',
+              title: title ? `${title} · ${sourceName}` : `费曼大白话 · ${sourceName}`,
+              createdAt: Date.now(),
+              sourceLabel: '1个来源',
+              payload: { markdown }
+            });
+          }}
         />
       )}
 
@@ -1149,6 +1671,15 @@ const App: React.FC = () => {
           initialMarkdown={examSummaryContentKey ? examSummaryCache[examSummaryContentKey] : null}
           onGenerated={(markdown) => {
             if (examSummaryContentKey) setExamSummaryCache((prev) => ({ ...prev, [examSummaryContentKey]: markdown }));
+            const sourceName = combinedReviewFileName || fileName || '文档';
+            addArtifact({
+              id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'examSummary',
+              title: `考前速览 · ${sourceName}`,
+              createdAt: Date.now(),
+              sourceLabel: '1个来源',
+              payload: { markdown }
+            });
           }}
         />
       )}
@@ -1158,6 +1689,35 @@ const App: React.FC = () => {
         <ExamTrapsPanel
           onClose={() => { setExamTrapsPanelOpen(false); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+          onGenerated={(markdown) => {
+            const sourceName = combinedReviewFileName || fileName || '文档';
+            addArtifact({
+              id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'examTraps',
+              title: `考点与陷阱 · ${sourceName}`,
+              createdAt: Date.now(),
+              sourceLabel: '1个来源',
+              payload: { markdown }
+            });
+          }}
+        />
+      )}
+
+      {/* 考前预测面板 */}
+      {examPredictionPanelOpen && (
+        <ExamPredictionPanel
+          onClose={() => { setExamPredictionPanelOpen(false); setExamPredictionInitialKCId(null); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+          contentKey={examSummaryContentKey}
+          displayFileName={combinedReviewFileName ?? fileName ?? '当前文档'}
+          onJumpToPage={slides.length > 0 ? (page) => setCurrentIndex(Math.max(0, Math.min(page - 1, slides.length - 1))) : undefined}
+          initialContentMap={lsapContentMap?.sourceKey === examSummaryContentKey ? lsapContentMap : null}
+          initialLSAPState={lsapContentMap?.sourceKey === examSummaryContentKey ? lsapState : null}
+          initialKCId={examPredictionInitialKCId}
+          onSaveState={(map, state) => {
+            setLsapContentMap(map);
+            setLsapState(state);
+          }}
         />
       )}
 
@@ -1179,6 +1739,17 @@ const App: React.FC = () => {
             setReviewModeChooserOpen(false);
             setReviewPanel('flashcard');
           }}
+          onSaveToStudio={(terms) => {
+            const sourceName = combinedReviewFileName || fileName || '文档';
+            addArtifact({
+              id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'terminology',
+              title: `术语定义 · ${sourceName}`,
+              createdAt: Date.now(),
+              sourceLabel: '1个来源',
+              payload: { terms: terms.map((t) => ({ term: t.term, definition: t.definition, keyWords: t.keyWords })) }
+            });
+          }}
         />
       )}
 
@@ -1187,6 +1758,51 @@ const App: React.FC = () => {
         <TrickyProfessorPanel
           onClose={() => { setTrickyProfessorPanelOpen(false); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+          onGenerated={(markdown) => {
+            const sourceName = combinedReviewFileName || fileName || '文档';
+            addArtifact({
+              id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'trickyProfessor',
+              title: `刁钻教授 · ${sourceName}`,
+              createdAt: Date.now(),
+              sourceLabel: '1个来源',
+              payload: { markdown }
+            });
+          }}
+        />
+      )}
+
+      {/* 思维导图面板 */}
+      {mindMapPanelOpen && (
+        <MindMapPanel
+          onClose={() => { setMindMapPanelOpen(false); clearCombinedReview(); }}
+          pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
+          fileNames={combinedReviewFileNames}
+          displayName={combinedReviewFileName}
+          onSaveToStudio={(payload) => {
+            const sourceName = combinedReviewFileName || fileName || '文档';
+            const title = 'tree' in payload ? `思维导图 · ${sourceName}` : `思维导图（多文档） · ${sourceName}`;
+            addArtifact({
+              id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'mindMap',
+              title,
+              createdAt: Date.now(),
+              sourceLabel: 'tree' in payload ? '1个来源' : `${(payload.multiResult?.perDoc?.length ?? 0)} 个来源`,
+              payload
+            });
+          }}
+        />
+      )}
+
+      {/* 多文档问答面板 */}
+      {multiDocQAPanelOpen && combinedReviewContent && multiDocQAConversationKey && (
+        <MultiDocQAPanel
+          onClose={() => { setMultiDocQAPanelOpen(false); setMultiDocQAConversationKey(null); clearCombinedReview(); }}
+          docContent={combinedReviewContent.startsWith('data:') ? (fullPdfText || combinedReviewContent) : combinedReviewContent}
+          docLabel={combinedReviewFileName ?? '当前文档'}
+          conversationKey={multiDocQAConversationKey}
+          initialMessages={multiDocQAInitialMessages}
+          onMessagesChange={(messages) => saveMultiDocQAMessages(multiDocQAConversationKey, messages)}
         />
       )}
 
@@ -1196,6 +1812,21 @@ const App: React.FC = () => {
           onClose={() => setTrapListPanelOpen(false)}
           items={trapList}
           onRemove={(id) => setTrapList(prev => prev.filter(t => t.id !== id))}
+          onSaveToStudio={
+            trapList.length > 0
+              ? () => {
+                  const sourceName = combinedReviewFileName || fileName || '文档';
+                  addArtifact({
+                    id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                    type: 'trapList',
+                    title: `陷阱清单 · ${sourceName}`,
+                    createdAt: Date.now(),
+                    sourceLabel: '1个来源',
+                    payload: { itemIds: trapList.map((t) => t.id) }
+                  });
+                }
+              : undefined
+          }
         />
       )}
 
@@ -1208,25 +1839,28 @@ const App: React.FC = () => {
           existingGuide={studyGuide}
           onSaveGuide={(guide) => {
             setStudyGuide(guide);
+            const title = guide.content?.chapters?.[0]?.title || guide.fileName || '学习指南';
+            addArtifact({
+              id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              type: 'studyGuide',
+              title,
+              createdAt: guide.createdAt,
+              sourceLabel: '1个来源',
+              payload: guide
+            });
           }}
         />
       )}
 
-      {/* Dungeon Panel */}
+      {/* 海龟汤 */}
       {turtleSoupOpen && (
         <TurtleSoupPanel
           isOpen={turtleSoupOpen}
           onClose={() => setTurtleSoupOpen(false)}
           state={turtleSoupState}
           onUpdateState={setTurtleSoupState}
-        />
-      )}
-      {jigsawOpen && (
-        <JigsawPanel
-          isOpen={jigsawOpen}
-          onClose={() => setJigsawOpen(false)}
-          state={jigsawState}
-          onUpdateState={setJigsawState}
+          completedSegmentsCount={completedSegmentsCount}
+          onConsumeSegment={() => setCompletedSegmentsCount((c) => Math.max(0, c - 1))}
         />
       )}
 
@@ -1309,13 +1943,57 @@ const App: React.FC = () => {
           
           <div 
             ref={leftPanelRef}
-            className="relative flex flex-col border-r border-stone-200 bg-[#E5E7EB] transition-[width] duration-0 ease-linear" 
+            className="relative flex flex-col border-r border-stone-200 bg-[#E5E7EB] transition-[width] duration-0 ease-linear h-full" 
             style={{ width: isImmersive ? (isSidePanelCollapsed ? '98%' : `${leftPanelWidth}%`) : '60%' }}
           >
-              <div className="flex-1 relative overflow-hidden flex flex-col">
+              <div className="flex-1 min-h-0 relative overflow-hidden flex flex-col">
                   {commonSlideViewer}
                   {renderVideoOverlay()}
               </div>
+              {currentSlide && (
+                <>
+                  {notesPanelCollapsed ? (
+                    <button
+                      type="button"
+                      onClick={() => setNotesPanelCollapsed(false)}
+                      className="flex-shrink-0 flex items-center justify-center gap-2 py-2 border-t border-stone-200 bg-stone-50 hover:bg-stone-100 text-stone-500 hover:text-stone-700 text-xs font-medium transition-colors"
+                      title="展开本页注释"
+                    >
+                      <span className="uppercase tracking-wider">本页注释</span>
+                      {(pageComments[currentSlide.id] || []).length > 0 && (
+                        <span className="rounded-full bg-stone-200 px-1.5 py-0.5 text-[10px]">
+                          {(pageComments[currentSlide.id] || []).length}
+                        </span>
+                      )}
+                    </button>
+                  ) : (
+                    <>
+                      <div
+                        onMouseDown={handleNotesSplitterStart}
+                        className="flex-shrink-0 h-1.5 bg-stone-300 hover:bg-indigo-400 cursor-row-resize z-30 flex items-center justify-center transition-colors hover:h-2 group"
+                        title="上下拖动调整本页注释高度"
+                      >
+                        <div className="w-12 h-0.5 rounded-full bg-stone-400 group-hover:bg-indigo-500 transition-colors" />
+                      </div>
+                      <div
+                        className="flex-shrink-0 min-h-[120px] overflow-hidden flex flex-col"
+                        style={{ height: `${notesPanelHeightPercent}%` }}
+                      >
+                        <SlidePageComments
+                          slideId={currentSlide.id}
+                          comments={pageComments[currentSlide.id] || []}
+                          onAdd={handleAddPageComment}
+                          onUpdate={handleUpdatePageComment}
+                          onDelete={handleDeletePageComment}
+                          onReorder={handleReorderPageComments}
+                          onResize={handleResizePageComment}
+                          onCollapse={() => setNotesPanelCollapsed(true)}
+                        />
+                      </div>
+                    </>
+                  )}
+                </>
+              )}
           </div>
 
           {isImmersive && !isSidePanelCollapsed && (
@@ -1327,20 +2005,49 @@ const App: React.FC = () => {
           )}
 
           <div className={`flex flex-col h-full relative z-20 bg-white transition-all duration-300 ${isImmersive ? (isSidePanelCollapsed ? 'w-[40px] border-l border-stone-200' : 'flex-1 min-w-[300px]') : 'flex-1'}`}>
-            {commonRightPanel}
+            {studioExpandedId ? (() => {
+              const artifact = savedArtifacts.find((a) => a.id === studioExpandedId);
+              return artifact ? (
+                <ArtifactFullView
+                  artifact={artifact}
+                  onClose={() => setStudioExpandedId(null)}
+                  onOpenQuiz={() => { setStudioExpandedId(null); setReviewPanel('quiz'); }}
+                  onOpenFlashcard={() => { setStudioExpandedId(null); setReviewPanel('flashcard'); }}
+                  onOpenTrapList={() => { setStudioExpandedId(null); setTrapListPanelOpen(true); }}
+                />
+              ) : commonRightPanel;
+            })() : commonRightPanel}
           </div>
+
+          {fileName && slides.length > 0 && !isClassroomMode && (
+            <StudioPanel
+              artifacts={savedArtifacts}
+              expandedId={studioExpandedId}
+              onToggleExpand={setStudioExpandedId}
+              onDelete={removeArtifact}
+              isCollapsed={studioCollapsed}
+              onToggleCollapse={() => setStudioCollapsed((c) => !c)}
+              onOpenQuiz={() => setReviewPanel('quiz')}
+              onOpenFlashcard={() => setReviewPanel('flashcard')}
+              onOpenTrapList={() => setTrapListPanelOpen(true)}
+            />
+          )}
         </main>
-        {!isImmersive && (
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-stone-300 animate-bounce flex flex-col items-center cursor-pointer pointer-events-none z-30 opacity-80">
-            <span className="text-xs font-bold tracking-widest uppercase mb-1">Scroll Down</span>
-            <ChevronDown className="w-6 h-6" />
-          </div>
-        )}
+        {!isImmersive && slides.length > 0 && fileName && (() => {
+          const pageNotes = notebookData[fileName] || {};
+          const hasNotesBelow = Object.values(pageNotes).some((notes) => Array.isArray(notes) && notes.length > 0);
+          return hasNotesBelow ? (
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 text-stone-300 animate-bounce flex flex-col items-center cursor-pointer pointer-events-none z-30 opacity-80">
+              <span className="text-xs font-bold tracking-widest uppercase mb-1">Scroll Down</span>
+              <ChevronDown className="w-6 h-6" />
+            </div>
+          ) : null;
+        })()}
       </section>
 
       {!isImmersive && (
         <>
-          <section className="bg-[#FFFBF7] pt-20 pb-24 relative z-10">
+          <section className="bg-[#FFFBF7] pt-10 pb-24 relative z-10">
              <Notebook fileName={fileName} notes={fileName ? (notebookData[fileName] || {}) : {}} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />
              <footer className="mt-10 text-center text-stone-300 text-sm font-bold tracking-widest">逃课神器 · POWERED BY GEMINI 3.0 PRO</footer>
           </section>

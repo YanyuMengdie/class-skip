@@ -1,5 +1,6 @@
-import React from 'react';
-import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen, Swords } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
+import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen, Swords, X, Timer, MoreHorizontal, GraduationCap } from 'lucide-react';
 import { MusicPlayer } from './MusicPlayer';
 import { ViewMode } from '../types';
 import { User } from 'firebase/auth'; 
@@ -64,9 +65,7 @@ interface HeaderProps {
   onOpenMarkPanel?: () => void;
   hasMarkOnCurrentPage?: boolean;
 
-  // 小憩区
-  onToggleBreakPanel?: () => void;
-  /** 白噪音面板受控打开（小憩区「打开白噪音」时设为 true） */
+  /** 白噪音面板受控 */
   musicPanelOpen?: boolean;
   onMusicPanelOpenChange?: (open: boolean) => void;
 
@@ -82,9 +81,25 @@ interface HeaderProps {
   // 独立复习入口（选 1 个或多个 PDF 进行复习）
   onOpenReview?: () => void;
 
-  // 海龟汤 & 猎奇盲盒
+  /** 考试中心 / 今日学习 / 情境流程 */
+  onOpenExamHub?: () => void;
+
+  /** 只学 5 分钟（学习兴致低时的快捷入口） */
+  onOpenFiveMin?: () => void;
+
+  // 海龟汤
   onOpenTurtleSoup?: () => void;
-  onOpenJigsaw?: () => void;
+
+  // 番茄钟（与「我学完一段」打通）
+  pomodoroSegmentSeconds?: number;
+  pomodoroBreakSeconds?: number;
+  onPomodoroSegmentChange?: (seconds: number) => void;
+  onPomodoroBreakChange?: (seconds: number) => void;
+  pomodoroPhase?: 'idle' | 'study' | 'break';
+  pomodoroRemainingSeconds?: number;
+  completedSegmentsCount?: number;
+  onPomodoroStart?: () => void;
+  onPomodoroStop?: () => void;
 }
 
 const formatTime = (seconds: number) => {
@@ -133,7 +148,6 @@ export const Header: React.FC<HeaderProps> = ({
   onEnterEnergyMode,
   onOpenMarkPanel,
   hasMarkOnCurrentPage,
-  onToggleBreakPanel,
   musicPanelOpen,
   onMusicPanelOpenChange,
   hasLectureHistory,
@@ -142,9 +156,71 @@ export const Header: React.FC<HeaderProps> = ({
   onStartClass,
   isTranscriptionSupported,
   onOpenReview,
+  onOpenExamHub,
+  onOpenFiveMin,
   onOpenTurtleSoup,
-  onOpenJigsaw
+  pomodoroSegmentSeconds = 25 * 60,
+  pomodoroBreakSeconds = 5 * 60,
+  onPomodoroSegmentChange,
+  onPomodoroBreakChange,
+  pomodoroPhase = 'idle',
+  pomodoroRemainingSeconds = 25 * 60,
+  completedSegmentsCount = 0,
+  onPomodoroStart,
+  onPomodoroStop
 }) => {
+  const [timerPopoverOpen, setTimerPopoverOpen] = useState(false);
+  const timerPopoverRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!timerPopoverOpen) return;
+    const close = (e: MouseEvent) => {
+      if (timerPopoverRef.current && !timerPopoverRef.current.contains(e.target as Node)) setTimerPopoverOpen(false);
+    };
+    const id = window.setTimeout(() => document.addEventListener('click', close), 0);
+    return () => { clearTimeout(id); document.removeEventListener('click', close); };
+  }, [timerPopoverOpen]);
+
+  const [restPopoverOpen, setRestPopoverOpen] = useState(false);
+  const restPopoverRef = useRef<HTMLDivElement>(null);
+  const [restMinutes, setRestMinutes] = useState(5);
+  const [restCountdownSec, setRestCountdownSec] = useState<number | null>(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [restSubmenuOpen, setRestSubmenuOpen] = useState(false);
+  const moreMenuRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!restPopoverOpen) return;
+    const close = (e: MouseEvent) => {
+      if (restPopoverRef.current && !restPopoverRef.current.contains(e.target as Node)) setRestPopoverOpen(false);
+    };
+    const id = window.setTimeout(() => document.addEventListener('click', close), 0);
+    return () => { clearTimeout(id); document.removeEventListener('click', close); };
+  }, [restPopoverOpen]);
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
+        setMoreMenuOpen(false);
+        setRestSubmenuOpen(false);
+      }
+    };
+    if (moreMenuOpen) document.addEventListener('click', close);
+    return () => document.removeEventListener('click', close);
+  }, [moreMenuOpen]);
+  useEffect(() => {
+    if (restCountdownSec === null || restCountdownSec > 0) return;
+    const t = window.setTimeout(() => {
+      setRestCountdownSec(null);
+      alert('该回去学啦～');
+    }, 100);
+    return () => clearTimeout(t);
+  }, [restCountdownSec]);
+  useEffect(() => {
+    if (restCountdownSec === null || restCountdownSec <= 0) return;
+    const interval = setInterval(() => setRestCountdownSec((s) => s! - 1), 1000);
+    return () => clearInterval(interval);
+  }, [restCountdownSec]);
+
+  const isPomodoroActive = pomodoroPhase === 'study' || pomodoroPhase === 'break';
+  const displayTime = isPomodoroActive ? (pomodoroRemainingSeconds ?? 0) : studyTime;
   return (
     <header className={`${isImmersive ? 'bg-white border-b border-stone-200' : 'bg-white/80 backdrop-blur-md border-b border-stone-100'} shadow-sm z-30 relative flex flex-col transition-all`}>
       {/* Top Bar */}
@@ -163,7 +239,10 @@ export const Header: React.FC<HeaderProps> = ({
             <FileText className="w-5 h-5 text-white" />
           </div>
           <div className="hidden md:block">
-            <h1 className="text-lg font-bold text-slate-800 tracking-tight">逃课神器</h1>
+            <h1 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-1.5">
+              逃课神器
+              {onOpenFiveMin && <span className="text-[10px] font-normal text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">9.13</span>}
+            </h1>
             {fileName && <p className="text-[10px] text-slate-400 max-w-[150px] truncate font-medium">{fileName}</p>}
           </div>
         </div>
@@ -175,6 +254,7 @@ export const Header: React.FC<HeaderProps> = ({
                     onClick={onPrev}
                     disabled={currentPage <= 1}
                     className="p-1.5 rounded-full hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:hover:bg-transparent transition-all active:scale-95"
+                    aria-label="上一页"
                 >
                     <ChevronLeft className="w-5 h-5" />
                 </button>
@@ -185,27 +265,12 @@ export const Header: React.FC<HeaderProps> = ({
                     onClick={onNext}
                     disabled={currentPage >= totalPages}
                     className="p-1.5 rounded-full hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:hover:bg-transparent transition-all active:scale-95"
+                    aria-label="下一页"
                 >
                     <ChevronRight className="w-5 h-5" />
                 </button>
              </div>
 
-             {/* 重点标记按钮 */}
-             {onOpenMarkPanel && totalPages > 0 && (
-                <button
-                    onClick={onOpenMarkPanel}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm ${
-                        hasMarkOnCurrentPage
-                            ? 'bg-amber-500 text-white shadow-amber-200 hover:bg-amber-600'
-                            : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
-                    }`}
-                    title="标记重点"
-                >
-                    <Star className={`w-3.5 h-3.5 ${hasMarkOnCurrentPage ? 'fill-current' : ''}`} />
-                    <span>重点</span>
-                </button>
-             )}
-             
              {/* Mode Toggle Button */}
              {hasStudyMap && (
                  <button 
@@ -237,223 +302,213 @@ export const Header: React.FC<HeaderProps> = ({
              )}
         </div>
 
-        {/* Right: Tools */}
-        <div className="flex items-center space-x-3 min-w-[200px] justify-end">
-          
-           {/* 上课：仅未在上课时显示，点击开始录音+转写 */}
-           {onStartClass && !isClassroomMode && (
-              <button
-                onClick={onStartClass}
-                className="flex items-center space-x-1 px-3 py-1.5 bg-rose-100 text-rose-700 hover:bg-rose-200 rounded-xl transition-colors text-xs font-bold shadow-sm border border-rose-200 disabled:opacity-50"
-                title={isTranscriptionSupported === false ? '当前浏览器不支持语音识别，建议使用 Chrome' : '开始上课（录音+实时转写）'}
-                disabled={isTranscriptionSupported === false}
-              >
-                <Mic className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">上课</span>
-              </button>
-           )}
-           {isClassroomMode && (
-              <span className="flex items-center space-x-1 px-3 py-1.5 bg-rose-100 text-rose-700 rounded-xl text-xs font-bold border border-rose-200">
-                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
-                <span className="hidden md:inline">上课中</span>
-              </span>
-           )}
-
-           {/* 上课录音文本 */}
-           {hasLectureHistory && onOpenLectureTranscript && (
-              <button
-                onClick={onOpenLectureTranscript}
-                className="flex items-center space-x-1 px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-xl transition-colors text-xs font-bold shadow-sm border border-rose-100"
-                title="查看上课转写与整理"
-              >
-                <Mic className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">上课录音文本</span>
-              </button>
-           )}
-
-           {/* 标记重点 */}
-           {onOpenMarkPanel && totalPages > 0 && (
-             <button
-               onClick={onOpenMarkPanel}
-               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
-                 hasMarkOnCurrentPage
-                   ? 'bg-amber-500 text-white shadow-amber-200 hover:bg-amber-600'
-                   : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
-               }`}
-               title="标记重点"
-             >
-               <Star className={`w-3.5 h-3.5 ${hasMarkOnCurrentPage ? 'fill-current' : ''}`} />
-               <span className="hidden md:inline">重点</span>
-             </button>
-           )}
-
-           {/* 小憩一下 */}
-           {onToggleBreakPanel && (
-              <button
-                onClick={onToggleBreakPanel}
-                className="flex items-center space-x-1 px-3 py-1.5 bg-sky-50 text-sky-600 hover:bg-sky-100 rounded-xl transition-colors text-xs font-bold shadow-sm border border-sky-100"
-                title="分心也在这一页"
-              >
-                <Sun className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">小憩一下</span>
-              </button>
-           )}
-
-           {/* 复习：独立页面，可选 1 个或多个 PDF（与学不动了并列显眼） */}
+        {/* Right: 与 3001 一致 = 复习、更多、上传、背景音（+ 账户）*/}
+        <div className="flex items-center gap-x-2 min-w-[200px] justify-end">
+          {/* 复习 */}
           {onOpenReview && (
-              <button
-                onClick={onOpenReview}
-                className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl transition-colors text-xs font-bold shadow-sm border border-indigo-400"
-                title="选择文档进行测验、闪卡、考前速览等"
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>复习</span>
-              </button>
-            )}
-
-          {onOpenTurtleSoup && (
-              <button
-                onClick={onOpenTurtleSoup}
-                className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-700 text-white hover:bg-amber-600 rounded-xl transition-colors text-xs font-bold shadow-sm border border-amber-600"
-                title="海龟汤：学完一段得提示，每回合 5 次是非题"
-              >
-                <Swords className="w-3.5 h-3.5" />
-                <span>海龟汤</span>
-              </button>
-            )}
-            {onOpenJigsaw && (
-              <button
-                onClick={onOpenJigsaw}
-                className="flex items-center space-x-1.5 px-3 py-1.5 bg-violet-600 text-white hover:bg-violet-500 rounded-xl transition-colors text-xs font-bold shadow-sm border border-violet-500"
-                title="猎奇盲盒：学完一段发一块拼图"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>猎奇盲盒</span>
-              </button>
-            )}
-
-           {/* Energy Mode Button */}
-           <button
-              onClick={onEnterEnergyMode}
-              className="flex items-center space-x-1 px-3 py-1.5 bg-amber-100 text-amber-700 hover:bg-amber-200 rounded-xl transition-colors text-xs font-bold shadow-sm"
-              title="进入休息模式"
-           >
-              <Coffee className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">学不动了</span>
-           </button>
-
-           {/* Galgame Mode Trigger - TEMPORARILY HIDDEN */}
-           {false && fileName && (
-              <button 
-                onClick={onEnterGalgameMode}
-                className="p-2 text-pink-400 hover:text-pink-600 hover:bg-pink-50 rounded-xl transition-all"
-                title="进入沉浸式伴读模式"
-              >
-                <Gamepad2 className="w-5 h-5" />
-              </button>
-           )}
-
-          {/* Cloud Sync Button */}
-          {user ? (
-             <div className="relative group">
-                <button
-                    className="flex items-center space-x-1 p-1.5 pr-3 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 hover:bg-emerald-100 transition-colors"
-                    title="已登录 - 数据自动同步中"
-                >
-                    {user.photoURL ? (
-                        <img src={user.photoURL} className="w-6 h-6 rounded-full border border-white" alt="User" />
-                    ) : (
-                        <UserIcon className="w-5 h-5" />
-                    )}
-                    <span className="text-[10px] font-bold hidden xl:inline">{isSyncing ? '同步中...' : '已同步'}</span>
-                </button>
-                {/* Hover Logout Menu */}
-                <div className="absolute top-full right-0 mt-2 w-32 bg-white rounded-xl shadow-xl border border-stone-100 p-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all z-50">
-                    <button 
-                        onClick={onLogout}
-                        className="w-full flex items-center space-x-2 px-3 py-2 text-xs font-bold text-rose-500 hover:bg-rose-50 rounded-lg"
-                    >
-                        <LogOut className="w-3.5 h-3.5" />
-                        <span>退出登录</span>
-                    </button>
-                </div>
-             </div>
-          ) : (
-             <button
-                onClick={onLogin}
-                className="p-2 text-stone-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
-                title="登录开启云同步"
-             >
-                <CloudOff className="w-5 h-5" />
-             </button>
-          )}
-
-          {/* Immersive Toggle */}
-          <button
-            onClick={onToggleImmersive}
-            className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              isImmersive 
-                ? 'bg-slate-800 text-white shadow-md shadow-slate-200 hover:bg-slate-900' 
-                : 'bg-stone-50 text-slate-500 hover:bg-stone-100'
-            }`}
-            title={isImmersive ? "退出沉浸模式" : "进入沉浸模式"}
-          >
-            {isImmersive ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />}
-            <span className="hidden lg:inline">{isImmersive ? '退出沉浸' : '沉浸模式'}</span>
-          </button>
-
-          <div className="w-px h-6 bg-stone-200 mx-1"></div>
-
-          {/* Timer */}
-          <div className="flex items-center bg-white shadow-sm px-3 py-1.5 rounded-xl border border-stone-100">
-            <Clock className={`w-3.5 h-3.5 mr-2 ${isTimerRunning ? 'text-rose-400 animate-pulse' : 'text-slate-300'}`} />
-            <span className="font-mono text-xs font-bold text-slate-600 w-14 text-center">{formatTime(studyTime)}</span>
-            <div className="w-px h-3 bg-stone-200 mx-2"></div>
-            <button 
-              onClick={onToggleTimer}
-              className="text-slate-400 hover:text-rose-500 transition-colors"
-            >
-              {isTimerRunning ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            <button onClick={onOpenReview} className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-sm" title="选择文档进行测验、闪卡、考前速览等" aria-label="复习">
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>复习</span>
             </button>
+          )}
+          {onOpenExamHub && (
+            <button
+              onClick={onOpenExamHub}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-violet-100 text-violet-800 hover:bg-violet-200 rounded-xl text-xs font-bold border border-violet-200"
+              title="考试管理、今日学习、情境复习流程"
+              aria-label="考试中心"
+            >
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">考试</span>
+            </button>
+          )}
+          {/* 更多：上课、学累了/休息、重点标记、沉浸、上课录音文本、计时、背景音入口等 */}
+          <div className="relative" ref={moreMenuRef}>
+            <button
+              type="button"
+              onClick={() => { setMoreMenuOpen((o) => !o); setRestSubmenuOpen(false); }}
+              className="flex items-center p-2 rounded-xl bg-stone-100 text-stone-600 hover:bg-stone-200 transition-colors"
+              title="更多功能"
+              aria-label="更多"
+              aria-expanded={moreMenuOpen}
+            >
+              <MoreHorizontal className="w-5 h-5" />
+            </button>
+            {moreMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-stone-200 py-1 z-[100]">
+                {onStartClass && !isClassroomMode && (
+                  <button type="button" onClick={() => { onStartClass(); setMoreMenuOpen(false); }} disabled={isTranscriptionSupported === false} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50 disabled:opacity-50">
+                    <Mic className="w-4 h-4 text-slate-500" /> 上课
+                  </button>
+                )}
+                {isClassroomMode && (
+                  <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-rose-600 font-medium">
+                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> 上课中
+                  </div>
+                )}
+                <div className="relative">
+                  <button type="button" onClick={() => setRestSubmenuOpen((o) => !o)} className="w-full flex items-center justify-between gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
+                    <span className="flex items-center gap-2"><Coffee className="w-4 h-4 text-amber-500" /> 学累了 / 休息</span>
+                    <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${restSubmenuOpen ? 'rotate-90' : ''}`} />
+                  </button>
+                  {restSubmenuOpen && (
+                    <div className="bg-amber-50/80 border-t border-amber-100 py-1">
+                      <button type="button" onClick={() => { setTimerPopoverOpen(true); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
+                        <Clock className="w-3.5 h-3.5" /> 番茄钟
+                      </button>
+                      <button type="button" onClick={() => { onMusicPanelOpenChange?.(true); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
+                        <Play className="w-3.5 h-3.5" /> 白噪音
+                      </button>
+                      <button type="button" onClick={() => { onEnterEnergyMode(); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
+                        <Coffee className="w-3.5 h-3.5" /> 能量补给
+                      </button>
+                      {onOpenTurtleSoup && <button type="button" onClick={() => { onOpenTurtleSoup(); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
+                        <Swords className="w-3.5 h-3.5" /> 海龟汤
+                      </button>}
+                      {fileName && onOpenFiveMin && <button type="button" onClick={() => { onOpenFiveMin(); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
+                        <Timer className="w-3.5 h-3.5" /> 只学 5 分钟
+                      </button>}
+                      <button type="button" onClick={() => { setRestPopoverOpen(true); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
+                        <Timer className="w-3.5 h-3.5" /> 休息一下
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {onOpenMarkPanel && totalPages > 0 && (
+                  <button type="button" onClick={() => { onOpenMarkPanel(); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
+                    <Star className={`w-4 h-4 ${hasMarkOnCurrentPage ? 'fill-amber-500 text-amber-500' : 'text-slate-500'}`} /> 重点标记
+                  </button>
+                )}
+                <button type="button" onClick={() => { onToggleImmersive(); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
+                  {isImmersive ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />} {isImmersive ? '退出沉浸' : '沉浸模式'}
+                </button>
+                {onOpenLectureTranscript && (
+                  <button type="button" onClick={() => { onOpenLectureTranscript(); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
+                    <Mic className="w-4 h-4 text-slate-500" /> 上课录音文本{!hasLectureHistory && <span className="text-[10px] text-slate-400">(暂无)</span>}
+                  </button>
+                )}
+                <div className="border-t border-stone-100 mt-1 pt-1">
+                  <button type="button" onClick={() => { setTimerPopoverOpen(true); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
+                    <Clock className="w-4 h-4 text-slate-500" />
+                    <span className="font-mono">{formatTime(displayTime)}</span>
+                    {isPomodoroActive && <span className="text-[10px] text-amber-600">番茄</span>}
+                  </button>
+                  <button type="button" onClick={() => { onMusicPanelOpenChange?.(!musicPanelOpen); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
+                    背景音
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Music Player */}
-          <MusicPlayer 
+          {/* 上传 */}
+          <div className="relative">
+            <input type="file" id="file-upload" className="hidden" accept=".pdf,image/*" multiple={false} onChange={onUpload} />
+            <label htmlFor="file-upload" className={`flex items-center space-x-2 bg-slate-800 text-white px-4 py-2 rounded-xl cursor-pointer hover:bg-slate-700 transition-all text-xs font-bold ${isProcessing ? 'opacity-70 cursor-not-allowed' : ''}`} aria-label={isProcessing ? '处理中' : '上传'}>
+              {isProcessing ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">{isProcessing ? '处理中...' : '上传'}</span>
+            </label>
+          </div>
+
+          {/* 背景音 */}
+          <MusicPlayer
             isPlaying={isPlayingAudio}
             currentTrack={currentTrackName}
             volume={volume}
             onPlayPause={onAudioPlayPause}
-            onVideoSelect={onVideoSelect} 
+            onVideoSelect={onVideoSelect}
             onVolumeChange={onAudioVolumeChange}
             onTrackChange={onAudioTrackChange}
             open={musicPanelOpen}
             onOpenChange={onMusicPanelOpenChange}
           />
 
-          {/* Upload Button */}
-          <div className="relative">
-            <input
-              type="file"
-              id="file-upload"
-              className="hidden"
-              accept=".pdf,image/*"
-              multiple={false}
-              onChange={onUpload}
-            />
-            <label
-              htmlFor="file-upload"
-              className={`flex items-center space-x-2 bg-slate-800 text-white px-4 py-2 rounded-xl cursor-pointer hover:bg-slate-700 hover:-translate-y-0.5 transition-all shadow-lg shadow-slate-200 text-xs font-bold ${isProcessing ? 'opacity-70 cursor-not-allowed' : ''}`}
-            >
-              {isProcessing ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-              ) : (
-                <Upload className="w-3.5 h-3.5" />
-              )}
-              <span className="hidden sm:inline">{isProcessing ? '处理中...' : '上传'}</span>
-            </label>
-          </div>
+          {/* 账户 */}
+          {user ? (
+            <div className="relative group">
+              <button className="flex items-center space-x-1 p-1.5 pr-3 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 hover:bg-emerald-100 transition-colors" title="已登录" aria-label="账户">
+                {user.photoURL ? <img src={user.photoURL} className="w-6 h-6 rounded-full border border-white" alt="" /> : <UserIcon className="w-5 h-5" />}
+                <span className="text-[10px] font-bold hidden xl:inline">{isSyncing ? '同步中' : '已同步'}</span>
+              </button>
+              <div className="absolute top-full right-0 mt-2 w-32 bg-white rounded-xl shadow-xl border border-stone-100 p-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all z-50">
+                <button onClick={onLogout} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-500 hover:bg-rose-50 rounded-lg">
+                  <LogOut className="w-3.5 h-3.5" /> 退出登录
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={onLogin} className="p-2 text-stone-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all" title="登录开启云同步" aria-label="登录">
+              <CloudOff className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
+
+      {/* 计时器弹层（Portal 到 body，避免被裁切或误关） */}
+      {timerPopoverOpen && createPortal(
+        <div ref={timerPopoverRef} className="fixed w-72 bg-white rounded-xl shadow-xl border border-stone-200 p-3 z-[200]" style={{ top: '4.5rem', right: '1rem' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-stone-600">计时</span>
+              <button type="button" onClick={() => setTimerPopoverOpen(false)} className="p-1 hover:bg-stone-100 rounded"><X className="w-4 h-4" /></button>
+            </div>
+            {!isPomodoroActive ? (
+              <>
+                <p className="text-xs text-stone-500 mb-2">普通计时：累计学习时长。</p>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-sm">{formatTime(studyTime)}</span>
+                  <button type="button" onClick={() => { onToggleTimer(); setTimerPopoverOpen(false); }} className="px-2 py-1 bg-stone-100 rounded text-xs font-bold">{isTimerRunning ? '暂停' : '开始'}</button>
+                </div>
+                <div className="border-t border-stone-100 mt-3 pt-3">
+                  <p className="text-xs font-bold text-amber-700 mb-2">番茄钟（学完一段可玩海龟汤）</p>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <label>一段（分钟）<input type="number" min={1} max={90} value={Math.round(pomodoroSegmentSeconds / 60)} onChange={(e) => onPomodoroSegmentChange?.(Math.max(1, Number(e.target.value) || 25) * 60)} className="w-full mt-0.5 px-2 py-1 border border-stone-200 rounded" /></label>
+                    <label>休息（分钟）<input type="number" min={0} max={30} value={Math.round(pomodoroBreakSeconds / 60)} onChange={(e) => onPomodoroBreakChange?.(Math.max(0, Number(e.target.value) || 5) * 60)} className="w-full mt-0.5 px-2 py-1 border border-stone-200 rounded" /></label>
+                  </div>
+                  <button type="button" onClick={() => { onPomodoroStart?.(); setTimerPopoverOpen(false); }} className="mt-2 w-full py-2 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600">开始番茄钟</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-xs text-stone-500 mb-1">{pomodoroPhase === 'study' ? '本段剩余' : '休息剩余'}</p>
+                <p className="font-mono text-lg font-bold text-slate-700">{formatTime(pomodoroRemainingSeconds)}</p>
+                <p className="text-xs text-amber-600 mt-1">已完成 {completedSegmentsCount} 段 · 海龟汤可用 {completedSegmentsCount} 次</p>
+                <button type="button" onClick={() => { onPomodoroStop?.(); setTimerPopoverOpen(false); }} className="mt-2 w-full py-2 bg-stone-200 text-stone-700 rounded-lg text-xs font-bold hover:bg-stone-300">结束番茄钟</button>
+              </>
+            )}
+        </div>,
+        document.body
+      )}
+
+      {/* 休息一下弹层（Portal 到 body） */}
+      {restPopoverOpen && createPortal(
+        <div ref={restPopoverRef} className="fixed w-72 bg-white rounded-xl shadow-xl border border-stone-200 p-3 z-[200]" style={{ top: '4.5rem', right: '1rem' }}>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-stone-600">休息</span>
+              <button type="button" onClick={() => setRestPopoverOpen(false)} className="p-1 hover:bg-stone-100 rounded"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100 space-y-3">
+              <p className="font-semibold text-slate-800 flex items-center gap-2 text-sm"><Timer className="w-4 h-4 text-emerald-600" />休息一下</p>
+              {restCountdownSec === null ? (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-slate-600">休息</span>
+                    <select value={restMinutes} onChange={(e) => setRestMinutes(Number(e.target.value))} className="rounded-lg border border-stone-200 px-2 py-1 text-sm">
+                      {[3, 5, 10, 15].map((m) => (<option key={m} value={m}>{m} 分钟</option>))}
+                    </select>
+                  </div>
+                  <button type="button" onClick={() => setRestCountdownSec(restMinutes * 60)} className="w-full py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 transition-colors">开始休息</button>
+                </>
+              ) : (
+                <div className="text-center py-2">
+                  <p className="text-2xl font-mono font-bold text-emerald-700">{Math.floor(restCountdownSec / 60)}:{(restCountdownSec % 60).toString().padStart(2, '0')}</p>
+                  <p className="text-xs text-slate-500 mt-1">到点提醒你回去学</p>
+                  <button type="button" onClick={() => setRestCountdownSec(null)} className="mt-2 text-xs text-slate-500 hover:text-slate-700">取消</button>
+                </div>
+              )}
+            </div>
+        </div>,
+        document.body
+      )}
 
       {!isImmersive && (
         <div className="h-1 w-full bg-stone-100 relative group overflow-hidden">

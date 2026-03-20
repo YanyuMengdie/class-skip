@@ -1,6 +1,15 @@
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, User } from 'firebase/auth';
+import {
+  getAuth,
+  GoogleAuthProvider,
+  signInWithPopup,
+  signOut,
+  User,
+  sendSignInLinkToEmail,
+  isSignInWithEmailLink,
+  signInWithEmailLink,
+} from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
@@ -13,13 +22,14 @@ import {
   getDocs, 
   query, 
   orderBy, 
-  limit, 
+  limit as firestoreLimit,
+  where,
   Timestamp, 
   initializeFirestore, 
   enableIndexedDbPersistence 
 } from 'firebase/firestore';
 
-import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo } from '../types';
+import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, Exam, ExamMaterialLink, DailyPlanCacheDoc, DailySegment } from '../types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC0_saRd3L2zIxOfG1FQinjYpyCGs_B9ls",
@@ -63,6 +73,33 @@ export const loginWithGoogle = async () => {
 export const logoutUser = async () => {
   await signOut(auth);
   console.log("[Auth] User Signed Out");
+};
+
+/** 用于邮件链接登录：发送登录链接到邮箱（无密码，点链接即登录） */
+export const sendEmailLoginLink = async (email: string): Promise<void> => {
+  const baseUrl = typeof window !== 'undefined' ? window.location.origin + (window.location.pathname || '/') : '';
+  const actionCodeSettings = {
+    url: baseUrl,
+    handleCodeInApp: true,
+  };
+  await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem('emailForSignIn', email);
+  }
+};
+
+/** 判断当前 URL 是否为邮件登录链接回调 */
+export const isEmailLinkSignIn = (url: string): boolean => {
+  return isSignInWithEmailLink(auth, url);
+};
+
+/** 在用户点击邮件中的链接后，用该函数完成登录（需传入当时填写的 email 与当前完整 URL） */
+export const completeEmailLinkSignIn = async (email: string, url: string): Promise<User> => {
+  const result = await signInWithEmailLink(auth, email, url);
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem('emailForSignIn');
+  }
+  return result.user;
 };
 
 // --- Storage Functions (REST API) ---
@@ -184,7 +221,8 @@ export const createCloudSession = async (user: User, fileName: string, fileUrl: 
       chatCache: {},
       explanations: {},
       annotations: {},
-      notebookData: {}, 
+      notebookData: {},
+      pageComments: {},
       skimMessages: [],
       viewMode: 'deep',
       docType: 'STEM',
@@ -312,7 +350,7 @@ export const getUserSessions = async (user: User): Promise<CloudSession[]> => {
     const q = query(
       collection(db, "sessions"), 
       orderBy("createdAt", "desc"),
-      limit(100) // Increase limit for folders
+      firestoreLimit(100) // Increase limit for folders
     );
     
     const snapshot = await getDocs(q);
@@ -406,6 +444,189 @@ export const deleteMemo = async (userId: string, memoId: string): Promise<void> 
     } catch (e) {
         console.error("Delete Memo Failed", e);
         throw e;
+    }
+};
+
+// --- Exam Hub (exams / examMaterials / dailyPlanCache) ---
+
+const examAtToMillis = (v: unknown): number | null => {
+    if (v == null) return null;
+    if (typeof v === 'number') return v;
+    if (v instanceof Timestamp) return v.toMillis();
+    if (typeof (v as { toMillis?: () => number }).toMillis === 'function') return (v as Timestamp).toMillis();
+    return null;
+};
+
+const examDocToExam = (id: string, data: Record<string, unknown>): Exam => ({
+    id,
+    userId: String(data.userId || ''),
+    title: String(data.title || ''),
+    examAt: examAtToMillis(data.examAt),
+    color: data.color != null ? String(data.color) : undefined,
+    notes: data.notes != null ? String(data.notes) : undefined,
+    createdAt: examAtToMillis(data.createdAt) ?? Date.now(),
+    updatedAt: examAtToMillis(data.updatedAt) ?? Date.now(),
+});
+
+const materialDocToLink = (id: string, data: Record<string, unknown>): ExamMaterialLink => ({
+    id,
+    userId: String(data.userId || ''),
+    examId: String(data.examId || ''),
+    sourceType: data.sourceType === 'sessionId' ? 'sessionId' : 'fileHash',
+    fileHash: data.fileHash != null ? String(data.fileHash) : undefined,
+    cloudSessionId: data.cloudSessionId != null ? String(data.cloudSessionId) : undefined,
+    fileName: String(data.fileName || ''),
+    sortIndex: typeof data.sortIndex === 'number' ? data.sortIndex : undefined,
+    addedAt: examAtToMillis(data.addedAt) ?? Date.now(),
+});
+
+export const createExam = async (
+    user: User,
+    input: { title: string; examAt: number | null; color?: string; notes?: string }
+): Promise<Exam> => {
+    const now = Timestamp.now();
+    const examAtTs = input.examAt != null ? Timestamp.fromMillis(input.examAt) : null;
+    const payload = {
+        userId: user.uid,
+        title: input.title.trim(),
+        examAt: examAtTs,
+        color: input.color ?? '#6366f1',
+        notes: input.notes?.trim() ?? '',
+        createdAt: now,
+        updatedAt: now,
+    };
+    const ref = await addDoc(collection(db, 'exams'), payload);
+    return examDocToExam(ref.id, { ...payload, examAt: input.examAt });
+};
+
+export const updateExam = async (
+    user: User,
+    examId: string,
+    partial: Partial<Pick<Exam, 'title' | 'examAt' | 'color' | 'notes'>>
+): Promise<void> => {
+    const ref = doc(db, 'exams', examId);
+    const snap = await getDoc(ref);
+    if (!snap.exists() || (snap.data() as { userId?: string }).userId !== user.uid) throw new Error('无权修改该考试');
+    const u: Record<string, unknown> = { updatedAt: Timestamp.now() };
+    if (partial.title != null) u.title = partial.title.trim();
+    if (partial.examAt !== undefined) u.examAt = partial.examAt != null ? Timestamp.fromMillis(partial.examAt) : null;
+    if (partial.color != null) u.color = partial.color;
+    if (partial.notes != null) u.notes = partial.notes;
+    await updateDoc(ref, u);
+};
+
+export const deleteExam = async (user: User, examId: string): Promise<void> => {
+    const ref = doc(db, 'exams', examId);
+    const snap = await getDoc(ref);
+    if (!snap.exists() || (snap.data() as { userId?: string }).userId !== user.uid) throw new Error('无权删除该考试');
+    const mq = query(collection(db, 'examMaterials'), where('userId', '==', user.uid));
+    const matSnap = await getDocs(mq);
+    await Promise.all(
+        matSnap.docs.filter((d) => (d.data() as { examId?: string }).examId === examId).map((d) => deleteDoc(d.ref))
+    );
+    await deleteDoc(ref);
+};
+
+export const listExams = async (user: User): Promise<Exam[]> => {
+    try {
+        const q = query(collection(db, 'exams'), where('userId', '==', user.uid));
+        const snap = await getDocs(q);
+        const list: Exam[] = [];
+        snap.forEach((d) => list.push(examDocToExam(d.id, d.data() as Record<string, unknown>)));
+        return list.sort((a, b) => {
+            if (a.examAt == null && b.examAt == null) return b.updatedAt - a.updatedAt;
+            if (a.examAt == null) return 1;
+            if (b.examAt == null) return -1;
+            return a.examAt - b.examAt;
+        });
+    } catch (e) {
+        console.error('listExams failed', e);
+        return [];
+    }
+};
+
+export const addExamMaterialLink = async (
+    user: User,
+    input: Omit<ExamMaterialLink, 'id' | 'userId' | 'addedAt'> & { examId: string }
+): Promise<ExamMaterialLink> => {
+    const now = Timestamp.now();
+    const payload = {
+        userId: user.uid,
+        examId: input.examId,
+        sourceType: input.sourceType,
+        fileHash: input.fileHash ?? null,
+        cloudSessionId: input.cloudSessionId ?? null,
+        fileName: input.fileName,
+        sortIndex: input.sortIndex ?? Date.now(),
+        addedAt: now,
+    };
+    const ref = await addDoc(collection(db, 'examMaterials'), payload);
+    return materialDocToLink(ref.id, payload as Record<string, unknown>);
+};
+
+export const removeExamMaterialLink = async (user: User, linkId: string): Promise<void> => {
+    const ref = doc(db, 'examMaterials', linkId);
+    const snap = await getDoc(ref);
+    if (!snap.exists() || (snap.data() as { userId?: string }).userId !== user.uid) throw new Error('无权删除该关联');
+    await deleteDoc(ref);
+};
+
+export const listExamMaterialLinks = async (user: User): Promise<ExamMaterialLink[]> => {
+    try {
+        const q = query(collection(db, 'examMaterials'), where('userId', '==', user.uid));
+        const snap = await getDocs(q);
+        const list: ExamMaterialLink[] = [];
+        snap.forEach((d) => list.push(materialDocToLink(d.id, d.data() as Record<string, unknown>)));
+        return list.sort((a, b) => b.addedAt - a.addedAt);
+    } catch (e) {
+        console.error('listExamMaterialLinks failed', e);
+        return [];
+    }
+};
+
+const dailyPlanDocId = (userId: string, dateStr: string) => `${userId}_${dateStr}`;
+
+export const getDailyPlanCache = async (userId: string, dateStr: string): Promise<DailyPlanCacheDoc | null> => {
+    try {
+        const ref = doc(db, 'dailyPlanCache', dailyPlanDocId(userId, dateStr));
+        const snap = await getDoc(ref);
+        if (!snap.exists()) return null;
+        const data = snap.data() as Record<string, unknown>;
+        if (data.userId !== userId) return null;
+        return {
+            userId: String(data.userId),
+            date: String(data.date),
+            selectedExamIds: Array.isArray(data.selectedExamIds) ? data.selectedExamIds.map(String) : [],
+            segments: Array.isArray(data.segments) ? (data.segments as DailySegment[]) : [],
+            generatedAt: typeof data.generatedAt === 'number' ? data.generatedAt : Date.now(),
+            budgetMinutes: typeof data.budgetMinutes === 'number' ? data.budgetMinutes : 30,
+            version: typeof data.version === 'number' ? data.version : 1,
+        };
+    } catch (e) {
+        console.error('getDailyPlanCache failed', e);
+        return null;
+    }
+};
+
+export const setDailyPlanCache = async (user: User, doc: Omit<DailyPlanCacheDoc, 'userId'> & { date: string }): Promise<void> => {
+    const id = dailyPlanDocId(user.uid, doc.date);
+    const ref = doc(db, 'dailyPlanCache', id);
+    await setDoc(ref, {
+        userId: user.uid,
+        date: doc.date,
+        selectedExamIds: doc.selectedExamIds,
+        segments: doc.segments,
+        generatedAt: doc.generatedAt,
+        budgetMinutes: doc.budgetMinutes,
+        version: doc.version,
+    });
+};
+
+export const deleteDailyPlanCache = async (user: User, dateStr: string): Promise<void> => {
+    try {
+        await deleteDoc(doc(db, 'dailyPlanCache', dailyPlanDocId(user.uid, dateStr)));
+    } catch (e) {
+        console.error('deleteDailyPlanCache failed', e);
     }
 };
 
