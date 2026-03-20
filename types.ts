@@ -504,6 +504,47 @@ export interface DailyPlanCacheDoc {
   generatedAt: number;
   budgetMinutes: number;
   version: number;
+  maintenance?: CachedMaintenanceBundle;
+}
+
+export interface MaintenanceFlashCard {
+  front: string;
+  back: string;
+}
+
+export interface CachedMaintenanceBundle {
+  cacheKey: string;
+  examIds: string[];
+  examTitles: string[];
+  materialKeys: string[];
+  flashCount: number;
+  cards: MaintenanceFlashCard[];
+  mergedContent: string;
+  generatedAt: number;
+}
+
+export interface MaintenanceSessionState {
+  phase:
+    | 'idle'
+    | 'blocked_sprint'
+    | 'loading_cards'
+    | 'cards'
+    | 'continue_menu'
+    | 'quiz_setup'
+    | 'quiz_doing'
+    | 'feedback_exit'
+    | 'feedback_strong';
+  selectedExamIds: string[];
+  flashTargetCount: number;
+  cards: MaintenanceFlashCard[];
+  cardIndex: number;
+  cardFlipped: boolean;
+  mergedContent: string;
+  quizCount: number;
+  quizItems: QuizData[];
+  quizIndex: number;
+  quizAnswers: Array<number | null>;
+  quizSubmitted: boolean[];
 }
 
 // --- 情境化复习编排（Study Flow）---

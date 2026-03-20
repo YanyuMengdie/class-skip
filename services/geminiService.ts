@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle } from "../types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent } from "../types";
 import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "../utils/prompts";
 
 // Ensure API Key exists or fail gracefully in logs (though process.env check is assumed handled elsewhere)
@@ -350,6 +350,56 @@ export const chatWithSlide = async (
   }
 };
 
+const MULTI_DOC_QA_MODEL = 'gemini-3.1-pro-preview';
+const MULTI_DOC_QA_DOC_MAX_LEN = 80000;
+const MULTI_DOC_QA_HISTORY_MAX = 20;
+
+/**
+ * 多文档问答：基于给定文档内容与历史对话，用 Gemini 3.1 生成下一轮回复。
+ * 仅根据文档内容回答，不编造；无相关信息时明确说明。
+ */
+export const multiDocQAReply = async (
+  docContent: string,
+  _docLabel: string,
+  history: ChatMessage[],
+  newMessage: string
+): Promise<string> => {
+  try {
+    const truncated = (docContent || '').trim().slice(0, MULTI_DOC_QA_DOC_MAX_LEN);
+    const systemInstruction = `你是基于用户提供文档的问答助手。请仅根据下述文档内容回答用户问题，不要编造文档中不存在的信息；若文档中无相关信息则明确说明。回答使用简体中文。
+
+重要：若回答中包含数学公式或方程，请一律使用 LaTeX 格式以便正确显示：行内公式用 $...$，独立公式用 $$...$$。例如：$dN/dt = rN(K-N)/K$。不要使用易产生乱码的 Unicode 数学符号或图片中的原始排版字符，避免出现问号块或乱码。`;
+
+    const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [
+      {
+        role: 'user',
+        parts: [{ text: `以下是用户选中的文档内容，请仅基于以下内容回答后续问题。\n\n${truncated || '（无文档内容）'}` }]
+      },
+      {
+        role: 'model',
+        parts: [{ text: '我已阅读文档，请提问。' }]
+      }
+    ];
+
+    const recentHistory = history.slice(-MULTI_DOC_QA_HISTORY_MAX);
+    recentHistory.forEach((msg) => {
+      contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+    });
+    contents.push({ role: 'user', parts: [{ text: newMessage }] });
+
+    const response = await ai.models.generateContent({
+      model: MULTI_DOC_QA_MODEL,
+      contents,
+      config: { systemInstruction }
+    });
+
+    return response.text?.trim() ?? '未能生成回复，请重试。';
+  } catch (error) {
+    console.error('multiDocQAReply Error:', error);
+    return '抱歉，回答时遇到问题，请稍后重试。';
+  }
+};
+
 /**
  * REPLACED: generateRemStoryScript -> generatePersonaStoryScript
  * Now accepts PersonaSettings to customize the storytelling voice.
@@ -621,16 +671,35 @@ export const runChatHugAgent = async (
   }
 };
 
-export const performPreFlightDiagnosis = async (docContent: string): Promise<StudyMap | null> => {
+export type SkimGranularity = 'fine' | 'standard' | 'coarse';
+
+export const performPreFlightDiagnosis = async (
+  docContent: string,
+  options?: { skimGranularity?: SkimGranularity; moduleCount?: number }
+): Promise<StudyMap | null> => {
   // #region agent log
   fetch('http://127.0.0.1:7242/ingest/f7788da6-7262-4420-bc72-576f23e0b7d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:performPreFlightDiagnosis',message:'entry',data:{},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
   // #endregion
   try {
     const contentPart = getContentPart(docContent);
+    const n = options?.moduleCount;
+    const moduleInstruction =
+      typeof n === 'number' && n >= 2 && n <= 8
+        ? `在 initialBriefing 中将文档拆解为 ${n} 个模块，每个模块写明页码范围与剧情/概要。`
+        : (() => {
+            const granularity = options?.skimGranularity ?? 'standard';
+            return granularity === 'fine'
+              ? '在 initialBriefing 中将文档拆解为 5-7 个模块，每个模块写明页码范围与剧情/概要。'
+              : granularity === 'coarse'
+                ? '在 initialBriefing 中将文档拆解为 2-3 个模块，每个模块写明页码范围与剧情/概要。'
+                : '在 initialBriefing 中将文档拆解为 3-5 个模块，每个模块写明页码范围与剧情/概要。';
+          })();
+    const basePrompt = '执行【预飞检查】。识别文档的主题领域，并提取 3-5 个读懂该文档必须具备的基础概念（前置知识）。';
+    const fullPrompt = `${basePrompt} ${moduleInstruction}`;
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: [
-          { role: 'user', parts: [contentPart, { text: `执行【预飞检查】。识别文档的主题领域，并提取 3-5 个读懂该文档必须具备的基础概念（前置知识）。` }] }
+          { role: 'user', parts: [contentPart, { text: fullPrompt }] }
       ],
       config: {
         responseMimeType: "application/json",
@@ -956,6 +1025,67 @@ export const generateFlashCards = async (
   }
 };
 
+/** 低压保温流：按考试维持记忆的闪卡（10-20张） */
+export const generateMaintenanceFlashCards = async (
+  docContent: string,
+  options: { count: number; examTitles: string[]; weakConcepts?: string[] }
+): Promise<Array<{ front: string; back: string }>> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 60000));
+    const weakPart =
+      options.weakConcepts && options.weakConcepts.length > 0
+        ? `\n优先覆盖这些薄弱概念：${options.weakConcepts.slice(0, 12).join('、')}。`
+        : '';
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `你是记忆维持教练。以下内容来自考试：${options.examTitles.join(' / ')}。
+请生成 ${options.count} 张中文闪卡，用于「低压记忆维持」。
+要求：
+1) 覆盖高频概念、易混点与必须记忆的事实；
+2) front 简洁明确，back 直接可复习；
+3) 避免过长解释，优先可提取记忆点。${weakPart}
+
+仅返回 JSON：{ "cards": [ { "front": "...", "back": "..." } ] }`,
+            },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            cards: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  front: { type: Type.STRING },
+                  back: { type: Type.STRING }
+                },
+                required: ["front", "back"]
+              }
+            }
+          },
+          required: ["cards"]
+        }
+      }
+    });
+    if (!response.text) return [];
+    const parsed = JSON.parse(response.text) as { cards: Array<{ front: string; back: string }> };
+    return Array.isArray(parsed.cards) ? parsed.cards : [];
+  } catch (error) {
+    console.error("generateMaintenanceFlashCards Error:", error);
+    return [];
+  }
+};
+
 /** 费曼检验：用大白话解释文档内容，便于自测是否真懂 */
 export const generateFeynmanExplanation = async (docContent: string): Promise<string> => {
   try {
@@ -971,8 +1101,8 @@ export const generateFeynmanExplanation = async (docContent: string): Promise<st
               text: `请用「费曼技巧」把这份文档的核心内容，用**完全不懂的人也能听懂的大白话**解释一遍。要求：
 1. 少用专业术语；若必须用，立刻用一句话解释该术语。
 2. 用生活类比或简单逻辑链把结论串起来。
-3. 分块说明（可加小标题），每块不要太长。
-直接输出 Markdown，不要 JSON。`
+3. 分块说明（用 ## 小标题），每块不要太长，条与条之间空一行。
+直接输出 Markdown，不要 JSON。数学用 LaTeX $...$。`
             }
           ]
         }
@@ -982,6 +1112,134 @@ export const generateFeynmanExplanation = async (docContent: string): Promise<st
   } catch (error) {
     console.error("generateFeynmanExplanation Error:", error);
     return "生成失败，请重试。";
+  }
+};
+
+/** 费曼：针对用户写的不懂的知识点，用大白话单独讲清楚 */
+export const generateFeynmanExplanationForTopics = async (
+  docContent: string,
+  userTopics: string
+): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 40000));
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `用户表示对以下知识点不太懂，请**只针对这些点**用费曼技巧、大白话讲清楚（可结合文档内容）：
+
+【用户不懂的知识点】
+${userTopics.trim()}
+
+要求：少用术语或立刻解释；用生活类比；分块用 ## 小标题；每块不要太长。直接输出 Markdown。数学用 LaTeX $...$。`
+            }
+          ]
+        }
+      ]
+    });
+    return response.text?.trim() || "生成失败，请重试。";
+  } catch (error) {
+    console.error("generateFeynmanExplanationForTopics Error:", error);
+    return "生成失败，请重试。";
+  }
+};
+
+export interface FeynmanQuestionResult {
+  question: string;
+  referenceAnswer: string;
+}
+
+/** 费曼：根据文档出一道简答题（short-answer），可指定难度 */
+export const generateFeynmanQuestion = async (
+  docContent: string,
+  difficulty: 'easy' | 'medium' | 'hard'
+): Promise<FeynmanQuestionResult | null> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 40000));
+    const diffHint =
+      difficulty === 'easy'
+        ? '考查基础概念、定义或直接能从文档找到的结论，用大白话或课本原话即可答对。'
+        : difficulty === 'hard'
+          ? '考查综合、辨析或易混点，需要联系多处内容或区分相似概念。'
+          : '考查理解与简单应用，难度适中。';
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `请根据文档内容出一道**简答题（Short Answer）**，学生需要用大白话或课堂/文档中的概念来回答。
+
+难度：${diffHint}
+
+要求：题目清晰、有唯一参考答案要点；不要选择题。返回 JSON，且只返回一个 JSON 对象，不要其他文字：
+{"question": "题目内容（中文）", "referenceAnswer": "参考答案要点（用于判分与反馈，可多条用分号隔开）"}`
+            }
+          ]
+        }
+      ]
+    });
+    const raw = response.text?.trim() || '';
+    const cleaned = raw.replace(/^```\w*\n?|\n?```$/g, '').trim();
+    const parsed = JSON.parse(cleaned) as FeynmanQuestionResult;
+    if (parsed?.question && parsed?.referenceAnswer) return parsed;
+    return null;
+  } catch (error) {
+    console.error("generateFeynmanQuestion Error:", error);
+    return null;
+  }
+};
+
+export interface FeynmanAnswerFeedback {
+  correct: boolean;
+  feedback: string;
+}
+
+/** 费曼：评判用户答案是否到位，并给出反馈与参考答案 */
+export const evaluateFeynmanAnswer = async (
+  question: string,
+  referenceAnswer: string,
+  userAnswer: string
+): Promise<FeynmanAnswerFeedback> => {
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `你是一位严格的简答题阅卷老师。请评判学生的答案是否扣住要点。
+
+【题目】${question}
+
+【参考答案要点】${referenceAnswer}
+
+【学生答案】${userAnswer}
+
+请返回一个 JSON 对象，且只返回该对象，不要其他文字：
+{"correct": true或false, "feedback": "简短评语：若不对则指出缺了哪点或哪里错了，并简要给出正确说法；若对则肯定并可有补充。"}`
+            }
+          ]
+        }
+      ]
+    });
+    const raw = response.text?.trim() || '';
+    const cleaned = raw.replace(/^```\w*\n?|\n?```$/g, '').trim();
+    const parsed = JSON.parse(cleaned) as FeynmanAnswerFeedback;
+    return {
+      correct: !!parsed?.correct,
+      feedback: parsed?.feedback || '无法评判，请重试。'
+    };
+  } catch (error) {
+    console.error("evaluateFeynmanAnswer Error:", error);
+    return { correct: false, feedback: "评判失败，请重试。" };
   }
 };
 
@@ -1003,7 +1261,7 @@ export const generateExamSummary = async (docContent: string): Promise<string> =
 2. **易错点**：5～8 个常被忽略或容易混淆的坑。每个要写出**具体例子或对比**（如 A 与 B 的区别、常见误用），便于避坑。
 3. **高频考点**：5～8 个最可能考到的方向或题型。每个要给出**可能考法、典型问法或答题要点**，必要时配简短例题思路。
 
-直接输出 Markdown，不要 JSON。数学与公式一律用 LaTeX 行内 $...$ 或块级 $$...$$。`
+直接输出 Markdown，不要 JSON。数学与公式一律用 LaTeX 行内 $...$ 或块级 $$...$$。各部分标题用 ##，子项用 - 或 1. 列表，条与条之间空一行便于阅读。`
             }
           ]
         }
@@ -1013,6 +1271,83 @@ export const generateExamSummary = async (docContent: string): Promise<string> =
   } catch (error) {
     console.error("generateExamSummary Error:", error);
     return "生成失败，请重试。";
+  }
+};
+
+/** 5 分钟模式：超简学习指南（3–5 个要点，每条一句话的 Markdown） */
+export const generateFiveMinGuide = async (docContent: string): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 30000));
+    const prompt = `你是一位善于「压缩知识」的助教，现在要为一个很抗拒学习、只愿意先花 5 分钟混个脸熟的学生，做一份**超简学习指南**。
+
+请根据文档内容，用中文输出 3～5 条要点，每条仅 1 句话，让学生对这份材料有一个「大致是讲什么」的直觉印象即可。
+
+要求：
+- 不求全面覆盖，只挑选最核心的 3～5 个大块。
+- 不要展开长篇解释，每条控制在一行之内。
+- 适合第一次见到这份材料、心情一般的人快速浏览。
+
+请直接以 Markdown 列表或小标题形式输出（例如以 - 开头的列表，或以 ## / ### 开头的简短标题），不要返回 JSON。`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            { text: prompt }
+          ]
+        }
+      ]
+    });
+    return response.text?.trim() || '（暂时无法生成 5 分钟速览，请稍后重试）';
+  } catch (error) {
+    console.error('generateFiveMinGuide Error:', error);
+    return '（生成 5 分钟速览失败，请稍后重试）';
+  }
+};
+
+/** 根据用户要求修改考前速览：在原有内容基础上增删改，其他结构不变 */
+export const updateExamSummary = async (
+  docContent: string,
+  currentMarkdown: string,
+  userRequest: string
+): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 30000));
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `下面是一份已有的「考前速览」Markdown 内容，用户希望对它进行修改。
+
+【用户的要求】
+${userRequest.trim()}
+
+【当前考前速览内容】
+\`\`\`
+${currentMarkdown}
+\`\`\`
+
+请根据用户要求，在**保持原有三部分结构**（核心要点、易错点、高频考点）的前提下，对内容进行增删或修改：
+- 若用户想「加入」某块不熟悉的知识：在该部分中增加相应条目，风格与现有条目一致。
+- 若用户想「减少」某部分：删减或合并相应条目，其余保留。
+- 若用户想「强调」某块：可适当加粗或增加一句说明。
+其他未提及的内容尽量保持原样。数学与公式用 LaTeX（$...$）。输出完整的修订后的 Markdown，不要只输出修改片段。`
+            }
+          ]
+        }
+      ]
+    });
+    return response.text?.trim() || "修改失败，请重试。";
+  } catch (error) {
+    console.error("updateExamSummary Error:", error);
+    return "修改失败，请重试。";
   }
 };
 
@@ -1028,12 +1363,12 @@ export const generateExamTraps = async (docContent: string): Promise<string> => 
           parts: [
             contentPart,
             {
-              text: `请根据文档内容，生成一份「考点与陷阱」Markdown，用中文输出，包含：
+              text: `请根据文档内容，生成一份「考点与陷阱」Markdown，用中文输出，包含三部分，每部分用 ## 小标题：
 1. **核心考点**：5～8 个必考知识点，每条一句话概括。
 2. **常见陷阱**：3～5 个易错/易混淆点，说明错误思路与正确区分方式。
 3. **陷阱题提示**：2～4 道典型陷阱题的题干要点与易错选项特征（不要求完整选项，只写“容易误选…因为…”即可）。
 
-直接输出 Markdown，不要 JSON。`
+各部分用 ## 小标题（如 ## 核心考点、## 常见陷阱、## 陷阱题提示），每条单独一行或列表项，条与条之间空一行。数学与公式用 LaTeX $...$。直接输出 Markdown，不要 JSON。`
             }
           ]
         }
@@ -1043,6 +1378,181 @@ export const generateExamTraps = async (docContent: string): Promise<string> => 
   } catch (error) {
     console.error("generateExamTraps Error:", error);
     return "生成失败，请重试。";
+  }
+};
+
+/** 递归为思维导图节点补全 id（若缺失） */
+const ensureMindMapIds = (node: MindMapNode, prefix: string): MindMapNode => {
+  const id = node.id || `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+  const children = node.children?.map((c, i) => ensureMindMapIds(c, `${id}-${i}`));
+  return { ...node, id, children };
+};
+
+/** 单文档思维导图生成 */
+export const generateMindMap = async (docContent: string): Promise<MindMapNode | null> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 40000));
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `请根据文档内容生成一份思维导图，用 JSON 表示树形结构。要求：
+- 根节点一个，label 为文档核心主题（中文）。
+- 每个节点格式：{ "id": "唯一标识", "label": "中文标题", "labelEn": "English title", "children": [ 子节点数组 ] }。必须中英对照：label 用中文，labelEn 用英文；子节点可省略 children 表示叶子。
+- 层级建议 2～4 层，每层子节点不超过 8 个，便于阅读。
+- 只输出一个 JSON 对象（根节点），不要其他文字。id 可用 "root", "root-0", "root-0-1" 这类形式。`
+            }
+          ]
+        }
+      ]
+    });
+    const raw = response.text?.trim() || '';
+    const cleaned = cleanJsonString(raw);
+    const parsed = JSON.parse(cleaned) as MindMapNode;
+    if (!parsed?.label) return null;
+    return ensureMindMapIds(parsed, 'n');
+  } catch (error) {
+    console.error("generateMindMap Error:", error);
+    return null;
+  }
+};
+
+/** 多文档思维导图：每文档一棵树 + 文档间关联 */
+export const generateMindMapMulti = async (
+  mergedContent: string,
+  fileNames: string[]
+): Promise<MindMapMultiResult | null> => {
+  try {
+    if (fileNames.length === 0) return null;
+    const contentPart = getContentPart(mergedContent.slice(0, 60000));
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `当前内容由多份文档合并，每段以【文件名】开头。请：
+1. 为每个【文件名】对应的文档生成一棵思维导图树，结构同单文档：根节点 { "id", "label", "labelEn", "children" }。label 用中文，labelEn 用英文，中英对照；每层子节点不超过 8 个。
+2. 分析这些文档之间的关联，列出两两之间相似或易混淆的知识点。
+
+只输出一个 JSON 对象，格式如下（不要其他文字）：
+{
+  "perDoc": [ { "fileName": "文档名", "tree": { "id": "root", "label": "主题", "labelEn": "Topic", "children": [...] } }, ... ],
+  "crossDoc": [ { "docA": "文档1名", "docB": "文档2名", "similarities": ["相似点1", "相似点2"] }, ... ]
+}
+fileName 必须与内容中的【文件名】一致。`
+            }
+          ]
+        }
+      ]
+    });
+    const raw = response.text?.trim() || '';
+    const cleaned = cleanJsonString(raw);
+    const parsed = JSON.parse(cleaned) as MindMapMultiResult;
+    if (!parsed?.perDoc?.length) return null;
+    const perDoc = parsed.perDoc.map((d) => ({
+      fileName: d.fileName,
+      tree: ensureMindMapIds(d.tree, 'm')
+    }));
+    return { perDoc, crossDoc: parsed.crossDoc || [] };
+  } catch (error) {
+    console.error("generateMindMapMulti Error:", error);
+    return null;
+  }
+};
+
+/** 自建思维导图：AI 评判与补充 */
+export const evaluateAndSupplementMindMap = async (
+  docContent: string,
+  userTree: MindMapNode
+): Promise<MindMapEvaluateResult | null> => {
+  try {
+    const contentPart = getContentPart(docContent.slice(0, 40000));
+    const treeJson = JSON.stringify(userTree, null, 0);
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            {
+              text: `用户根据文档自己构建了一份思维导图（JSON 树结构），请评判并给出补充建议。
+
+【用户当前的思维导图】
+${treeJson}
+
+请输出一个 JSON 对象（不要其他文字）：
+{
+  "feedback": "简短评语：肯定做得好的地方，指出遗漏或易混点，1～3 句话。",
+  "suggestedNodes": [ { "parentId": "用户树中某节点的 id", "node": { "id": "new-1", "label": "建议补充的节点标题", "children": [] } }, ... ]
+}
+suggestedNodes 最多 5～8 条，只补充重要遗漏即可；若用户导图已很完整可返回空数组。parentId 必须是用户树中已存在的 id。`
+            }
+          ]
+        }
+      ]
+    });
+    const raw = response.text?.trim() || '';
+    const cleaned = cleanJsonString(raw);
+    const parsed = JSON.parse(cleaned) as MindMapEvaluateResult;
+    if (!parsed?.feedback) return null;
+    return {
+      feedback: parsed.feedback,
+      suggestedNodes: parsed.suggestedNodes || []
+    };
+  } catch (error) {
+    console.error("evaluateAndSupplementMindMap Error:", error);
+    return null;
+  }
+};
+
+/** 根据用户描述修改思维导图（增删改节点、简化、翻译等），返回新树 */
+export const modifyMindMap = async (
+  currentTree: MindMapNode,
+  userInstruction: string,
+  docContent?: string
+): Promise<MindMapNode | null> => {
+  try {
+    const treeJson = JSON.stringify(currentTree, null, 0);
+    const contentParts: Array<{ text: string } | ReturnType<typeof getContentPart>> = [
+      {
+        text: `用户有一份思维导图（JSON 树结构），希望按他的描述修改。请根据描述输出修改后的完整思维导图 JSON。
+
+【当前思维导图】
+${treeJson}
+
+【用户修改要求】
+${userInstruction}
+
+要求：
+- 只输出一个 JSON 对象（根节点），不要其他文字。保持 id 格式（如 root, root-0 等），可新增节点用 new-1, new-2 等。
+- 节点格式：{ "id", "label", "labelEn", "children" }，保持中英对照：label 中文，labelEn 英文。
+- 严格按用户要求增删改节点、调整结构或文案；若要求翻译则整体改为目标语并保留另一语种在 label/labelEn。`
+      }
+    ];
+    if (docContent?.trim()) {
+      contentParts.push(getContentPart(docContent.slice(0, 20000)));
+      contentParts.push({ text: '\n若修改需参考文档内容，请结合上文。' });
+    }
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: contentParts }]
+    });
+    const raw = response.text?.trim() || '';
+    const cleaned = cleanJsonString(raw);
+    const parsed = JSON.parse(cleaned) as MindMapNode;
+    if (!parsed?.label) return null;
+    return ensureMindMapIds(parsed, 'n');
+  } catch (error) {
+    console.error("modifyMindMap Error:", error);
+    return null;
   }
 };
 
@@ -1099,13 +1609,22 @@ export const generateTrickyQuestions = async (docContent: string, weakPoints?: s
             {
               text: `请扮演「刁钻教授」，根据文档内容出 3～5 道**易错、易混淆、考细节**的题目。${userHint}
 
-要求：每题包含题干、选项（4 个）、正确答案索引（0-based）、简要解析。用 Markdown 输出，格式示例：
+要求：每题包含题干、选项（4 个）、正确答案索引（0-based）、简要解析。用 Markdown 输出。
+- 数学、符号用 LaTeX 表示，例如有效种群大小用 $N_e$，不要写纯文字 Ne。
+- 题干、选项、答案、解析之间各空一行，便于排版。
+格式示例：
 ## 第 1 题
-**题干** ...
-- A. ...
-- B. ...
-- **答案**：B（索引 1）
-**解析**：...
+
+**题干** 题目内容…
+
+- A. 选项 A
+- B. 选项 B
+- C. 选项 C
+- D. 选项 D
+
+**答案**：B（索引 1）
+
+**解析**：解析内容…
 
 直接输出 Markdown，不要 JSON。`
             }
@@ -1125,7 +1644,8 @@ export const chatWithAdaptiveTutor = async (
     history: ChatMessage[],
     newMessage: string,
     mode: 'tutoring' | 'reading',
-    docType: DocType = 'STEM'
+    docType: DocType = 'STEM',
+    readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number }
 ): Promise<string> => {
     try {
         const contentPart = getContentPart(docContent);
@@ -1146,7 +1666,18 @@ export const chatWithAdaptiveTutor = async (
             contents.push({ role: msg.role, parts: [{ text: msg.text }] });
         });
 
-        contents.push({ role: 'user', parts: [{ text: newMessage }] });
+        let finalMessage = newMessage;
+        if (mode === 'reading' && readingOptions) {
+            const n = readingOptions.moduleCount;
+            if (typeof n === 'number' && n >= 2 && n <= 8) {
+                finalMessage = newMessage + `\n\n【领读模块数】请将文档拆解为 ${n} 个大模块后再输出逻辑路线图与带读。本次要求：${n} 个模块。`;
+            } else if (readingOptions.studyMapBriefing?.trim()) {
+                finalMessage = newMessage + "\n\n【必须一致】当前学习地图的模块划分如下，请严格按相同模块数量与结构进行深度领读，不要自行改为其他模块数：\n\n" + readingOptions.studyMapBriefing.trim();
+            } else if (readingOptions.skimGranularity) {
+                finalMessage = newMessage + "\n\n【领读模块数】请将文档拆解为以下数量的大模块后再输出逻辑路线图与带读：fine 为 5-7 个，standard 为 3-5 个，coarse 为 2-3 个。本次要求：" + readingOptions.skimGranularity + "。";
+            }
+        }
+        contents.push({ role: 'user', parts: [{ text: finalMessage }] });
 
         const response = await ai.models.generateContent({
             model: 'gemini-3-pro-preview',
@@ -1172,7 +1703,7 @@ export const generateStudyGuide = async (
     const isDetailed = options.format === 'detailed';
     
     const prompt = isDetailed 
-      ? `根据整个文档内容，生成一份**详细的学习指南 (Detailed Study Guide)**。要求：
+      ? `根据整个文档内容，生成一份**详细的学习指南 (Detailed Study Guide)**。要求**覆盖文档中出现过的所有概念**，不设数量上限，复习时不能有遗漏。
 
 **1. 章节大纲 (Chapters)**
 - 识别文档的所有主要章节和子章节
@@ -1180,33 +1711,34 @@ export const generateStudyGuide = async (
 - 列出每个章节下的关键子主题
 
 **2. 核心概念 (Core Concepts)**
-- 提取文档中最重要的概念和术语（至少10-15个）
-- 为每个概念提供清晰的定义
-- 标注重要性等级（high/medium/low）
+- 提取**文档中出现过的全部**重要概念与术语，一个都不要漏
+- 凡在正文、图表、例题中出现的专业概念、术语、公式符号，均需列入并给出清晰定义
+- 为每个概念标注重要性等级（high/medium/low）
+- 数量以文档实际覆盖为准，不设上限
 
 **3. 学习路径 (Learning Path)**
-- 设计一个循序渐进的学习顺序（5-8个步骤）
+- 设计一个循序渐进的学习顺序，覆盖全部章节与概念
 - 每个步骤包含：标题、详细描述、建议阅读的页码
-- 确保步骤之间有逻辑递进关系
+- 确保步骤之间有逻辑递进关系，且能对应到上述所有概念
 
 **4. 知识点树 (Knowledge Tree)**
-- 构建知识点的层级结构
+- 构建知识点的层级结构，**包含文档中所有相关知识点**
 - 根节点：文档的核心主题
 - 分支：主要知识领域
-- 子分支：具体知识点和细节
+- 子分支：具体知识点和细节，尽量穷举文档中出现的内容
 
 **5. 复习建议 (Review Suggestions)**
-- 关键要点：列出最重要的复习重点（5-8条）
+- 关键要点：列出所有需要掌握的复习重点（不限于5-8条，以覆盖全面为准）
 - 练习建议：提供具体的复习方法和练习方向
 - 常见错误：列出学习时容易混淆或出错的地方（可选）
 
 **6. Markdown 格式内容**
-- 生成一份完整的 Markdown 格式学习指南
-- 包含所有上述内容，格式清晰，层次分明
+- 生成一份完整的 Markdown 格式学习指南，**必须包含上述所有概念与知识点的详细讲解**
+- 格式清晰，层次分明，每条概念都有对应说明
 - 使用 Markdown 语法（标题、列表、表格、代码块等）
 - 支持数学公式（使用 LaTeX 格式）
 
-请用中文输出，内容要详细、全面、实用。`
+请用中文输出，内容要详尽、全面、不遗漏文档中任何概念。`
       : `根据整个文档内容，生成一份**简洁的学习大纲 (Outline)**。要求：
 
 **1. 章节大纲 (Chapters)**
@@ -1341,6 +1873,244 @@ export const generateStudyGuide = async (
   } catch (error) {
     console.error("generateStudyGuide Error:", error);
     return null;
+  }
+};
+
+// --- L-SAP 考前预测 ---
+export const generateLSAPContentMap = async (docContent: string): Promise<LSAPContentMap | null> => {
+  try {
+    const contentPart = getContentPart(docContent);
+    const prompt = `根据以下文档内容，提取「知识组件」(KC)，用于考前掌握度评估。要求严格依据文档，不编造。
+
+对每个知识组件输出：
+- id: 唯一标识，如 kc-0, kc-1
+- concept: 概念名称
+- definition: 简短定义（一句）
+- reviewFocus: 复习重点（一句话，便于复习时扫一眼知道要学什么，严格基于文档）
+- sourcePages: 出现过的页码数组（从文档结构推断，如 [1,2,3]）
+- examWeight: 考试权重 1-5（5 最重要）
+- bloomTargetLevel: 布鲁姆目标层级 1-3（1=记忆/理解，2=应用，3=分析/综合）
+
+请覆盖文档中的核心考点，数量 5-15 个。输出 JSON：{ "id": "content-map-xxx", "sourceKey": "doc", "kcs": [ ... ], "createdAt": 0 }
+createdAt 请填当前时间戳（毫秒）。`;
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            id: { type: Type.STRING },
+            sourceKey: { type: Type.STRING },
+            kcs: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  concept: { type: Type.STRING },
+                  definition: { type: Type.STRING },
+                  reviewFocus: { type: Type.STRING },
+                  sourcePages: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+                  sourceExcerpt: { type: Type.STRING },
+                  examWeight: { type: Type.NUMBER },
+                  bloomTargetLevel: { type: Type.INTEGER }
+                },
+                required: ['id', 'concept', 'definition', 'sourcePages', 'examWeight', 'bloomTargetLevel']
+              }
+            },
+            createdAt: { type: Type.NUMBER }
+          },
+          required: ['id', 'sourceKey', 'kcs', 'createdAt']
+        }
+      }
+    });
+    if (!response.text) return null;
+    const parsed = JSON.parse(response.text) as LSAPContentMap;
+    if (!parsed.kcs?.length) return null;
+    parsed.createdAt = parsed.createdAt || Date.now();
+    return parsed;
+  } catch (e) {
+    console.error('generateLSAPContentMap Error:', e);
+    return null;
+  }
+};
+
+export interface LSAPProbeResult {
+  question: string;
+  sourceRef: string;
+}
+
+export const generateLSAPProbeQuestion = async (
+  docContent: string,
+  contentMap: LSAPContentMap,
+  kcId: string,
+  bloomLevel: number,
+  _conversationSoFar?: { role: string; text: string }[]
+): Promise<LSAPProbeResult | null> => {
+  try {
+    const kc = contentMap.kcs.find((k) => k.id === kcId);
+    if (!kc) return null;
+    const contentPart = getContentPart(docContent);
+    const prompt = `你正在根据讲义评估学生对某一考点的掌握程度。严格依据以下文档内容，不要自由发挥。
+
+当前考点：${kc.concept}
+定义：${kc.definition}
+布鲁姆层级：${bloomLevel}（1=记忆/理解，2=应用，3=分析/综合）
+讲义页码：${(kc.sourcePages || []).join(', ')}
+
+请生成一道开放式问答题（不要选择题），让学生用自己的话解释或应用该考点。题目必须与讲义内容直接相关，且能根据讲义判断对错。
+输出 JSON：{ "question": "题目内容", "sourceRef": "对应讲义页码或原文摘要，用于证据链" }`;
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            question: { type: Type.STRING },
+            sourceRef: { type: Type.STRING }
+          },
+          required: ['question', 'sourceRef']
+        }
+      }
+    });
+    if (!response.text) return null;
+    return JSON.parse(response.text) as LSAPProbeResult;
+  } catch (e) {
+    console.error('generateLSAPProbeQuestion Error:', e);
+    return null;
+  }
+};
+
+export type LSAPNextAction = 'level_up' | 'same_level_retry' | 'hint' | 'next_kc';
+
+export interface LSAPEvalResult {
+  correct: boolean | 'partial';
+  levelReached: number;
+  evidence: string;
+  conflictWithPage?: number;
+  nextAction: LSAPNextAction;
+}
+
+export const evaluateLSAPAnswer = async (
+  docContent: string,
+  kcId: string,
+  question: string,
+  userAnswer: string,
+  sourceRef: string
+): Promise<LSAPEvalResult | null> => {
+  try {
+    const contentPart = getContentPart(docContent);
+    const prompt = `你是阅卷人。严格依据以下文档（讲义）内容判断学生回答是否正确。不要引入文档外的标准。
+
+题目：${question}
+学生回答：${userAnswer}
+参考（讲义出处）：${sourceRef}
+
+判断要求：
+1. correct: 完全正确 true，部分正确 "partial"，错误 false
+2. levelReached: 学生实际达到的布鲁姆层级 1-3
+3. evidence: 一句话说明与讲义哪部分一致或冲突（用于证据链，如「与讲义第3页定义一致」）
+4. conflictWithPage: 若与讲义冲突，写出页码（数字），否则不填
+5. nextAction: 若正确且未到该考点目标层级则 "level_up"，错误则 "same_level_retry"，需提示则 "hint"，可测下一考点则 "next_kc"
+
+输出 JSON，键名与上述一致。`;
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            correct: { type: Type.STRING },
+            levelReached: { type: Type.INTEGER },
+            evidence: { type: Type.STRING },
+            conflictWithPage: { type: Type.INTEGER },
+            nextAction: { type: Type.STRING }
+          },
+          required: ['correct', 'levelReached', 'evidence', 'nextAction']
+        }
+      }
+    });
+    if (!response.text) return null;
+    const raw = JSON.parse(response.text) as { correct: string; levelReached: number; evidence: string; conflictWithPage?: number; nextAction: string };
+    const correctVal = raw.correct === 'true' || raw.correct === true ? true : raw.correct === 'partial' ? 'partial' : false;
+    return {
+      correct: correctVal,
+      levelReached: raw.levelReached ?? 1,
+      evidence: raw.evidence ?? '',
+      conflictWithPage: raw.conflictWithPage,
+      nextAction: (raw.nextAction as LSAPNextAction) || 'same_level_retry'
+    };
+  } catch (e) {
+    console.error('evaluateLSAPAnswer Error:', e);
+    return null;
+  }
+};
+
+/** 针对性教学：根据考点与评判证据，基于讲义生成讲解，并明确标出对应页码 */
+export const generateLSAPTargetedTeaching = async (
+  docContent: string,
+  kc: LSAPKnowledgeComponent,
+  evidence: string
+): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent);
+    const pages = (kc.sourcePages && kc.sourcePages.length > 0) ? kc.sourcePages.join('、') : '讲义中';
+    const prompt = `你是一位针对性的辅导老师。学生刚在考点「${kc.concept}」上回答有误或不够完整。评判反馈是：${evidence}
+
+请严格依据以下文档（讲义）内容，针对该考点做一段简短讲解（2～4 段），帮助学生补上缺口。要求：
+1. 只讲与「评判反馈」相关的部分，不要泛泛而谈。
+2. 必须明确写出「请重点看讲义第 X 页」或「见讲义第 X–Y 页」，与考点对应的页码为：${pages}。
+3. 用中文，语气友好，可直接指出「你漏掉了…」「这里需要区分…」。
+4. 不要编造，所有内容必须能在文档中找到依据。
+
+直接输出讲解正文（Markdown 可选），不要输出 JSON。`;
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }]
+    });
+    return response.text?.trim() || `请查看讲义第 ${pages} 页复习「${kc.concept}」。`;
+  } catch (e) {
+    console.error('generateLSAPTargetedTeaching Error:', e);
+    const pages = (kc.sourcePages && kc.sourcePages.length > 0) ? kc.sourcePages.join('、') : '—';
+    return `请查看讲义第 ${pages} 页复习「${kc.concept}」。\n\n（针对性讲解生成失败，请根据证据反馈自行对照讲义学习。）`;
+  }
+};
+
+/** 针对性教学内的追问：基于讲义与当前考点回答，直到学生理解 */
+export const answerLSAPTeachingQuestion = async (
+  docContent: string,
+  kc: LSAPKnowledgeComponent,
+  teachingContent: string,
+  conversationHistory: { role: 'user' | 'model'; text: string }[],
+  userQuestion: string
+): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent);
+    const historyText = conversationHistory.length
+      ? conversationHistory.map((m) => `${m.role === 'user' ? '学生' : '老师'}: ${m.text}`).join('\n')
+      : '';
+    const prompt = `你是针对「${kc.concept}」考点的辅导老师。学生正在看上面的针对性讲解，现在追问。
+
+${historyText ? `此前对话：\n${historyText}\n\n` : ''}学生问：${userQuestion}
+
+要求：严格依据以下文档（讲义）回答，不编造。可指出「见讲义第 X 页」。用中文，简短清晰。若学生已理解可肯定并小结。`;
+    const parts: { role: 'user' | 'model'; parts: { text: string }[] }[] = [
+      { role: 'user', parts: [contentPart, { text: `针对性讲解摘要：\n${teachingContent.slice(0, 2000)}\n\n---\n\n${prompt}` }] }
+    ];
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: parts
+    });
+    return response.text?.trim() || '请对照讲义再想想，或点击「查看讲义」看具体页码。';
+  } catch (e) {
+    console.error('answerLSAPTeachingQuestion Error:', e);
+    return '回答生成失败，请重试或直接查看讲义对应页码。';
   }
 };
 

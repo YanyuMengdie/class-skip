@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import type { User } from 'firebase/auth';
-import type { DailySegment, Exam, ExamMaterialLink, FilePersistedState, StudyFlowStep } from '../types';
+import type { Exam, ExamMaterialLink, FilePersistedState, StudyFlowStep } from '../types';
 import { listExams, listExamMaterialLinks } from '../services/firebase';
 import { ExamCenterPanel } from './ExamCenterPanel';
-import { DailyExamStudyPanel } from './DailyExamStudyPanel';
+import { ExamDailyMaintenancePanel } from './ExamDailyMaintenancePanel';
 import { StudyFlowPanel } from './StudyFlowPanel';
 
 type Tab = 'exams' | 'daily' | 'flow';
@@ -18,8 +18,9 @@ interface ExamHubModalProps {
   cloudSessionId: string | null;
   fileName: string | null;
   filePersistedState: FilePersistedState | null;
-  onNavigateSegment: (segment: DailySegment) => void;
   onExecuteFlowStep: (step: StudyFlowStep) => void;
+  onOpenReviewTool: (tool: 'examPrediction' | 'examSummary' | 'examTraps' | 'feynman' | 'flashcard' | 'quiz') => void;
+  onBuildMaintenanceContent: (links: ExamMaterialLink[]) => Promise<string>;
 }
 
 export const ExamHubModal: React.FC<ExamHubModalProps> = ({
@@ -31,8 +32,9 @@ export const ExamHubModal: React.FC<ExamHubModalProps> = ({
   cloudSessionId,
   fileName,
   filePersistedState,
-  onNavigateSegment,
   onExecuteFlowStep,
+  onOpenReviewTool,
+  onBuildMaintenanceContent,
 }) => {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [exams, setExams] = useState<Exam[]>([]);
@@ -98,15 +100,13 @@ export const ExamHubModal: React.FC<ExamHubModalProps> = ({
             />
           )}
           {tab === 'daily' && (
-            <DailyExamStudyPanel
+            <ExamDailyMaintenancePanel
               user={user}
-              onClose={onClose}
               exams={exams}
               materials={materials}
-              onNavigateSegment={(s) => {
-                onNavigateSegment(s);
-                onClose();
-              }}
+              onClose={onClose}
+              onOpenTool={onOpenReviewTool}
+              onBuildMergedContent={onBuildMaintenanceContent}
             />
           )}
           {tab === 'flow' && (

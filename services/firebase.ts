@@ -601,6 +601,7 @@ export const getDailyPlanCache = async (userId: string, dateStr: string): Promis
             generatedAt: typeof data.generatedAt === 'number' ? data.generatedAt : Date.now(),
             budgetMinutes: typeof data.budgetMinutes === 'number' ? data.budgetMinutes : 30,
             version: typeof data.version === 'number' ? data.version : 1,
+            maintenance: data.maintenance as DailyPlanCacheDoc['maintenance'] | undefined,
         };
     } catch (e) {
         console.error('getDailyPlanCache failed', e);
@@ -619,6 +620,7 @@ export const setDailyPlanCache = async (user: User, doc: Omit<DailyPlanCacheDoc,
         generatedAt: doc.generatedAt,
         budgetMinutes: doc.budgetMinutes,
         version: doc.version,
+        maintenance: doc.maintenance ?? null,
     });
 };
 

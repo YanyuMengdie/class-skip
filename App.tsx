@@ -43,7 +43,7 @@ import { startRecording, stopRecording, isTranscriptionSupported } from './servi
 import { storageService } from './services/storageService';
 import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, DailySegment, StudyFlowStep } from './types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, DailySegment, StudyFlowStep, ExamMaterialLink } from './types';
 import { Sparkles, X, ChevronDown, Loader2, Wand2 } from 'lucide-react';
 
 // #region agent log
@@ -799,22 +799,28 @@ const App: React.FC = () => {
       switch (seg.kind) {
         case 'slide_review':
           setViewMode('deep');
+          window.alert('已进入精读模式：先看当前页，再向右侧提问“先讲这页最核心的3点”。');
           break;
         case 'lsap_probe':
           setExamPredictionPanelOpen(true);
-          if (!seg.kcId) window.alert('未指定薄弱考点，请在考前预测中手动选择复习单元');
+          if (!seg.kcId) window.alert('已打开考前预测：请先手动选择一个单元进行探测。');
+          else window.alert('已打开考前预测：将优先带你做该薄弱考点探测。');
           break;
         case 'flashcard_batch':
           setReviewPanel('flashcard');
+          window.alert('已进入闪卡复习：先刷一轮，再标记不熟卡片。');
           break;
         case 'trap_review':
           setTrapListPanelOpen(true);
+          window.alert('已打开陷阱清单：先看最近错题，再针对性复习。');
           break;
         case 'feynman_chunk':
           setFeynmanPanelOpen(true);
+          window.alert('已进入费曼检验：先尝试口述，再根据反馈补缺。');
           break;
         case 'study_guide_section':
           setStudyGuidePanel(true);
+          window.alert('已打开学习指南：先完成一个小节，再回到今日学习选下一块。');
           break;
         default:
           setViewMode('deep');
@@ -919,6 +925,68 @@ const App: React.FC = () => {
       }
     }
   }, []);
+
+  const openReviewToolFromExamHub = useCallback((tool: 'examPrediction' | 'examSummary' | 'examTraps' | 'feynman' | 'flashcard' | 'quiz') => {
+    switch (tool) {
+      case 'examPrediction':
+        setExamPredictionInitialKCId(null);
+        setExamPredictionPanelOpen(true);
+        break;
+      case 'examSummary':
+        setExamSummaryPanelOpen(true);
+        break;
+      case 'examTraps':
+        setExamTrapsPanelOpen(true);
+        break;
+      case 'feynman':
+        setFeynmanPanelOpen(true);
+        break;
+      case 'flashcard':
+        setReviewPanel('flashcard');
+        break;
+      case 'quiz':
+        setReviewPanel('quiz');
+        break;
+      default:
+        break;
+    }
+  }, []);
+
+  const buildMaintenanceMergedContent = useCallback(async (links: ExamMaterialLink[]) => {
+    const blocks: string[] = [];
+    const sessionIds = Array.from(new Set(
+      links.filter((x) => x.sourceType === 'cloudSession' && x.cloudSessionId).map((x) => x.cloudSessionId!)
+    ));
+    const sessions = sessionIds.length > 0 && user ? await getUserSessions(user) : [];
+    const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+
+    for (const link of links) {
+      try {
+        if (link.sourceType === 'cloudSession' && link.cloudSessionId) {
+          const s = sessionMap.get(link.cloudSessionId);
+          if (!s?.fileUrl) continue;
+          const file = await fetchFileFromUrl(s.fileUrl, s.fileName || link.fileName || '云端文件.pdf');
+          const text = (await extractPdfText(file)).join('\n').trim();
+          if (text) blocks.push(`【${link.fileName || s.fileName || '材料'}】\n${text}`);
+          continue;
+        }
+        if (link.sourceType === 'fileHash' && link.fileHash) {
+          if (fileHash === link.fileHash && fullPdfText?.trim()) {
+            blocks.push(`【${link.fileName || fileName || '当前文件'}】\n${fullPdfText}`);
+            continue;
+          }
+          const localState = await storageService.getFileState(link.fileHash);
+          const fallbackText = localState?.state?.studyGuide?.content;
+          if (fallbackText?.trim()) {
+            blocks.push(`【${link.fileName || localState.name || '本地材料'}】\n${fallbackText}`);
+          }
+        }
+      } catch (e) {
+        console.warn('buildMaintenanceMergedContent: skip one link', e);
+      }
+    }
+    return blocks.join('\n\n-----\n\n').slice(0, 60000);
+  }, [user, fileHash, fullPdfText, fileName]);
 
   const filePersistedSnapshot: FilePersistedState | null = useMemo(() => {
     if (!fileHash && !fileName) return null;
@@ -1392,8 +1460,9 @@ const App: React.FC = () => {
           cloudSessionId={currentSessionId}
           fileName={fileName}
           filePersistedState={filePersistedSnapshot}
-          onNavigateSegment={navigateToSegment}
           onExecuteFlowStep={navigateStudyFlowStep}
+          onOpenReviewTool={openReviewToolFromExamHub}
+          onBuildMaintenanceContent={buildMaintenanceMergedContent}
         />
       )}
 
@@ -1512,7 +1581,7 @@ const App: React.FC = () => {
       {reviewModeChooserOpen && (
         <div className="fixed inset-0 z-[200] bg-black/30 flex items-center justify-center p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-xl border border-stone-200 max-w-lg w-full p-6 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-bold text-slate-800 mb-2">选择复习方式</h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-2">选择喜欢的学习方式</h3>
             <p className="text-sm text-slate-500 mb-4">基于 {combinedReviewFileName} 进行复习</p>
 
             <div className="space-y-4">
