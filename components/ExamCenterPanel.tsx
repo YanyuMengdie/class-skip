@@ -1,7 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { X, Plus, Trash2, Calendar, ChevronDown, ChevronRight, Link2 } from 'lucide-react';
 import type { User } from 'firebase/auth';
-import type { Exam, ExamMaterialLink } from '../types';
+import type { DisciplineBand, Exam, ExamMaterialLink } from '../types';
 import { createExam, deleteExam, removeExamMaterialLink, updateExam, addCalendarEvent } from '../services/firebase';
 import { ExamLinkModal } from './ExamLinkModal';
 
@@ -31,6 +31,7 @@ export const ExamCenterPanel: React.FC<ExamCenterPanelProps> = ({
   const [linkOpen, setLinkOpen] = useState(false);
   const [newExamTitle, setNewExamTitle] = useState('');
   const [newExamDate, setNewExamDate] = useState('');
+  const [newExamDiscipline, setNewExamDiscipline] = useState<DisciplineBand>('unspecified');
 
   const byExam = useMemo(() => {
     const m = new Map<string, ExamMaterialLink[]>();
@@ -75,7 +76,12 @@ export const ExamCenterPanel: React.FC<ExamCenterPanelProps> = ({
     if (!newExamTitle.trim()) return;
     try {
       const examAt = newExamDate ? new Date(newExamDate + 'T12:00:00').getTime() : null;
-      const exam = await createExam(user, { title: newExamTitle.trim(), examAt, color: '#6366f1' });
+      const exam = await createExam(user, {
+        title: newExamTitle.trim(),
+        examAt,
+        color: '#6366f1',
+        disciplineBand: newExamDiscipline,
+      });
       if (examAt != null) {
         const d = new Date(examAt);
         const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -94,6 +100,7 @@ export const ExamCenterPanel: React.FC<ExamCenterPanelProps> = ({
       }
       setNewExamTitle('');
       setNewExamDate('');
+      setNewExamDiscipline('unspecified');
       onRefresh();
     } catch (e) {
       alert(e instanceof Error ? e.message : '创建失败');
@@ -104,13 +111,18 @@ export const ExamCenterPanel: React.FC<ExamCenterPanelProps> = ({
     <div className="flex flex-col h-full min-h-0">
       <div className="flex items-center justify-between shrink-0 mb-3">
         <h2 className="text-lg font-bold text-slate-800">我的考试</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-center justify-end">
+          <p className="text-[10px] text-slate-500 max-w-[200px] leading-snug hidden xl:block" title="在弹窗中可从本地上传历史或云端选择 PDF">
+            支持本地历史与云端文件
+          </p>
           <button
             type="button"
             onClick={() => setLinkOpen(true)}
             className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-100 text-indigo-800 text-xs font-bold"
+            aria-label="关联材料：可选择本地上传历史、云端文件或当前打开的文件"
+            title="关联材料到考试：支持本地上传过的 PDF、云端文件、以及当前打开的文件"
           >
-            <Link2 className="w-3.5 h-3.5" /> 关联当前文件
+            <Link2 className="w-3.5 h-3.5" /> 关联材料
           </button>
           <button type="button" onClick={onClose} className="p-2 rounded-xl hover:bg-stone-100">
             <X className="w-5 h-5 text-stone-500" />
@@ -127,6 +139,18 @@ export const ExamCenterPanel: React.FC<ExamCenterPanelProps> = ({
             placeholder="标题，如期中考试"
             className="flex-1 min-w-[120px] border border-stone-200 rounded-lg px-3 py-2 text-sm"
           />
+          <select
+            value={newExamDiscipline}
+            onChange={(e) => setNewExamDiscipline(e.target.value as DisciplineBand)}
+            className="border border-stone-200 rounded-lg px-2 py-2 text-xs min-w-[140px]"
+            title="学科带（影响保温闪卡教学法）"
+          >
+            <option value="unspecified">学科：未设置</option>
+            <option value="humanities_social">文科与社会科学</option>
+            <option value="business_mgmt">商业与管理</option>
+            <option value="stem">STEM</option>
+            <option value="arts_creative">艺术与创意</option>
+          </select>
           <input
             type="date"
             value={newExamDate}
@@ -225,6 +249,7 @@ export const ExamCenterPanel: React.FC<ExamCenterPanelProps> = ({
         onClose={() => setLinkOpen(false)}
         exams={exams}
         onRefresh={onRefresh}
+        existingMaterials={materials}
         fileHash={fileHash}
         cloudSessionId={cloudSessionId}
         fileName={fileName ?? null}
@@ -242,12 +267,20 @@ const EditableExamMeta: React.FC<{
   const [dateStr, setDateStr] = useState(
     exam.examAt != null ? new Date(exam.examAt).toISOString().slice(0, 10) : ''
   );
+  const [disciplineBand, setDisciplineBand] = useState<DisciplineBand>(exam.disciplineBand ?? 'unspecified');
+
+  useEffect(() => {
+    setTitle(exam.title);
+    setDateStr(exam.examAt != null ? new Date(exam.examAt).toISOString().slice(0, 10) : '');
+    setDisciplineBand(exam.disciplineBand ?? 'unspecified');
+  }, [exam.id, exam.title, exam.examAt, exam.disciplineBand]);
 
   const save = async () => {
     try {
       await updateExam(user, exam.id, {
         title: title.trim() || exam.title,
         examAt: dateStr ? new Date(dateStr + 'T12:00:00').getTime() : null,
+        disciplineBand,
       });
       onSaved();
     } catch (e) {
@@ -262,6 +295,18 @@ const EditableExamMeta: React.FC<{
         onChange={(e) => setTitle(e.target.value)}
         className="border border-stone-200 rounded px-2 py-1 text-xs flex-1 min-w-[100px]"
       />
+      <select
+        value={disciplineBand}
+        onChange={(e) => setDisciplineBand(e.target.value as DisciplineBand)}
+        className="border border-stone-200 rounded px-2 py-1 text-xs min-w-[130px]"
+        title="学科带"
+      >
+        <option value="unspecified">学科：未设置</option>
+        <option value="humanities_social">文科与社会科学</option>
+        <option value="business_mgmt">商业与管理</option>
+        <option value="stem">STEM</option>
+        <option value="arts_creative">艺术与创意</option>
+      </select>
       <input
         type="date"
         value={dateStr}

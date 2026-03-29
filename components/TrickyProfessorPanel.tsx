@@ -1,15 +1,35 @@
 import React, { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 import { X, Loader2, GraduationCap } from 'lucide-react';
 import { generateTrickyQuestions } from '../services/geminiService';
+
+const MarkdownComponents: Components = {
+  h1: ({ node, ...props }) => <h1 className="text-xl font-bold text-slate-900 mt-6 mb-4 pb-2 border-b border-orange-100" {...props} />,
+  h2: ({ node, ...props }) => (
+    <h2 className="text-lg font-bold text-orange-800 mt-8 mb-3 first:mt-0 px-4 py-2.5 rounded-xl bg-orange-50 border border-orange-100" {...props} />
+  ),
+  h3: ({ node, ...props }) => <h3 className="text-base font-bold text-slate-700 mt-4 mb-2" {...props} />,
+  p: ({ node, ...props }) => <p className="mb-4 leading-7 text-slate-700" {...props} />,
+  ul: ({ node, ...props }) => <ul className="list-disc list-outside ml-5 space-y-2 my-4 text-slate-700 pl-1" {...props} />,
+  ol: ({ node, ...props }) => <ol className="list-decimal list-outside ml-5 space-y-2 my-4 text-slate-700 pl-1" {...props} />,
+  li: ({ node, ...props }) => <li className="leading-relaxed" {...props} />,
+  strong: ({ node, ...props }) => <strong className="font-bold text-orange-900 bg-orange-50/80 px-1 rounded" {...props} />,
+  blockquote: ({ node, ...props }) => (
+    <blockquote className="border-l-4 border-orange-300 pl-4 py-2 my-4 bg-amber-50/60 text-slate-600 rounded-r-lg text-sm leading-6" {...props} />
+  ),
+  code: ({ node, ...props }) => <code className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-sm font-mono" {...props} />,
+};
 
 interface TrickyProfessorPanelProps {
   onClose: () => void;
   pdfContent: string | null;
+  onGenerated?: (markdown: string) => void;
 }
 
-export const TrickyProfessorPanel: React.FC<TrickyProfessorPanelProps> = ({ onClose, pdfContent }) => {
+export const TrickyProfessorPanel: React.FC<TrickyProfessorPanelProps> = ({ onClose, pdfContent, onGenerated }) => {
   const [weakPoints, setWeakPoints] = useState('');
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,6 +45,7 @@ export const TrickyProfessorPanel: React.FC<TrickyProfessorPanelProps> = ({ onCl
     generateTrickyQuestions(pdfContent, weakPoints || undefined)
       .then((text) => {
         setMarkdown(text);
+        onGenerated?.(text);
       })
       .catch(() => {
         setError('生成失败，请重试');
@@ -46,7 +67,7 @@ export const TrickyProfessorPanel: React.FC<TrickyProfessorPanelProps> = ({ onCl
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+        <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 min-h-0">
           {!markdown ? (
             <>
               <p className="text-slate-600 text-sm">可选：描述你的薄弱点或易错章节，教授会针对这些地方出刁钻题。</p>
@@ -68,8 +89,13 @@ export const TrickyProfessorPanel: React.FC<TrickyProfessorPanelProps> = ({ onCl
             </>
           ) : (
             <>
-              <div className="prose prose-sm max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} className="text-slate-700">
+              <div className="prose prose-sm max-w-none prose-p:my-3 prose-headings:font-quicksand prose-li:my-1.5 prose-ul:my-3 prose-ol:my-3">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
+                  components={MarkdownComponents}
+                  className="text-slate-700"
+                >
                   {markdown}
                 </ReactMarkdown>
               </div>

@@ -4,7 +4,7 @@ import ReactMarkdown, { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { Sparkles, RefreshCw, Send, Image as ImageIcon, MessageSquare, X, Heart, HelpCircle, Highlighter, Plus, GripHorizontal, Move, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Sparkles, RefreshCw, Send, Image as ImageIcon, MessageSquare, X, Heart, HelpCircle, Highlighter, Plus, GripHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { plainTextToHtmlWithSupSub, normalizeSelectionText, dedupeHtml } from '../utils/textUtils';
 import { LoadingInteractiveContent } from './LoadingInteractiveContent';
@@ -412,15 +412,6 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
   }, [selectionRect]);
 
   // --- ACTION HANDLERS ---
-  
-  const handleDragStart = (e: React.DragEvent) => {
-      if (selectedText) {
-          // 同时传递纯文本和 HTML 格式；无 HTML 时用带上标/下标的转换，与「选中平移」格式一致
-          e.dataTransfer.setData("text/plain", selectedText);
-          e.dataTransfer.setData("text/html", selectedHtml || plainTextToHtmlWithSupSub(selectedText));
-          e.dataTransfer.effectAllowed = "copy";
-      }
-  };
 
   const handleAddToNotebook = (e: React.MouseEvent) => {
     e.preventDefault(); 
@@ -521,16 +512,6 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
             className="fixed z-[100] transform -translate-x-1/2 animate-in fade-in zoom-in-95 duration-150 flex items-center space-x-2"
             style={{ top: selectionRect.top, left: selectionRect.left }}
         >
-            <div 
-                draggable
-                onDragStart={handleDragStart}
-                className="flex items-center space-x-1 bg-slate-900 text-white px-3 py-1.5 rounded-full shadow-2xl ring-4 ring-white/50 cursor-grab active:cursor-grabbing hover:scale-105 transition-transform"
-                title="拖拽到左侧生成便签"
-            >
-                <Move className="w-3.5 h-3.5" />
-                <span className="text-xs font-bold whitespace-nowrap ml-1">拖拽便签</span>
-            </div>
-
             <button
                 onMouseDown={handleAddToNotebook}
                 className="flex items-center space-x-1 bg-amber-500 text-white px-3 py-1.5 rounded-full shadow-2xl ring-4 ring-white/50 hover:bg-amber-600 hover:scale-105 transition-all cursor-pointer"
@@ -540,7 +521,7 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
                 <span className="text-xs font-bold whitespace-nowrap ml-1">记笔记</span>
             </button>
             
-            <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-slate-900 absolute left-1/2 -translate-x-1/2 -bottom-2 pointer-events-none"></div>
+            <div className="w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] border-t-amber-500 absolute left-1/2 -translate-x-1/2 -bottom-2 pointer-events-none"></div>
         </div>
       )}
 

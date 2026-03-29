@@ -102,10 +102,10 @@ export const Notebook: React.FC<NotebookProps> = ({ fileName, notes, onUpdateNot
 
   return (
     <div className="w-full max-w-5xl mx-auto mb-24 px-4">
-      <div className="bg-white rounded-[40px] shadow-xl border border-stone-100 overflow-hidden relative">
+      <div className="bg-white rounded-2xl shadow-sm border border-stone-100 overflow-hidden relative">
         {/* Decorative Background */}
-        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full mix-blend-multiply filter blur-3xl opacity-50 -translate-y-1/4 translate-x-1/4 pointer-events-none"></div>
-        <div className="absolute bottom-0 left-0 w-80 h-80 bg-rose-50 rounded-full mix-blend-multiply filter blur-3xl opacity-40 translate-y-1/4 -translate-x-1/4 pointer-events-none"></div>
+        <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-50 rounded-full mix-blend-multiply filter blur-3xl opacity-40 -translate-y-1/4 translate-x-1/4 pointer-events-none"></div>
+        <div className="absolute bottom-0 left-0 w-80 h-80 bg-rose-50 rounded-full mix-blend-multiply filter blur-3xl opacity-30 translate-y-1/4 -translate-x-1/4 pointer-events-none"></div>
         
         {/* Header */}
         <div className="p-8 pb-4 border-b border-stone-50 flex items-center justify-between relative z-10">

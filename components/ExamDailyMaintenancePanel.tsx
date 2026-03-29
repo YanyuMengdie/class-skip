@@ -1,16 +1,22 @@
-import React, { useMemo, useState } from 'react';
-import { X, Loader2, Sparkles, ArrowRight } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { X, Loader2, Sparkles, ArrowRight, Wind } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import type {
   CachedMaintenanceBundle,
   Exam,
   ExamMaterialLink,
+  LearnerMood,
   MaintenanceFlashCard,
   QuizData,
 } from '../types';
 import { getDailyPlanCache, setDailyPlanCache } from '../services/firebase';
 import { generateMaintenanceFlashCards, generateQuizSet } from '../services/geminiService';
 import { evaluateMaintenanceEligibility } from '../utils/examMaintenanceEligibility';
+import {
+  aggregateUrgencyFromSelectedExams,
+  computeMaintenanceStrategy,
+  resolveDisciplineBandForMergedMaintenance,
+} from '../utils/maintenanceStrategy';
 import { MaintenanceFlashcardDeck } from './MaintenanceFlashcardDeck';
 import { MaintenanceFeedbackCelebration } from './MaintenanceFeedbackCelebration';
 import { buildFeedbackExitCopy, buildFeedbackStrongCopy } from '../data/maintenanceFeedbackCopy';
@@ -19,6 +25,7 @@ import type { FilePlanMeta } from '../utils/examSchedule';
 type Phase =
   | 'idle'
   | 'blocked_sprint'
+  | 'pre_breathe'
   | 'loading_cards'
   | 'cards'
   | 'continue_menu'
@@ -62,6 +69,7 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
   const [selectedExamIds, setSelectedExamIds] = useState<string[]>(() =>
     exams.filter((e) => e.examAt != null).map((e) => e.id)
   );
+  const [learnerMood, setLearnerMood] = useState<LearnerMood>('normal');
   const [flashCount, setFlashCount] = useState<number>(15);
   const [phase, setPhase] = useState<Phase>('idle');
   const [cards, setCards] = useState<MaintenanceFlashCard[]>([]);
@@ -99,6 +107,47 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
     return Math.max(1, Math.ceil((nearest - now) / 86400000));
   }, [exams, selectedExamIds]);
 
+  const maintenanceEligibility = useMemo(
+    () =>
+      evaluateMaintenanceEligibility({
+        now: new Date(),
+        exams,
+        selectedExamIds,
+        materialsByExamId: materialsByExam,
+        fileMeta,
+      }),
+    [exams, selectedExamIds, materialsByExam, fileMeta]
+  );
+
+  const aggregatedUrgency = useMemo(
+    () => aggregateUrgencyFromSelectedExams(exams, selectedExamIds),
+    [exams, selectedExamIds]
+  );
+
+  const maintenanceAllowed = maintenanceEligibility.allowedExamIds.length > 0;
+
+  const strategy = useMemo(
+    () =>
+      computeMaintenanceStrategy({
+        mood: learnerMood,
+        urgency: aggregatedUrgency,
+        maintenanceAllowed,
+      }),
+    [learnerMood, aggregatedUrgency, maintenanceAllowed]
+  );
+
+  const disciplineBandResolved = useMemo(() => {
+    const ids =
+      maintenanceEligibility.allowedExamIds.length > 0
+        ? maintenanceEligibility.allowedExamIds
+        : [...selectedExamIds].sort();
+    return resolveDisciplineBandForMergedMaintenance(exams, ids, materialsByExam, fileMeta);
+  }, [exams, maintenanceEligibility.allowedExamIds, selectedExamIds, materialsByExam, fileMeta]);
+
+  useEffect(() => {
+    setFlashCount(strategy.suggestedFlashCount);
+  }, [strategy.suggestedFlashCount]);
+
   const toggleExam = (id: string) => {
     setSelectedExamIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
@@ -119,7 +168,8 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
     return Array.from(new Set(out));
   };
 
-  const runGenerateCards = async () => {
+  const runGenerateCards = async (opts?: { skipBreathing?: boolean }) => {
+    const skipBreathing = opts?.skipBreathing ?? false;
     setError(null);
     if (selectedExamIds.length === 0) {
       setError('请先勾选至少一场考试');
@@ -149,15 +199,33 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
       return;
     }
 
+    if (!skipBreathing && strategy.showBreathingFirst) {
+      setPhase('pre_breathe');
+      return;
+    }
+
     setPhase('loading_cards');
     setLoadingText('正在整理材料并生成闪卡…');
     const examTitles = exams.filter((e) => eligibility.allowedExamIds.includes(e.id)).map((e) => e.title);
 
     const materialKeys = Array.from(new Set(allowedLinks.map(keyForMaterial))).sort();
-    const cacheKey = `${user.uid}_${dateStr}_${eligibility.allowedExamIds.slice().sort().join(',')}_${materialKeys.join('|')}_${flashCount}`;
+    const band = resolveDisciplineBandForMergedMaintenance(
+      exams,
+      eligibility.allowedExamIds,
+      materialsByExam,
+      fileMeta
+    );
+    const cacheKey = `${user.uid}_${dateStr}_${eligibility.allowedExamIds.slice().sort().join(',')}_${materialKeys.join('|')}_${flashCount}_${band}_${learnerMood}_${aggregatedUrgency}`;
     const existing = await getDailyPlanCache(user.uid, dateStr);
     const cached = existing?.maintenance;
-    if (cached && cached.cacheKey === cacheKey && cached.cards.length > 0) {
+    if (
+      cached &&
+      cached.cacheKey === cacheKey &&
+      cached.cards.length > 0 &&
+      cached.disciplineBand === band &&
+      cached.mood === learnerMood &&
+      cached.urgency === aggregatedUrgency
+    ) {
       setCards(cached.cards);
       setMergedContent(cached.mergedContent);
       setExamTitlesInSession(cached.examTitles);
@@ -178,6 +246,9 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
       count: flashCount,
       examTitles,
       weakConcepts: weakConcepts.length > 0 ? weakConcepts : undefined,
+      disciplineBand: band,
+      mood: learnerMood,
+      urgency: aggregatedUrgency,
     });
     if (generated.length === 0) {
       setPhase('idle');
@@ -200,6 +271,9 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
       cards: generated,
       mergedContent: merged,
       generatedAt: Date.now(),
+      disciplineBand: band,
+      mood: learnerMood,
+      urgency: aggregatedUrgency,
     };
     await setDailyPlanCache(user, {
       date: dateStr,
@@ -212,7 +286,7 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
     });
   };
 
-  const onFinishCards = () => setPhase('continue_menu');
+  const onFinishCards = () => setPhase(strategy.suggestQuiz ? 'quiz_setup' : 'continue_menu');
   const onExitToday = () => setPhase('feedback_exit');
   const onContinueStudy = () => setPhase('quiz_setup');
   const onOpenOtherTool = (tool: 'examPrediction' | 'examSummary' | 'examTraps' | 'feynman' | 'flashcard' | 'quiz') => {
@@ -266,11 +340,15 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
     examTitles: examTitlesInSession,
     cardCount: cards.length,
     daysToNearest,
+    variant: strategy.feedbackVariant,
+    mood: learnerMood,
   });
   const strongCopy = buildFeedbackStrongCopy({
     examTitles: examTitlesInSession,
     cardCount: cards.length,
     quizCount: quizItems.length,
+    variant: strategy.feedbackVariant,
+    mood: learnerMood,
   });
 
   return (
@@ -287,6 +365,35 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
 
       {(phase === 'idle' || phase === 'blocked_sprint') && (
         <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-3">
+          <div className="space-y-2">
+            <p className="text-xs font-bold text-slate-500">此刻心态（影响默认张数、语气与是否先呼吸）</p>
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ['normal', '正常'],
+                  ['dont_want', '不想学'],
+                  ['want_anxious', '想学但焦虑'],
+                ] as const
+              ).map(([v, label]) => (
+                <button
+                  key={v}
+                  type="button"
+                  onClick={() => setLearnerMood(v)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                    learnerMood === v ? 'bg-violet-600 text-white' : 'bg-stone-100 text-slate-600'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {daysToNearest != null && (
+              <p className="text-[11px] text-slate-500">距最近所选未来考试约 {daysToNearest} 天 · 紧迫度分桶已用于策略</p>
+            )}
+            {strategy.softTone && maintenanceAllowed && (
+              <p className="text-[11px] text-indigo-600">今日语气会偏温和、短句，减轻压力感。</p>
+            )}
+          </div>
           <div className="flex items-center gap-2 text-sm">
             <span className="font-semibold text-slate-700">目标闪卡数量</span>
             {[10, 15, 20].map((n) => (
@@ -330,11 +437,38 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
           {error && <p className="text-xs text-rose-600">{error}</p>}
           <button
             type="button"
-            onClick={runGenerateCards}
+            onClick={() => runGenerateCards()}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold"
           >
             <Sparkles className="w-4 h-4" /> 生成今日保温闪卡
           </button>
+        </div>
+      )}
+
+      {phase === 'pre_breathe' && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50/80 p-4 space-y-3">
+          <div className="flex items-center gap-2 text-sky-900 font-bold text-sm">
+            <Wind className="w-5 h-5" /> 先约 1 分钟呼吸 / 放松
+          </div>
+          <p className="text-sm text-sky-900/90 leading-relaxed">
+            慢慢吸气约 4 拍，稍停，再缓缓呼出。不必做得完美，只是让身体松一点。准备好再开始闪卡即可。
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => runGenerateCards({ skipBreathing: true })}
+              className="px-4 py-2 rounded-xl bg-sky-600 text-white text-sm font-bold"
+            >
+              我准备好了，生成闪卡
+            </button>
+            <button
+              type="button"
+              onClick={() => setPhase('idle')}
+              className="px-4 py-2 rounded-xl border border-sky-300 text-sky-800 text-sm"
+            >
+              返回
+            </button>
+          </div>
         </div>
       )}
 
@@ -385,8 +519,17 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
         <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-3">
           <p className="text-sm text-slate-700 font-medium">闪卡已完成。接下来你想：</p>
           <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={() => setPhase('quiz_setup')} className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm font-bold inline-flex items-center gap-1">
-              来几道测验 <ArrowRight className="w-4 h-4" />
+            <button
+              type="button"
+              onClick={() => setPhase('quiz_setup')}
+              className={`px-4 py-2 rounded-xl text-sm font-bold inline-flex items-center gap-1 ${
+                strategy.suggestQuiz
+                  ? 'bg-indigo-600 text-white ring-2 ring-indigo-300'
+                  : 'bg-stone-200 text-slate-700'
+              }`}
+            >
+              来几道测验 {strategy.suggestQuiz && <span className="text-[10px] font-normal opacity-90">（推荐）</span>}
+              <ArrowRight className="w-4 h-4" />
             </button>
             <button type="button" onClick={onExitToday} className="px-4 py-2 rounded-xl border border-stone-300 text-slate-700 text-sm">
               今天先到这里
@@ -406,6 +549,13 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
 
       {phase === 'quiz_setup' && (
         <div className="rounded-xl border border-stone-200 bg-white p-4 space-y-3">
+          <button
+            type="button"
+            onClick={() => setPhase('continue_menu')}
+            className="text-xs text-indigo-600 font-bold hover:underline"
+          >
+            ← 返回「接下来你想」菜单
+          </button>
           <p className="text-sm text-slate-700">设定测验题数（3-20）：</p>
           <div className="flex items-center gap-2">
             {[5, 10, 15].map((n) => (

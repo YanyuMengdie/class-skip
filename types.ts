@@ -9,12 +9,19 @@ export interface ExplanationCache {
   [slideId: string]: string;
 }
 
+/** 1-3：该轮助手回复绑定的检索白名单，用于解析 †chunkId† 与持久化留痕后恢复链钮 */
+export interface ExamChunkCitationSnapshot {
+  chunks: Record<string, { materialLinkId: string; page: number }>;
+}
+
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
   image?: string;
   timestamp: number;
   isQuiz?: boolean; // Flag for Phase 2 intercepts
+  /** 备考台：仅 model 消息；有快照时优先按 chunk 协议解析链钮 */
+  examChunkCitationSnapshot?: ExamChunkCitationSnapshot;
 }
 
 export interface ChatCache {
@@ -149,6 +156,18 @@ export interface MindMapEvaluateResult {
 }
 
 // --- L-SAP 考前预测 ---
+/** 隶属于某一 KC 的最小逻辑单元（用于「命题密度」与覆盖统计） */
+export interface LogicAtom {
+  id: string;
+  kcId: string;
+  label: string;
+  /** 一句说明，便于 UI 与后续对齐讲义 */
+  description: string;
+}
+
+/** 每个 KC 下原子覆盖：atomId -> 是否已在教学对话中被判定覆盖（M2 可全 false） */
+export type AtomCoverageByKc = Record<string, Record<string, boolean>>;
+
 /** 知识组件（考点） */
 export interface LSAPKnowledgeComponent {
   id: string;
@@ -160,6 +179,24 @@ export interface LSAPKnowledgeComponent {
   reviewFocus?: string;
   examWeight: number;
   bloomTargetLevel: number;
+  /** 备考工作台：该考点下的逻辑原子（与 bundle 一并持久化） */
+  atoms?: LogicAtom[];
+  /** P1：多份材料合并图谱时，标记来源考试材料 link（旧 bundle 无此字段） */
+  sourceLinkId?: string;
+  /** P1：来源文件名（展示/分组） */
+  sourceFileName?: string;
+}
+
+/** 某 KC 下、对话中自动收录的术语卡片（即时术语侧栏） */
+export interface KcGlossaryEntry {
+  id: string;
+  kcId: string;
+  /** 术语展示名（与粗体一致或规范化后） */
+  term: string;
+  /** 基于本场讲义与 KC 的短释义（1～3 句，中文） */
+  definition: string;
+  /** 可选：首次出现的对话时间戳 */
+  firstSeenAt?: number;
 }
 
 /** 考点图谱 */
@@ -438,6 +475,55 @@ export interface CalendarEvent {
     linkedExamId?: string;
 }
 
+/** P1：学科教学法分带（Firestore Exam.disciplineBand 可选） */
+export type DisciplineBand =
+  | 'humanities_social'
+  | 'business_mgmt'
+  | 'stem'
+  | 'arts_creative'
+  | 'unspecified';
+
+/** P1：保温流学习者心态 */
+export type LearnerMood = 'normal' | 'dont_want' | 'want_anxious';
+
+/** P1：保温正反馈语气变体 */
+export type MaintenanceFeedbackVariant = 'standard' | 'gentle' | 'celebrate_small';
+
+/** P4：学生上一轮表述质量（启发式 / LLM 分类） */
+export type LearnerTurnQuality = 'strong' | 'partial' | 'weak' | 'empty' | 'neutral';
+
+/** P4：本轮希望模型采取的策略 */
+export type ScaffoldingPhase =
+  | 'socratic_probe'
+  | 'light_hint'
+  | 'sub_questions'
+  | 'structured_explain';
+
+/** P4：传入 chatWithAdaptiveTutor / chatWithSlide 的支架上下文（略读 chatWithSkimAdaptiveTutor 不使用） */
+export interface TutorScaffoldingContext {
+  quality: LearnerTurnQuality;
+  phase: ScaffoldingPhase;
+  consecutiveWeakStreak: number;
+  totalUserTurns: number;
+}
+
+/** M3：在 KC 内的探测阶段 */
+export type SocraticProbeMode = 'direct' | 'stress' | 'remediate';
+
+/** M3：扩展 P4 支架上下文，供 chatWithAdaptiveTutor 在备考台「锚定 KC」时使用（略读不用） */
+export interface KCScopedTutorContext extends TutorScaffoldingContext {
+  kcId: string;
+  kcConcept: string;
+  kcDefinition: string;
+  /** 当前 KC 下的原子；可为空数组 */
+  atoms: LogicAtom[];
+  probeMode: SocraticProbeMode;
+  /** 当前追问目标布鲁姆层级（简化 1～3） */
+  bloomTarget: 1 | 2 | 3;
+  /** 可选：模型上一步推断的缺失原子 id */
+  gapAtomIds?: string[];
+}
+
 // --- 考试中心（Exam Hub）---
 export interface Exam {
   id: string;
@@ -447,6 +533,8 @@ export interface Exam {
   examAt: number | null;
   color?: string;
   notes?: string;
+  /** P1：显式学科带；未设置时保温流可回退 unspecified */
+  disciplineBand?: DisciplineBand;
   createdAt: number;
   updatedAt: number;
 }
@@ -464,6 +552,33 @@ export interface ExamMaterialLink {
   fileName: string;
   sortIndex?: number;
   addedAt: number;
+}
+
+/**
+ * 备考引用管线 1-1：单份 PDF 按页文本切块后的持久化单元（chunkId 稳定可复现）。
+ * chunkIndex：该页内从 0 递增；page：1-based，与 extractPdfText 数组下标满足 page === index + 1。
+ * **多材料（1-4）**：`materialLinkId` 编入 `chunkId`，故不同 PDF 的块互不冲突；检索与链钮均依赖该字段区分文件。
+ */
+export interface ExamMaterialTextChunk {
+  /** 稳定主键：`${materialLinkId}__p${page}__c${chunkIndex}`（多材料下由 materialLinkId 区分 PDF） */
+  chunkId: string;
+  materialLinkId: string;
+  examId: string;
+  page: number;
+  /** 该页内第几块，0-based */
+  chunkIndex: number;
+  /** 块内纯文本；生成时对 slice 做 trim，块与块之间可有重叠区字符重复 */
+  text: string;
+  createdAt?: number;
+}
+
+/** 备考引用 1-2：BM25 检索得到的候选块（score 越大越相关，见 utils/examChunkRetrieval 注释） */
+export interface RetrievedChunk {
+  chunk: ExamMaterialTextChunk;
+  /**
+   * Okapi BM25 原始分数（未做 0～1 归一化），仅保证同次检索内可排序比较、越大越相关。
+   */
+  score: number;
 }
 
 // --- 今日学习分段 ---
@@ -521,6 +636,10 @@ export interface CachedMaintenanceBundle {
   cards: MaintenanceFlashCard[];
   mergedContent: string;
   generatedAt: number;
+  /** P1：参与 cacheKey 的维度（旧缓存无此字段则视为不匹配） */
+  disciplineBand?: DisciplineBand;
+  mood?: LearnerMood;
+  urgency?: UrgencyBand;
 }
 
 export interface MaintenanceSessionState {

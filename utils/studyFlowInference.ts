@@ -1,4 +1,4 @@
-import type { Exam, ExamMaterialLink, FilePersistedState, LSAPState } from '../types';
+import type { Exam, ExamMaterialLink, FilePersistedState, LearnerMood, LSAPState } from '../types';
 import type { MaterialFamiliarity, UrgencyBand } from '../types';
 
 const DAY_MS = 86_400_000;
@@ -81,4 +81,20 @@ export function buildScenarioKey(
   affect: 'good' | 'tired' | 'anxious' = 'good'
 ): string {
   return `${familiarity}_${urgency}_${affect}`;
+}
+
+/** P1：情境模板键扩展为 LearnerMood（与旧 `affect` 命名空间区分） */
+export function buildExtendedScenarioKey(
+  familiarity: MaterialFamiliarity,
+  urgency: UrgencyBand,
+  mood: LearnerMood
+): string {
+  return `${familiarity}_${urgency}_${mood}`;
+}
+
+/** 与旧 `AffectState` 的对照：Study Flow 回退模板 / 文档说明用 */
+export function mapLearnerMoodToLegacyAffect(mood: LearnerMood): 'good' | 'tired' | 'anxious' {
+  if (mood === 'normal') return 'good';
+  if (mood === 'dont_want') return 'tired';
+  return 'anxious';
 }

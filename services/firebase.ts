@@ -29,7 +29,7 @@ import {
   enableIndexedDbPersistence 
 } from 'firebase/firestore';
 
-import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, Exam, ExamMaterialLink, DailyPlanCacheDoc, DailySegment } from '../types';
+import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, Exam, ExamMaterialLink, DailyPlanCacheDoc, DailySegment, type DisciplineBand } from '../types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC0_saRd3L2zIxOfG1FQinjYpyCGs_B9ls",
@@ -457,6 +457,19 @@ const examAtToMillis = (v: unknown): number | null => {
     return null;
 };
 
+const DISCIPLINE_VALUES: DisciplineBand[] = [
+  'humanities_social',
+  'business_mgmt',
+  'stem',
+  'arts_creative',
+  'unspecified',
+];
+
+function parseDisciplineBand(v: unknown): DisciplineBand | undefined {
+  if (typeof v !== 'string') return undefined;
+  return DISCIPLINE_VALUES.includes(v as DisciplineBand) ? (v as DisciplineBand) : undefined;
+}
+
 const examDocToExam = (id: string, data: Record<string, unknown>): Exam => ({
     id,
     userId: String(data.userId || ''),
@@ -464,6 +477,7 @@ const examDocToExam = (id: string, data: Record<string, unknown>): Exam => ({
     examAt: examAtToMillis(data.examAt),
     color: data.color != null ? String(data.color) : undefined,
     notes: data.notes != null ? String(data.notes) : undefined,
+    disciplineBand: parseDisciplineBand(data.disciplineBand),
     createdAt: examAtToMillis(data.createdAt) ?? Date.now(),
     updatedAt: examAtToMillis(data.updatedAt) ?? Date.now(),
 });
@@ -482,7 +496,7 @@ const materialDocToLink = (id: string, data: Record<string, unknown>): ExamMater
 
 export const createExam = async (
     user: User,
-    input: { title: string; examAt: number | null; color?: string; notes?: string }
+    input: { title: string; examAt: number | null; color?: string; notes?: string; disciplineBand?: DisciplineBand }
 ): Promise<Exam> => {
     const now = Timestamp.now();
     const examAtTs = input.examAt != null ? Timestamp.fromMillis(input.examAt) : null;
@@ -492,6 +506,7 @@ export const createExam = async (
         examAt: examAtTs,
         color: input.color ?? '#6366f1',
         notes: input.notes?.trim() ?? '',
+        disciplineBand: input.disciplineBand && input.disciplineBand !== 'unspecified' ? input.disciplineBand : 'unspecified',
         createdAt: now,
         updatedAt: now,
     };
@@ -502,7 +517,7 @@ export const createExam = async (
 export const updateExam = async (
     user: User,
     examId: string,
-    partial: Partial<Pick<Exam, 'title' | 'examAt' | 'color' | 'notes'>>
+    partial: Partial<Pick<Exam, 'title' | 'examAt' | 'color' | 'notes' | 'disciplineBand'>>
 ): Promise<void> => {
     const ref = doc(db, 'exams', examId);
     const snap = await getDoc(ref);
@@ -512,6 +527,9 @@ export const updateExam = async (
     if (partial.examAt !== undefined) u.examAt = partial.examAt != null ? Timestamp.fromMillis(partial.examAt) : null;
     if (partial.color != null) u.color = partial.color;
     if (partial.notes != null) u.notes = partial.notes;
+    if (partial.disciplineBand !== undefined) {
+        u.disciplineBand = partial.disciplineBand === 'unspecified' ? 'unspecified' : partial.disciplineBand;
+    }
     await updateDoc(ref, u);
 };
 

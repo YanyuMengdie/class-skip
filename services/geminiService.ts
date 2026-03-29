@@ -1,6 +1,9 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent } from "../types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, ExamMaterialLink, RetrievedChunk } from "../types";
+import { buildDialogueTeachingSystemPrompt } from "../data/disciplineTeachingProfiles";
+import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "../data/scaffoldingPrompt";
+import { heuristicQuality } from "../utils/scaffoldingClassifier";
 import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "../utils/prompts";
 
 // Ensure API Key exists or fail gracefully in logs (though process.env check is assumed handled elsewhere)
@@ -37,6 +40,60 @@ const getContentPart = (docContent: string) => {
   const safeText = docContent ? docContent.slice(0, 40000) : "Warning: No document content provided.";
   return { text: `DOCUMENT CONTENT:\n${safeText}` };
 };
+
+/**
+ * 备考工作台：按「单份关联材料」调用 KC 图谱时使用。
+ * 上限 120000 字符：仅作用于该路径，避免与全局 getContentPart(40000) 一样在单份长讲义中过早截断；
+ * 其它功能（分类、考前预测单文件等）仍走 getContentPart，不受影响。
+ */
+const LSAP_WORKSPACE_CHUNK_MAX_CHARS = 120_000;
+
+const getContentPartForWorkspaceChunk = (docContent: string) => {
+  if (docContent && docContent.startsWith('data:')) {
+    const matches = docContent.match(/^data:([^;]+);base64,(.+)$/);
+    if (matches && matches.length === 3) {
+      return {
+        inlineData: {
+          mimeType: matches[1],
+          data: matches[2],
+        },
+      };
+    }
+  }
+  const safeText = docContent ? docContent.slice(0, LSAP_WORKSPACE_CHUNK_MAX_CHARS) : 'Warning: No document content provided.';
+  return { text: `DOCUMENT CONTENT:\n${safeText}` };
+};
+
+/** 逻辑原子等：可指定正文上限，避免与全局 getContentPart(40000) 绑死 */
+const getContentPartWithMaxChars = (docContent: string, maxChars: number) => {
+  if (docContent && docContent.startsWith('data:')) {
+    const matches = docContent.match(/^data:([^;]+);base64,(.+)$/);
+    if (matches && matches.length === 3) {
+      return {
+        inlineData: {
+          mimeType: matches[1],
+          data: matches[2],
+        },
+      };
+    }
+  }
+  const safeText = docContent ? docContent.slice(0, maxChars) : 'Warning: No document content provided.';
+  return { text: `DOCUMENT CONTENT:\n${safeText}` };
+};
+
+/** 备考工作台按材料抽原子：单讲可用更大上限（与 P1 KC 单份 120000 对齐）；未传则 40000 与历史行为一致 */
+export interface GenerateLogicAtomsForContentMapOptions {
+  maxDocChars?: number;
+  /** true：prompt 中「合并讲义」改为「本份关联材料全文」 */
+  perMaterial?: boolean;
+}
+
+/** generateLSAPContentMap 可选模式；默认 legacy 与历史行为一致 */
+export type GenerateLSAPContentMapMode = 'legacy' | 'workspaceChunk';
+
+export interface GenerateLSAPContentMapOptions {
+  mode?: GenerateLSAPContentMapMode;
+}
 
 /**
  * Clean JSON string aggressively
@@ -79,6 +136,60 @@ export const classifyDocument = async (docContent: string): Promise<DocType> => 
     return 'STEM';
   }
 };
+
+/**
+ * P4：可选 LLM 学生单轮质量分类（便宜模型 + JSON）。失败时回退 heuristicQuality。
+ * 不返回 neutral。
+ */
+export async function classifyLearnerTurn(
+  shortText: string
+): Promise<Exclude<LearnerTurnQuality, 'neutral'>> {
+  const t = shortText.trim().slice(0, 2000);
+  if (!t) return 'empty';
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `你是教学对话分析器。根据下面「学生一句话」，判断其表述质量档位（仅 JSON，不要其他文字）。
+
+档位说明：
+- strong：论述较完整、有推理或结构
+- partial：有一定内容但明显不完整或缺推理链
+- weak：过短、敷衍或信息极少
+- empty：几乎无实质内容
+
+学生表述：
+${t}`,
+            },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            quality: {
+              type: Type.STRING,
+              enum: ['strong', 'partial', 'weak', 'empty'],
+            },
+          },
+          required: ['quality'],
+        },
+      },
+    });
+    const parsed = JSON.parse(response.text || '{}') as { quality?: string };
+    const q = parsed.quality;
+    if (q === 'strong' || q === 'partial' || q === 'weak' || q === 'empty') return q;
+  } catch (e) {
+    console.warn('classifyLearnerTurn failed', e);
+  }
+  return heuristicQuality(t) as Exclude<LearnerTurnQuality, 'neutral'>;
+}
 
 /** 根据上课转写全文，用 Gemini 整理：讲课逻辑、重点、老师风格、以及如何理解这篇 lecture */
 export const organizeLectureFromTranscript = async (transcript: string): Promise<string> => {
@@ -271,7 +382,9 @@ export const chatWithSlide = async (
   newMessage: string,
   userImageBase64?: string,
   mode: 'standard' | 'galgame' = 'standard',
-  persona?: PersonaSettings
+  persona?: PersonaSettings,
+  disciplineBand: DisciplineBand = 'unspecified',
+  scaffolding?: TutorScaffoldingContext
 ): Promise<string> => {
   try {
     const parts = slideImageBase64.split(',');
@@ -308,7 +421,12 @@ export const chatWithSlide = async (
       contents.push({ role: msg.role, parts: parts });
     });
 
-    const currentParts: any[] = [{ text: newMessage }];
+    let messageForModel = newMessage;
+    if (mode === 'standard' && scaffolding) {
+      messageForModel = `${newMessage}\n\n${buildScaffoldingTurnDirective(scaffolding)}`;
+    }
+
+    const currentParts: any[] = [{ text: messageForModel }];
     if (userImageBase64) {
       const uParts = userImageBase64.split(',');
       const uImgData = uParts[1];
@@ -320,17 +438,23 @@ export const chatWithSlide = async (
     let systemPrompt = "";
     
     if (mode === 'galgame' && persona) {
-        // DYNAMIC PERSONA PROMPT
-        systemPrompt = getPersonaSystemPrompt(persona);
+        // Galgame：保留角色扮演，不套完整苏格拉底长指令，仅锚定幻灯片
+        systemPrompt = `${getPersonaSystemPrompt(persona)}
+
+【内容锚定】请仅依据当前幻灯片画面可见的信息作答；不要编造画面中未出现的内容。数学公式用 LaTeX $...$ / $$...$$。`;
     } else {
-        // STANDARD TUTOR PROMPT
-        systemPrompt = `You are a helpful study assistant. 
-        # VISUAL LOGIC PROTOCOL (No Code Blocks)
-        1. **Trigger**: When explaining complex logic (e.g., A leads to B which inhibits C).
-        2. **Prohibition**: DO NOT use raw code blocks like Mermaid or Graphviz.
-        3. **Solution**: Use **Emoji Flows**.
-           - Example: **[ Glucose ]** ➔ 🟢 **[ Insulin ]** ➔ 📉 **[ Blood Sugar ]**
-        4. **Style**: Magazine-style readability. No technical jargon dumping.`;
+        const pedagogy = buildDialogueTeachingSystemPrompt(disciplineBand);
+        const visualBlock = `# 幻灯片辅助说明（与教学法叠加）
+# VISUAL LOGIC PROTOCOL (No Code Blocks)
+1. **Trigger**: When explaining complex logic (e.g., A leads to B which inhibits C).
+2. **Prohibition**: DO NOT use raw code blocks like Mermaid or Graphviz.
+3. **Solution**: Use **Emoji Flows**.
+   - Example: **[ Glucose ]** ➔ 🟢 **[ Insulin ]** ➔ 📉 **[ Blood Sugar ]**
+4. **Style**: Magazine-style readability. No technical jargon dumping.`;
+        systemPrompt = `${pedagogy}\n\n${visualBlock}`;
+        if (scaffolding) {
+          systemPrompt += getScaffoldingSystemAddendum();
+        }
     }
 
     const config: any = {
@@ -1025,10 +1149,40 @@ export const generateFlashCards = async (
   }
 };
 
+function maintenanceMoodInstruction(mood: LearnerMood): string {
+  if (mood === 'dont_want') {
+    return '【心态】学习者此刻不太想学习：请用更短句、降低压迫感；强调可随时停下、少量即可；不要堆叠任务感。';
+  }
+  if (mood === 'want_anxious') {
+    return '【心态】学习者想学但焦虑：请强调小步、可控、过程导向；避免评价其能力；语气稳定、支持性。';
+  }
+  return '【心态】学习者状态正常：保持清晰、可执行的复习语气即可。';
+}
+
+function maintenanceUrgencyInstruction(urgency: UrgencyBand): string {
+  if (urgency === 'd1_2') {
+    return '【紧迫度】约 1–2 天内考试：略提高「高频考点 / 必记事实」在整批闪卡中的比例（仍遵守 JSON 结构）。';
+  }
+  if (urgency === 'd3_7') {
+    return '【紧迫度】约 3–7 天：平衡高频与易混点。';
+  }
+  if (urgency === 'd8_plus') {
+    return '【紧迫度】8 天以上：可略增加结构梳理类记忆点，仍保持闪卡可快速过。';
+  }
+  return '【紧迫度】无明确近期考试：以维持手感与关键术语为主。';
+}
+
 /** 低压保温流：按考试维持记忆的闪卡（10-20张） */
 export const generateMaintenanceFlashCards = async (
   docContent: string,
-  options: { count: number; examTitles: string[]; weakConcepts?: string[] }
+  options: {
+    count: number;
+    examTitles: string[];
+    weakConcepts?: string[];
+    disciplineBand: DisciplineBand;
+    mood: LearnerMood;
+    urgency: UrgencyBand;
+  }
 ): Promise<Array<{ front: string; back: string }>> => {
   try {
     const contentPart = getContentPart(docContent.slice(0, 60000));
@@ -1036,6 +1190,15 @@ export const generateMaintenanceFlashCards = async (
       options.weakConcepts && options.weakConcepts.length > 0
         ? `\n优先覆盖这些薄弱概念：${options.weakConcepts.slice(0, 12).join('、')}。`
         : '';
+    // P2：保温闪卡为「记忆向」；苏格拉底式深度教学在对话层（备考台 / adaptive tutor），此处不收学科长指令。
+    const metaLine = {
+      disciplineBand: options.disciplineBand,
+      mood: options.mood,
+      urgency: options.urgency,
+    };
+    if (import.meta.env?.DEV) {
+      console.debug('[generateMaintenanceFlashCards] P1 prompt context', metaLine);
+    }
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-preview',
       contents: [
@@ -1045,11 +1208,13 @@ export const generateMaintenanceFlashCards = async (
             contentPart,
             {
               text: `你是记忆维持教练。以下内容来自考试：${options.examTitles.join(' / ')}。
+${maintenanceMoodInstruction(options.mood)}
+${maintenanceUrgencyInstruction(options.urgency)}
 请生成 ${options.count} 张中文闪卡，用于「低压记忆维持」。
 要求：
-1) 覆盖高频概念、易混点与必须记忆的事实；
-2) front 简洁明确，back 直接可复习；
-3) 避免过长解释，优先可提取记忆点。${weakPart}
+1) 以高频概念、易混点、必须记忆的事实为主；front/back 短而可检索；
+2) 不要做「对话式追问教学」——那是备考台苏格拉底对话的职责；
+3) front 简洁明确，back 直接可复习。${weakPart}
 
 仅返回 JSON：{ "cards": [ { "front": "...", "back": "..." } ] }`,
             },
@@ -1639,20 +1804,182 @@ export const generateTrickyQuestions = async (docContent: string, weakPoints?: s
   }
 };
 
+/** P1：备考台讲义引用 — 附在用户轮末尾，约束模型输出可解析的 citations JSON */
+export function buildExamWorkspaceCitationInstruction(materials: ExamMaterialLink[]): string {
+  if (!materials.length) return '';
+  const lines = materials
+    .map((m) => `- materialId: \`${m.id}\` ｜ fileName: ${(m.fileName || '未命名').replace(/\s+/g, ' ').trim()}`)
+    .join('\n');
+  return `
+
+【本场关联材料清单（用于讲义页码引用）】
+下列 materialId 必须与引用时完全一致；**禁止**编造未出现在清单中的 materialId；无法确定页码时不要写入 citations。
+${lines}
+
+【回复末尾必须附机器可解析的引用（JSON）】
+在 Markdown 正文全部输出完毕后，**单独**追加一个 fenced 代码块：语言标记为 json，且**仅**包含下列结构（page 为 **1-based** 页码，与讲义预览一致）：
+- **P3 增强（可选，与旧版兼容）**：每条引用可含 \`paragraphIndex\`（**0-based** 整数）：按正文渲染顺序，依次为每个块级元素编号——段落 \`p\`、标题 \`h1\`–\`h6\`、**每个** \`li\`、\`blockquote\`、\`pre\` 各占一个编号；请保证该索引与引用所依据的**那一段正文**一致。
+- 可选 \`quote\`：从讲义中摘录的**短句**（≤120 字，须真实存在），用于侧栏 PDF 文本高亮；**禁止**编造讲义中不存在的句子。
+\`\`\`json
+{
+  "citations": [
+    { "materialId": "<materialId>", "page": 3, "paragraphIndex": 2, "quote": "讲义中的原文片段…" }
+  ]
+}
+\`\`\`
+若本轮无可靠页码或材料对应关系，请使用 "citations": []；不要猜测页码。无把握时不要填写 paragraphIndex 或 quote。
+`;
+}
+
+/**
+ * 备考引用 1-3：向用户轮追加 chunk 白名单与 †chunkId† 协议（仅摘要，不塞全文）。
+ * 当本附录非空时，chatWithAdaptiveTutor **不再**附加旧版 buildExamWorkspaceCitationInstruction。
+ */
+export function buildExamChunkCitationAppendix(candidates: RetrievedChunk[]): string {
+  if (!candidates.length) return '';
+  const exampleId = candidates[0]!.chunk.chunkId;
+  const lines = candidates
+    .map((r) => {
+      const id = r.chunk.chunkId;
+      const sum = r.chunk.text.replace(/\s+/g, ' ').trim().slice(0, 80);
+      return `- \`${id}\` ｜ ${sum}`;
+    })
+    .join('\n');
+
+  return `
+
+【讲义定位引用（检索白名单 · 必须遵守）】
+以下为**本轮**检索到的讲义片段 id（**仅允许**引用下列 id；**禁止**编造 id、禁止编造 materialId 或页码）。
+每一行：chunkId 与不超过 80 字的摘要（摘要仅协助对齐语义，**不要**在正文中复述全文）。
+
+${lines}
+
+【引用暗号（必须）】
+- 在正文中需要指向讲义时，使用 **†chunkId†**（字符 † 为 U+2020 DAGGER，一对包裹**完整** chunkId；chunkId 内**不得**含 †）。
+- 示例：正如 †${exampleId}† 中的表述…
+- **不要**使用旧版文末 \`\`\`json\` 的 \`citations\` 块；本轮仅以 chunkId 为准。
+- **不要**编造未出现在上方列表中的 id。
+
+若本轮无法关联到任何白名单片段，则**不要**输出任何 † 引用，也不要猜测页码。
+`;
+}
+
+function isKCScopedTutorContext(
+  scaffolding: TutorScaffoldingContext | KCScopedTutorContext | undefined
+): scaffolding is KCScopedTutorContext {
+  return (
+    !!scaffolding &&
+    typeof scaffolding === 'object' &&
+    'kcId' in scaffolding &&
+    typeof (scaffolding as KCScopedTutorContext).kcId === 'string' &&
+    (scaffolding as KCScopedTutorContext).kcId.length > 0
+  );
+}
+
+/** M3：备考台锚定 KC 时附在用户消息末尾（在 P4 元指令之后） */
+function buildKCScopedTutorAppendix(ctx: KCScopedTutorContext): string {
+  const atomLines = (ctx.atoms ?? [])
+    .slice(0, 32)
+    .map((a) => `- ${a.id}: ${a.label}`)
+    .join('\n');
+  const gapPart =
+    ctx.gapAtomIds && ctx.gapAtomIds.length > 0
+      ? `\n【待加强原子（上一轮分析）】${ctx.gapAtomIds.join('、')}`
+      : '';
+
+  const modeHint =
+    ctx.probeMode === 'direct'
+      ? `【探测模式·direct】正面探测：引导学生用简短语言解释机制或定义；不要先给长篇讲义。`
+      : ctx.probeMode === 'stress'
+        ? `【探测模式·stress】必须构造一个与讲义一致的**违背场景或小反例**，区分背诵与真正理解；篇幅仍须遵守上方「本轮辅导元指令」。`
+        : `【探测模式·remediate】针对未说清处补追问或小线索；可优先围绕下方待加强原子。`;
+
+  return `
+
+【M3·本场锚定考点（本轮只讨论此 KC）】
+- 考点：${ctx.kcConcept}
+- 定义摘要：${(ctx.kcDefinition || '').slice(0, 500)}
+- 布鲁姆追问目标层级：${ctx.bloomTarget}（1=记忆/理解，2=应用，3=分析/综合）
+${modeHint}
+${gapPart}
+
+【本考点逻辑原子 id 清单】
+${atomLines || '（暂无原子，仅围绕考点概念讨论）'}
+
+【Markdown 与考点释义侧栏】
+请使用 Markdown；双星号粗体 **...** 仅用于本学科专有名词、术语、符号名、标准缩写等；不要用粗体强调普通词汇、整句或修辞性强调（否则会被侧栏误收为术语）。
+`;
+}
+
+/**
+ * reading 模式下对用户本轮消息的追加（略读 / 备考 reading 共用）。
+ * - `moduleCount`(2–8) 与 `studyMapBriefing`（trim 非空）**可同时存在**：先拼模块数段，再拼「必须一致」+ 地图正文；**禁止**二选一。
+ * - 仅有其一时与旧行为一致；二者皆无时由 `skimGranularity` 兜底（与旧「第三分支」一致）。
+ */
+export function appendReadingModeUserMessageSuffix(
+  newMessage: string,
+  readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number }
+): string {
+  if (!readingOptions) {
+    return newMessage;
+  }
+  const n = readingOptions.moduleCount;
+  const hasModuleCount = typeof n === 'number' && n >= 2 && n <= 8;
+  const brief = readingOptions.studyMapBriefing?.trim();
+
+  let out = newMessage;
+
+  if (hasModuleCount) {
+    out += `\n\n【领读模块数】请将文档拆解为 ${n} 个大模块后再输出逻辑路线图与带读。本次要求：${n} 个模块。`;
+  }
+  if (brief) {
+    out +=
+      "\n\n【必须一致】当前学习地图的模块划分如下，请严格按相同模块数量与结构进行深度领读，不要自行改为其他模块数：\n\n" +
+      brief;
+  }
+  if (!hasModuleCount && !brief && readingOptions.skimGranularity) {
+    out +=
+      "\n\n【领读模块数】请将文档拆解为以下数量的大模块后再输出逻辑路线图与带读：fine 为 5-7 个，standard 为 3-5 个，coarse 为 2-3 个。本次要求：" +
+      readingOptions.skimGranularity +
+      "。";
+  }
+  return out;
+}
+
+/**
+ * 备考工作台苏格拉底对话等：**教学法** `buildDialogueTeachingSystemPrompt` + docFlavor + 模式提示；可叠加
+ * `scaffolding`、KC 附录、备考材料 citations / chunk 白名单等。**不要**用于略读 `SkimPanel`（略读请用 `chatWithSkimAdaptiveTutor`）。
+ */
 export const chatWithAdaptiveTutor = async (
     docContent: string,
     history: ChatMessage[],
     newMessage: string,
     mode: 'tutoring' | 'reading',
     docType: DocType = 'STEM',
-    readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number }
+    readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number },
+    disciplineBand: DisciplineBand = 'unspecified',
+    scaffolding?: TutorScaffoldingContext | KCScopedTutorContext,
+    /** P1：备考台传入本场材料时，追加 citations JSON 协议（略读走 `chatWithSkimAdaptiveTutor`，不经过此参数） */
+    examWorkspaceMaterials?: ExamMaterialLink[],
+    /** 1-3：非空时优先使用 chunk 白名单 + †chunkId† 协议，**不**再附加旧版 citations JSON */
+    examChunkCitationAppendix?: string | null
 ): Promise<string> => {
     try {
         const contentPart = getContentPart(docContent);
         const contents = [];
-        const adaptiveSystemPrompt = docType === 'HUMANITIES' 
-            ? HUMANITIES_SYSTEM_PROMPT 
-            : STEM_SYSTEM_PROMPT;
+        const base = buildDialogueTeachingSystemPrompt(disciplineBand);
+        const docFlavor =
+            docType === 'HUMANITIES'
+                ? '\n\n【材料类型辅助】文本偏文科/论证类：关注论点、前提、概念辨析与理论适用边界。'
+                : '\n\n【材料类型辅助】文本偏理科/机制类：关注变量关系、因果链、边界条件与反事实推理。';
+        const modeHint =
+            mode === 'tutoring'
+                ? '\n\n【当前模式】递归式辅导：以苏格拉底式对话为主，先问后讲，必要时再给结构化讲解。'
+                : '\n\n【当前模式】深度领读：按用户要求拆解模块、逐段讲解；仍需遵守上文「锚定课程」与支架式原则。';
+        let adaptiveSystemPrompt = `${base}${docFlavor}${modeHint}`;
+        if (scaffolding) {
+            adaptiveSystemPrompt += getScaffoldingSystemAddendum();
+        }
 
         contents.push({
             role: 'user',
@@ -1666,16 +1993,24 @@ export const chatWithAdaptiveTutor = async (
             contents.push({ role: msg.role, parts: [{ text: msg.text }] });
         });
 
-        let finalMessage = newMessage;
-        if (mode === 'reading' && readingOptions) {
-            const n = readingOptions.moduleCount;
-            if (typeof n === 'number' && n >= 2 && n <= 8) {
-                finalMessage = newMessage + `\n\n【领读模块数】请将文档拆解为 ${n} 个大模块后再输出逻辑路线图与带读。本次要求：${n} 个模块。`;
-            } else if (readingOptions.studyMapBriefing?.trim()) {
-                finalMessage = newMessage + "\n\n【必须一致】当前学习地图的模块划分如下，请严格按相同模块数量与结构进行深度领读，不要自行改为其他模块数：\n\n" + readingOptions.studyMapBriefing.trim();
-            } else if (readingOptions.skimGranularity) {
-                finalMessage = newMessage + "\n\n【领读模块数】请将文档拆解为以下数量的大模块后再输出逻辑路线图与带读：fine 为 5-7 个，standard 为 3-5 个，coarse 为 2-3 个。本次要求：" + readingOptions.skimGranularity + "。";
-            }
+        let finalMessage =
+          mode === 'reading' && readingOptions
+            ? appendReadingModeUserMessageSuffix(newMessage, readingOptions)
+            : newMessage;
+        if (scaffolding) {
+            finalMessage = finalMessage + '\n\n' + buildScaffoldingTurnDirective(scaffolding);
+        }
+        if (isKCScopedTutorContext(scaffolding)) {
+            finalMessage = finalMessage + buildKCScopedTutorAppendix(scaffolding);
+        }
+        /**
+         * 1-3 / 1-4：`examChunkCitationAppendix` 与 `buildExamWorkspaceCitationInstruction` **互斥**（if / else）。
+         * 有 chunk 附录时仅用 †chunkId†；无附录（无索引、检索空、检索失败）且仍有材料时沿用旧版文末 citations JSON；**禁止** 同时注入两套协议。
+         */
+        if (examChunkCitationAppendix && examChunkCitationAppendix.trim()) {
+            finalMessage = finalMessage + examChunkCitationAppendix;
+        } else if (examWorkspaceMaterials && examWorkspaceMaterials.length > 0) {
+            finalMessage = finalMessage + buildExamWorkspaceCitationInstruction(examWorkspaceMaterials);
         }
         contents.push({ role: 'user', parts: [{ text: finalMessage }] });
 
@@ -1691,6 +2026,75 @@ export const chatWithAdaptiveTutor = async (
         return "通信中断，请重试。";
     }
 };
+
+function isAbortLikeError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') return true;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'name' in error &&
+    (error as { name: string }).name === 'AbortError'
+  );
+}
+
+/**
+ * 略读 / 智能导读专用：仅 `SkimPanel` 等入口应调用；`systemInstruction` 为 `utils/prompts.ts` 的
+ * `STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT`（按 `docType`）。**无**备考 citations、chunk、KC、支架附录。
+ * reading 模式下的用户句追加与 `appendReadingModeUserMessageSuffix` 对齐（与 `chatWithAdaptiveTutor` 内 reading 分支一致）。
+ *
+ * `abortSignal`：传入 `AbortController.signal`（`@google/genai` 在 `GenerateContentConfig.abortSignal` 中支持），用户取消时抛出可识别的 abort 错误，由 UI 静默处理、不追加助手消息。
+ */
+export async function chatWithSkimAdaptiveTutor(
+  docContent: string,
+  history: ChatMessage[],
+  newMessage: string,
+  mode: 'tutoring' | 'reading',
+  docType: DocType = 'STEM',
+  readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number },
+  abortSignal?: AbortSignal
+): Promise<string> {
+  try {
+    const contentPart = getContentPart(docContent);
+    const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> }> = [];
+    const systemInstruction = docType === 'HUMANITIES' ? HUMANITIES_SYSTEM_PROMPT : STEM_SYSTEM_PROMPT;
+
+    contents.push({
+      role: 'user',
+      parts: [
+        contentPart,
+        { text: `Current Mode: ${mode === 'tutoring' ? 'Recursive Tutoring' : 'Deep Lead-Reading (Phase 1/2)'}` }
+      ]
+    });
+
+    history.forEach((msg) => {
+      contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+    });
+
+    let finalMessage = newMessage;
+    if (mode === 'reading' && readingOptions) {
+      finalMessage = appendReadingModeUserMessageSuffix(newMessage, readingOptions);
+    }
+
+    contents.push({ role: 'user', parts: [{ text: finalMessage }] });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents,
+      config: {
+        systemInstruction,
+        ...(abortSignal ? { abortSignal } : {})
+      }
+    });
+
+    return response.text || 'Thinking...';
+  } catch (error) {
+    if (isAbortLikeError(error)) {
+      throw error;
+    }
+    console.error('Skim Adaptive Tutor Error:', error);
+    return '通信中断，请重试。';
+  }
+}
 
 /** 生成 Study Guide/Outline */
 export const generateStudyGuide = async (
@@ -1877,10 +2281,28 @@ export const generateStudyGuide = async (
 };
 
 // --- L-SAP 考前预测 ---
-export const generateLSAPContentMap = async (docContent: string): Promise<LSAPContentMap | null> => {
+export const generateLSAPContentMap = async (
+  docContent: string,
+  options?: GenerateLSAPContentMapOptions
+): Promise<LSAPContentMap | null> => {
   try {
-    const contentPart = getContentPart(docContent);
-    const prompt = `根据以下文档内容，提取「知识组件」(KC)，用于考前掌握度评估。要求严格依据文档，不编造。
+    const chunkMode = options?.mode === 'workspaceChunk';
+    const contentPart = chunkMode ? getContentPartForWorkspaceChunk(docContent) : getContentPart(docContent);
+    const prompt = chunkMode
+      ? `以下 DOCUMENT 为**单份**讲义/材料的全文（或其中一段）。请仅依据本段内容提取「知识组件」(KC)，用于考前掌握度评估；不要引入材料外知识。
+
+对每个知识组件输出：
+- id: 唯一标识，如 kc-0, kc-1（本段内唯一即可）
+- concept: 概念名称
+- definition: 简短定义（一句）
+- reviewFocus: 复习重点（一句话，严格基于本段）
+- sourcePages: 出现过的页码数组（从本段结构推断，如 [1,2,3]）
+- examWeight: 考试权重 1-5（5 最重要）
+- bloomTargetLevel: 布鲁姆目标层级 1-3（1=记忆/理解，2=应用，3=分析/综合）
+
+请**充分覆盖本段/本讲的核心可考点**，数量随内容复杂度增加；软上限约 **40 个 KC**（内容极少时可少于 5）。输出 JSON：{ "id": "content-map-xxx", "sourceKey": "doc", "kcs": [ ... ], "createdAt": 0 }
+createdAt 请填当前时间戳（毫秒）。`
+      : `根据以下文档内容，提取「知识组件」(KC)，用于考前掌握度评估。要求严格依据文档，不编造。
 
 对每个知识组件输出：
 - id: 唯一标识，如 kc-0, kc-1
@@ -1937,28 +2359,268 @@ createdAt 请填当前时间戳（毫秒）。`;
   }
 };
 
+/**
+ * 为已有考点图谱的每个 KC 生成 3～8 条逻辑原子（最小命题单元），严格依据 DOCUMENT，不编造页码。
+ * 返回新的 LSAPContentMap 深拷贝；失败返回 null（调用方勿清空已有 kcs）。
+ * @param options.maxDocChars 默认 40000；备考按单份材料调用时可传 120000 等与 P1 一致，避免单讲仍被截断。
+ */
+export async function generateLogicAtomsForContentMap(
+  mergedDocContent: string,
+  contentMap: LSAPContentMap,
+  options?: GenerateLogicAtomsForContentMapOptions
+): Promise<LSAPContentMap | null> {
+  try {
+    const copy = JSON.parse(JSON.stringify(contentMap)) as LSAPContentMap;
+    if (!copy.kcs?.length) return copy;
+
+    const maxChars = options?.maxDocChars ?? 40000;
+    const contentPart = getContentPartWithMaxChars(mergedDocContent, maxChars);
+    const docLabel = options?.perMaterial ? '本份关联材料全文' : '本场合并讲义';
+
+    const kcSummaries = copy.kcs
+      .map(
+        (k) =>
+          `- id=${k.id}; concept=${k.concept}; definition=${(k.definition || '').slice(0, 200)}; examWeight=${k.examWeight ?? 3}; bloomTargetLevel=${k.bloomTargetLevel ?? 1}`
+      )
+      .join('\n');
+
+    const prompt = `你是课程分析助手。下面「DOCUMENT」为${docLabel}（唯一事实来源）。上面列出了已提取的考点（KC）列表。
+
+任务：为**每一个** KC 输出若干「逻辑原子」——能独立判断真假的**最小命题/推理单元**，用于衡量讲义中的命题密度与后续覆盖统计。
+
+硬性规则：
+1. 严格依据 DOCUMENT，禁止引入讲义外知识；不要编造页码。
+2. 每个 KC 输出 **3～8** 条原子：examWeight 越高、bloomTargetLevel 越高，倾向于取**更多**条（仍不超过 8）。
+3. 每条原子用简短 label（≤40 字）+ description（1～2 句，可复述讲义可核对的内容）。
+4. 必须覆盖列表中的**全部** KC id；某 KC 在文档中信息极少时可少至 3 条，但不要留空数组。
+5. 输出 JSON 仅含 perKc 数组：每项含 kcId（与输入 id 一致）与 atoms（label + description，不要含 id 字段）。
+
+KC 列表：
+${kcSummaries}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            perKc: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  kcId: { type: Type.STRING },
+                  atoms: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        label: { type: Type.STRING },
+                        description: { type: Type.STRING },
+                      },
+                      required: ['label', 'description'],
+                    },
+                  },
+                },
+                required: ['kcId', 'atoms'],
+              },
+            },
+          },
+          required: ['perKc'],
+        },
+      },
+    });
+
+    if (!response.text) return null;
+    const parsed = JSON.parse(response.text) as { perKc?: Array<{ kcId: string; atoms: Array<{ label: string; description: string }> }> };
+    const rows = parsed.perKc;
+    if (!Array.isArray(rows)) return null;
+
+    const byKcId = new Map<string, Array<{ label: string; description: string }>>();
+    for (const row of rows) {
+      if (!row?.kcId) continue;
+      if (!byKcId.has(row.kcId)) byKcId.set(row.kcId, row.atoms ?? []);
+    }
+
+    for (const kc of copy.kcs) {
+      const rawAtoms = byKcId.get(kc.id) ?? [];
+      const atoms: LogicAtom[] = rawAtoms.map((a, index) => ({
+        id: `atom-${kc.id}-${index}`,
+        kcId: kc.id,
+        label: (a.label || '').trim() || `原子 ${index + 1}`,
+        description: (a.description || '').trim() || '—',
+      }));
+      kc.atoms = atoms;
+    }
+
+    return copy;
+  } catch (e) {
+    console.error('generateLogicAtomsForContentMap Error:', e);
+    return null;
+  }
+}
+
+/**
+ * 一次 API 同时返回「本句已覆盖的原子」与「仍可能缺失的原子」。
+ * 备考台对话应只调用本函数；若分别调用 markAtomsCoveredByUtterance 与 detectReasoningGaps 会各触发一次请求。
+ */
+/**
+ * 为本场讲义语境下的单个术语生成短释义；无依据时须明说「材料未直接定义」等（见 prompt）。
+ * 失败返回 null。
+ */
+export async function defineTermInLectureContext(
+  mergedDocContent: string,
+  kc: LSAPKnowledgeComponent,
+  term: string
+): Promise<string | null> {
+  const t = term.trim().slice(0, 80);
+  if (!t) return null;
+  try {
+    const contentPart = getContentPart(mergedDocContent.slice(0, 60000));
+    const kcBlock = `考点 id：${kc.id}
+考点名称：${kc.concept}
+考点定义：${(kc.definition || '').slice(0, 2000)}
+${kc.reviewFocus ? `复习重点：${kc.reviewFocus.slice(0, 500)}` : ''}`;
+    const prompt = `你是课程助教。上方「DOCUMENT」为本场合并讲义（唯一事实来源）。另有当前考点 KC 上下文。
+
+任务：请仅根据 DOCUMENT，用中文为术语「${t}」写 1～3 句讲义内释义（面向复习，紧扣当前考点语境；非百科泛谈）。
+
+硬性规则：
+1. 若 DOCUMENT 中未明确出现该术语、或未给出可复述的解释，须先作极短说明，并明确写出：材料中未单独定义，以上为结合当前考点语境的概括。
+2. 禁止编造页码；禁止引入讲义外知识。
+3. 不要输出 Markdown 粗体、标题或列表符号；纯段落文本即可。
+
+当前 KC：
+${kcBlock}
+
+请直接输出释义：`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+    });
+    const text = response.text?.trim();
+    return text || null;
+  } catch (e) {
+    console.warn('defineTermInLectureContext', e);
+    return null;
+  }
+}
+
+export async function analyzeKcUtteranceForAtoms(
+  mergedDocContent: string,
+  kc: LSAPKnowledgeComponent,
+  userText: string
+): Promise<{ coveredAtomIds: string[]; gapAtomIds: string[] }> {
+  const atoms = kc.atoms ?? [];
+  if (!atoms.length) return { coveredAtomIds: [], gapAtomIds: [] };
+  const allowed = new Set(atoms.map((a) => a.id));
+  try {
+    const contentPart = getContentPart(mergedDocContent);
+    const atomList = atoms
+      .map((a) => `- id=${a.id}; label=${a.label}; desc=${(a.description || '').slice(0, 200)}`)
+      .join('\n');
+    const prompt = `你是严谨评阅助手。DOCUMENT 为本场合并讲义；下列 id 为当前考点下的「逻辑原子」。
+
+任务：阅读学生的**本轮发言**（可能很短）。判断：
+1) coveredAtomIds：学生**明确、可核对地**体现了哪些原子（id 必须来自列表；无把握则不要列入；宁可少报）。
+2) gapAtomIds：结合讲义，哪些原子学生**尚未覆盖**或**表述可能不足**（同样必须来自列表；可空数组）。
+
+学生发言：
+${userText.slice(0, 8000)}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [{ role: 'user', parts: [contentPart, { text: prompt + '\n\n原子列表：\n' + atomList }] }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            coveredAtomIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+            gapAtomIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+          required: ['coveredAtomIds', 'gapAtomIds'],
+        },
+      },
+    });
+    if (!response.text) return { coveredAtomIds: [], gapAtomIds: [] };
+    const parsed = JSON.parse(response.text) as { coveredAtomIds?: string[]; gapAtomIds?: string[] };
+    const filter = (ids: unknown): string[] =>
+      (Array.isArray(ids) ? ids : []).filter((x): x is string => typeof x === 'string' && allowed.has(x));
+    return {
+      coveredAtomIds: filter(parsed.coveredAtomIds),
+      gapAtomIds: filter(parsed.gapAtomIds),
+    };
+  } catch (e) {
+    console.warn('analyzeKcUtteranceForAtoms', e);
+    return { coveredAtomIds: [], gapAtomIds: [] };
+  }
+}
+
+/** 返回本句覆盖到的 LogicAtom.id（仅 id 来自 kc.atoms）。单独调用会触发一次 API；与 detectReasoningGaps 各调一次则共两次。 */
+export async function markAtomsCoveredByUtterance(
+  mergedDocContent: string,
+  kc: LSAPKnowledgeComponent,
+  userText: string
+): Promise<string[]> {
+  const r = await analyzeKcUtteranceForAtoms(mergedDocContent, kc, userText);
+  return r.coveredAtomIds;
+}
+
+/** 返回仍缺失或表述可能不足的 atom id。单独调用会触发一次 API。 */
+export async function detectReasoningGaps(
+  mergedDocContent: string,
+  kc: LSAPKnowledgeComponent,
+  userText: string
+): Promise<string[]> {
+  const r = await analyzeKcUtteranceForAtoms(mergedDocContent, kc, userText);
+  return r.gapAtomIds;
+}
+
 export interface LSAPProbeResult {
   question: string;
   sourceRef: string;
 }
+
+export type LSAPProbeDocScope = {
+  /** 展示用材料名（与左侧材料一致） */
+  materialDisplayName?: string;
+  /** true：下列 DOCUMENT 仅为一份讲义，题目与 sourceRef 必须约束在该文档内 */
+  docIsSingleMaterial?: boolean;
+};
 
 export const generateLSAPProbeQuestion = async (
   docContent: string,
   contentMap: LSAPContentMap,
   kcId: string,
   bloomLevel: number,
-  _conversationSoFar?: { role: string; text: string }[]
+  _conversationSoFar?: { role: string; text: string }[],
+  options?: LSAPProbeDocScope
 ): Promise<LSAPProbeResult | null> => {
   try {
     const kc = contentMap.kcs.find((k) => k.id === kcId);
     if (!kc) return null;
     const contentPart = getContentPart(docContent);
+    const matName = options?.materialDisplayName?.trim() || '本考点所属讲义';
+    const singleScope =
+      options?.docIsSingleMaterial === true
+        ? `
+【材料边界（必须遵守）】
+下列 DOCUMENT **仅为**考点所属的这一份讲义（材料名：「${matName}」）。
+- 题目与答案依据必须**全部**来自该 DOCUMENT；**禁止**引用文档中未出现的其它讲义文件名或其它材料内容。
+- sourceRef 必须写清：**材料名 + 该材料内的页码 + 极短原文摘录**（摘录须出自该 DOCUMENT）。
+- 考点备注页码 ${(kc.sourcePages || []).join(', ')} 指**该材料内**的页码标注，请与此一致。
+`
+        : '';
     const prompt = `你正在根据讲义评估学生对某一考点的掌握程度。严格依据以下文档内容，不要自由发挥。
-
+${singleScope}
 当前考点：${kc.concept}
 定义：${kc.definition}
 布鲁姆层级：${bloomLevel}（1=记忆/理解，2=应用，3=分析/综合）
-讲义页码：${(kc.sourcePages || []).join(', ')}
+讲义页码（考点元数据，以该材料内标注为准）：${(kc.sourcePages || []).join(', ')}
 
 请生成一道开放式问答题（不要选择题），让学生用自己的话解释或应用该考点。题目必须与讲义内容直接相关，且能根据讲义判断对错。
 输出 JSON：{ "question": "题目内容", "sourceRef": "对应讲义页码或原文摘要，用于证据链" }`;
@@ -2000,12 +2662,18 @@ export const evaluateLSAPAnswer = async (
   kcId: string,
   question: string,
   userAnswer: string,
-  sourceRef: string
+  sourceRef: string,
+  options?: LSAPProbeDocScope
 ): Promise<LSAPEvalResult | null> => {
   try {
     const contentPart = getContentPart(docContent);
+    const matName = options?.materialDisplayName?.trim() || '';
+    const singleNote =
+      options?.docIsSingleMaterial === true
+        ? `\n下列 DOCUMENT 与出题时完全一致，**仅为**材料「${matName || '该考点所属讲义'}」的全文。请**仅据此文档**阅卷；不要引用其它讲义或文档外知识。sourceRef 中的页码与依据须与该材料内文一致。\n`
+        : '';
     const prompt = `你是阅卷人。严格依据以下文档（讲义）内容判断学生回答是否正确。不要引入文档外的标准。
-
+${singleNote}
 题目：${question}
 学生回答：${userAnswer}
 参考（讲义出处）：${sourceRef}
@@ -2056,16 +2724,25 @@ export const evaluateLSAPAnswer = async (
 export const generateLSAPTargetedTeaching = async (
   docContent: string,
   kc: LSAPKnowledgeComponent,
-  evidence: string
+  evidence: string,
+  options?: LSAPProbeDocScope
 ): Promise<string> => {
   try {
     const contentPart = getContentPart(docContent);
     const pages = (kc.sourcePages && kc.sourcePages.length > 0) ? kc.sourcePages.join('、') : '讲义中';
+    const matName = options?.materialDisplayName?.trim() || '本讲义';
+    const singleScope =
+      options?.docIsSingleMaterial === true
+        ? `
+【材料边界（必须遵守）】
+下列 DOCUMENT **仅为**材料「${matName}」的全文。讲解、举例与「请重点看第 X 页」等页码引用必须**全部**出自该 DOCUMENT；**禁止**引用未在本 DOCUMENT 中出现的其它文件名或其它讲义内容。页码均指**该材料内**的页码。
+`
+        : '';
     const prompt = `你是一位针对性的辅导老师。学生刚在考点「${kc.concept}」上回答有误或不够完整。评判反馈是：${evidence}
-
+${singleScope}
 请严格依据以下文档（讲义）内容，针对该考点做一段简短讲解（2～4 段），帮助学生补上缺口。要求：
 1. 只讲与「评判反馈」相关的部分，不要泛泛而谈。
-2. 必须明确写出「请重点看讲义第 X 页」或「见讲义第 X–Y 页」，与考点对应的页码为：${pages}。
+2. 必须明确写出「请重点看讲义第 X 页」或「见讲义第 X–Y 页」，与考点对应的页码为：${pages}（以该材料内标注为准）。
 3. 用中文，语气友好，可直接指出「你漏掉了…」「这里需要区分…」。
 4. 不要编造，所有内容必须能在文档中找到依据。
 
@@ -2088,18 +2765,24 @@ export const answerLSAPTeachingQuestion = async (
   kc: LSAPKnowledgeComponent,
   teachingContent: string,
   conversationHistory: { role: 'user' | 'model'; text: string }[],
-  userQuestion: string
+  userQuestion: string,
+  options?: LSAPProbeDocScope
 ): Promise<string> => {
   try {
     const contentPart = getContentPart(docContent);
     const historyText = conversationHistory.length
       ? conversationHistory.map((m) => `${m.role === 'user' ? '学生' : '老师'}: ${m.text}`).join('\n')
       : '';
-    const prompt = `你是针对「${kc.concept}」考点的辅导老师。学生正在看上面的针对性讲解，现在追问。
+    const matName = options?.materialDisplayName?.trim() || '本讲义';
+    const singleScope =
+      options?.docIsSingleMaterial === true
+        ? `【材料边界】下列 DOCUMENT 仅为「${matName}」的全文；回答与页码引用必须出自该 DOCUMENT，禁止引用其它讲义或未出现的内容。\n\n`
+        : '';
+    const prompt = `${singleScope}你是针对「${kc.concept}」考点的辅导老师。学生正在看上面的针对性讲解，现在追问。
 
 ${historyText ? `此前对话：\n${historyText}\n\n` : ''}学生问：${userQuestion}
 
-要求：严格依据以下文档（讲义）回答，不编造。可指出「见讲义第 X 页」。用中文，简短清晰。若学生已理解可肯定并小结。`;
+要求：严格依据以下文档（讲义）回答，不编造。可指出「见讲义第 X 页」（页码为该材料内页码）。用中文，简短清晰。若学生已理解可肯定并小结。`;
     const parts: { role: 'user' | 'model'; parts: { text: string }[] }[] = [
       { role: 'user', parts: [contentPart, { text: `针对性讲解摘要：\n${teachingContent.slice(0, 2000)}\n\n---\n\n${prompt}` }] }
     ];

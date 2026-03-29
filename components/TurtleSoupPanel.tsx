@@ -8,6 +8,8 @@ interface TurtleSoupPanelProps {
   onClose: () => void;
   state: TurtleSoupState | null;
   onUpdateState: (state: TurtleSoupState) => void;
+  completedSegmentsCount?: number;
+  onConsumeSegment?: () => void;
 }
 
 const QUESTIONS_PER_ROUND = 5;
@@ -16,7 +18,9 @@ export const TurtleSoupPanel: React.FC<TurtleSoupPanelProps> = ({
   isOpen,
   onClose,
   state,
-  onUpdateState
+  onUpdateState,
+  completedSegmentsCount = 0,
+  onConsumeSegment
 }) => {
   const [questionInput, setQuestionInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -71,7 +75,8 @@ export const TurtleSoupPanel: React.FC<TurtleSoupPanelProps> = ({
   };
 
   const handleFinishSection = async () => {
-    if (!state || state.solved) return;
+    if (!state || state.solved || completedSegmentsCount <= 0) return;
+    onConsumeSegment?.();
     setHintLoading(true);
     try {
       const hint = await generateTurtleSoupHint(state.hiddenStory, state.hints);
@@ -106,7 +111,7 @@ export const TurtleSoupPanel: React.FC<TurtleSoupPanelProps> = ({
   const questionsLeft = state?.questionsLeft ?? 0;
   const canAsk = questionsLeft > 0 && !state?.solved && !loading;
   const showFinishPrompt = hasPuzzle && questionsLeft === 0 && !state?.solved;
-  const canFinishSection = hasPuzzle && !state?.solved && (questionsLeft < QUESTIONS_PER_ROUND || (state?.hints?.length ?? 0) > 0);
+  const canFinishSection = hasPuzzle && !state?.solved && completedSegmentsCount > 0 && (questionsLeft < QUESTIONS_PER_ROUND || (state?.hints?.length ?? 0) > 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
@@ -188,13 +193,17 @@ export const TurtleSoupPanel: React.FC<TurtleSoupPanelProps> = ({
 
               {!state.solved && (
                 <div className="flex flex-col gap-2">
+                  {completedSegmentsCount <= 0 && (
+                    <p className="text-amber-200/90 text-sm">先完成一段学习（点击顶栏计时器开启番茄钟，到点后即可使用）</p>
+                  )}
                   <button
                     onClick={handleFinishSection}
                     disabled={hintLoading || !canFinishSection}
                     className="w-full py-3.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 rounded-xl text-stone-900 font-bold text-base shadow-lg flex items-center justify-center gap-2"
+                    title={completedSegmentsCount <= 0 ? '番茄钟到点后可解锁' : undefined}
                   >
                     {hintLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
-                    我学完一段
+                    我学完一段 {completedSegmentsCount > 0 ? `(剩余 ${completedSegmentsCount} 段)` : ''}
                   </button>
                   <button
                     onClick={handleReveal}

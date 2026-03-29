@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen, Swords, X, Timer, MoreHorizontal, GraduationCap } from 'lucide-react';
+import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen, Swords, X, Timer, MoreHorizontal, LayoutDashboard } from 'lucide-react';
 import { MusicPlayer } from './MusicPlayer';
 import { ViewMode } from '../types';
 import { User } from 'firebase/auth'; 
@@ -81,8 +81,8 @@ interface HeaderProps {
   // 独立复习入口（选 1 个或多个 PDF 进行复习）
   onOpenReview?: () => void;
 
-  /** 考试中心 / 今日学习 / 情境流程 */
-  onOpenExamHub?: () => void;
+  /** P0：备考工作台（全屏一级工作区）；考试中心请从备考工作台内「考试中心」进入 */
+  onOpenExamWorkspace?: () => void;
 
   /** 只学 5 分钟（学习兴致低时的快捷入口） */
   onOpenFiveMin?: () => void;
@@ -156,7 +156,7 @@ export const Header: React.FC<HeaderProps> = ({
   onStartClass,
   isTranscriptionSupported,
   onOpenReview,
-  onOpenExamHub,
+  onOpenExamWorkspace,
   onOpenFiveMin,
   onOpenTurtleSoup,
   pomodoroSegmentSeconds = 25 * 60,
@@ -302,24 +302,24 @@ export const Header: React.FC<HeaderProps> = ({
              )}
         </div>
 
-        {/* Right: 与 3001 一致 = 复习、更多、上传、背景音（+ 账户）*/}
+        {/* Right: 与 3001 一致 = 学习工具、更多、上传、背景音（+ 账户）*/}
         <div className="flex items-center gap-x-2 min-w-[200px] justify-end">
-          {/* 复习 */}
+          {/* 学习工具 */}
           {onOpenReview && (
-            <button onClick={onOpenReview} className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-sm" title="选择文档进行测验、闪卡、考前速览等" aria-label="复习">
+            <button onClick={onOpenReview} className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-sm" title="选择文档进行测验、闪卡、考前速览等" aria-label="学习工具">
               <BookOpen className="w-3.5 h-3.5" />
-              <span>复习</span>
+              <span>学习工具</span>
             </button>
           )}
-          {onOpenExamHub && (
+          {onOpenExamWorkspace && (
             <button
-              onClick={onOpenExamHub}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-violet-100 text-violet-800 hover:bg-violet-200 rounded-xl text-xs font-bold border border-violet-200"
-              title="考试管理、今日学习、情境复习流程"
-              aria-label="考试中心"
+              onClick={onOpenExamWorkspace}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-teal-600 text-white hover:bg-teal-700 rounded-xl text-xs font-bold shadow-sm"
+              title="备考工作台：选择当前考试、查看材料、进入考前预测"
+              aria-label="考试复习"
             >
-              <GraduationCap className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">考试</span>
+              <LayoutDashboard className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">考试复习</span>
             </button>
           )}
           {/* 更多：上课、学累了/休息、重点标记、沉浸、上课录音文本、计时、背景音入口等 */}

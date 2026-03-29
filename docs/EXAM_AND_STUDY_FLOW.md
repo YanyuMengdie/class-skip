@@ -1,5 +1,7 @@
 # 考试中心 + 情境化复习（交付说明）
 
+**P0 备考工作台（全屏一级入口）** 见 [`EXAM_WORKSPACE_P0.md`](./EXAM_WORKSPACE_P0.md)。
+
 ## 新增 / 修改文件
 
 | 文件 | 说明 |
@@ -13,6 +15,7 @@
 | `components/ExamCenterPanel.tsx` | 考试 CRUD、材料列表、关联入口 |
 | `components/ExamLinkModal.tsx` | 当前文件挂到多场考试 |
 | `components/ExamDailyMaintenancePanel.tsx` | 今日学习低压保温主流程（gate + 闪卡 + 分支 + Quiz + 正反馈） |
+| `docs/P1_EXAM_MAINTENANCE.md` | P1：Firestore `disciplineBand`、缓存 key、`LearnerMood` 与 Study Flow 映射说明 |
 | `components/MaintenanceFlashcardDeck.tsx` | 轻量闪卡浏览器（不跳全屏） |
 | `components/MaintenanceFeedbackCelebration.tsx` | 分层正反馈面板 |
 | `utils/examMaintenanceEligibility.ts` | sprint / warning / daily gate 资格判定 |

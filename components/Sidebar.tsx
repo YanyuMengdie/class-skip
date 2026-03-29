@@ -3,13 +3,18 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LayoutGrid, Cloud, FileText, Loader2, LogIn, Trash2, Edit2, Check, X, FolderPlus, Folder, FolderOpen, MoreHorizontal, Plus, CornerDownRight, Calendar as CalendarIcon, PenTool, ChevronLeft, ChevronRight, Clock, MapPin, CheckCircle2, BookOpen, Layers, Star, Filter, Lightbulb, Target, AlertTriangle, Flame, Sparkles } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { getUserSessions, renameCloudSession, moveSession, createCloudFolder, addCalendarEvent, getCalendarEvents, deleteCalendarEvent, addMemo, getMemos, deleteMemo } from '../services/firebase';
-import { CloudSession, CalendarEvent, Memo, PageMarks, MarkType } from '../types';
+import { CloudSession, CalendarEvent, Memo, PageMarks, PageMark, MarkType } from '../types';
 
 interface SidebarProps {
   isOpen: boolean;
   totalPages: number;
   currentPage: number;
   onJumpToPage: (page: number) => void;
+  /**
+   * 可选：每页缩略图 URL（与 totalPages 对齐；`pageThumbnails[page - 1]` 对应第 page 页）。
+   * `null` 或缺省时显示占位，不阻塞跳页。
+   */
+  pageThumbnails?: Array<string | null>;
 
   /** 已上传 PDF 时显示「复习」入口 */
   hasPdfLoaded?: boolean;
@@ -248,11 +253,72 @@ const MARK_TYPE_CONFIG: Record<MarkType, { icon: React.ReactNode; color: string;
   custom: { icon: <Star className="w-3 h-3" />, color: 'text-slate-600', label: '自定义' },
 };
 
+/**
+ * 「页面」tab 缩略图卡片：上方图区 + 下方页码；标记角标叠在图区右上。
+ * `appearance === 'filter'` 对应「标记页」筛选视图（非选中时统一琥珀底）。
+ */
+const PageThumbCardButton: React.FC<{
+  page: number;
+  marks: PageMark[];
+  thumbUrl: string | null | undefined;
+  currentPage: number;
+  onJumpToPage: (pageIndex0: number) => void;
+  appearance: 'filter' | 'all';
+}> = ({ page, marks, thumbUrl, currentPage, onJumpToPage, appearance }) => {
+  const isActive = page === currentPage;
+  const hasMark = marks.length > 0;
+  const showPlaceholder = thumbUrl == null || thumbUrl.trim() === '';
+
+  const containerInactive =
+    appearance === 'filter'
+      ? 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400'
+      : hasMark
+        ? 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400'
+        : 'border-stone-200 bg-white text-stone-400 hover:border-stone-300 hover:text-stone-600';
+
+  return (
+    <button
+      type="button"
+      onClick={() => onJumpToPage(page - 1)}
+      className={`relative flex w-full flex-col items-stretch rounded-lg border-2 p-1 transition-all ${
+        isActive ? 'z-10 scale-105 border-slate-800 bg-slate-800 text-white shadow-md' : containerInactive
+      }`}
+    >
+      <div
+        className={`relative aspect-[3/4] w-full overflow-hidden rounded-md border ${
+          isActive ? 'border-slate-600 bg-slate-700' : 'border-stone-200/80 bg-stone-100'
+        }`}
+      >
+        {showPlaceholder ? (
+          <div className="flex h-full min-h-0 w-full flex-col items-center justify-center bg-gradient-to-b from-stone-200 to-stone-300 px-1 animate-pulse">
+            <span className="text-[9px] font-medium text-stone-500">无预览</span>
+          </div>
+        ) : (
+          <img src={thumbUrl} alt={`第 ${page} 页`} className="h-full w-full max-h-full object-cover" />
+        )}
+        {marks.length > 0 && (
+          <div className="absolute top-1 right-1 flex max-w-[70%] flex-wrap justify-end gap-0.5">
+            {marks.slice(0, 3).map((mark) =>
+              mark.types.slice(0, 2).map((type, tIdx) => (
+                <div key={`${mark.id}-${tIdx}`} className={`${MARK_TYPE_CONFIG[type]?.color || 'text-stone-400'}`}>
+                  {MARK_TYPE_CONFIG[type]?.icon || <Star className="w-2.5 h-2.5" />}
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+      <span className={`mt-0.5 text-center text-[10px] font-bold tabular-nums ${isActive ? 'text-white' : ''}`}>{page}</span>
+    </button>
+  );
+};
+
 export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   totalPages,
   currentPage,
   onJumpToPage,
+  pageThumbnails,
   hasPdfLoaded,
   onOpenQuiz,
   onOpenFlashCard,
@@ -266,6 +332,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onRestoreSession,
   onDeleteSession
 }) => {
+  /** 阶段 1：无 `pageThumbnails`、数组越界或 `null` 时由 PageThumbCardButton 显示「无预览」占位；映射为 `pageThumbnails[page - 1]` → 第 `page` 页。 */
+  const resolveThumbForPage = (page: number): string | null | undefined => {
+    if (!pageThumbnails || page < 1) return undefined;
+    return pageThumbnails[page - 1];
+  };
   const [activeTab, setActiveTab] = useState<Tab>('pages');
   const [sessions, setSessions] = useState<CloudSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
@@ -594,30 +665,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                         }
                                         return marks.some(m => m.types.includes(markFilter as MarkType));
                                     })
-                                    .map(pageNum => {
+                                    .map((pageNum) => {
                                         const marks = pageMarks[fileName][pageNum] || [];
-                                        const isActive = pageNum === currentPage;
                                         return (
-                                            <button
+                                            <PageThumbCardButton
                                                 key={pageNum}
-                                                onClick={() => onJumpToPage(pageNum - 1)}
-                                                className={`relative aspect-[3/4] rounded-lg border-2 flex flex-col items-center justify-center text-sm font-bold transition-all ${
-                                                    isActive 
-                                                        ? 'border-slate-800 bg-slate-800 text-white shadow-md scale-105 z-10' 
-                                                        : 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400'
-                                                }`}
-                                            >
-                                                <span>{pageNum}</span>
-                                                <div className="absolute top-1 right-1 flex flex-wrap gap-0.5">
-                                                    {marks.slice(0, 3).map((mark, idx) => 
-                                                        mark.types.slice(0, 2).map((type, tIdx) => (
-                                                            <div key={`${mark.id}-${tIdx}`} className={`${MARK_TYPE_CONFIG[type]?.color || 'text-stone-400'}`}>
-                                                                {MARK_TYPE_CONFIG[type]?.icon || <Star className="w-2.5 h-2.5" />}
-                                                            </div>
-                                                        ))
-                                                    )}
-                                                </div>
-                                            </button>
+                                                page={pageNum}
+                                                marks={marks}
+                                                thumbUrl={resolveThumbForPage(pageNum)}
+                                                currentPage={currentPage}
+                                                onJumpToPage={onJumpToPage}
+                                                appearance="filter"
+                                            />
                                         );
                                     })}
                             </div>
@@ -641,34 +700,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                     return marks.some(m => m.types.includes(markFilter as MarkType));
                                 })
                                 .map((page) => {
-                                const isActive = page === currentPage;
                                 const marks = pageMarks && fileName && pageMarks[fileName] ? (pageMarks[fileName][page] || []) : [];
-                                const hasMark = marks.length > 0;
                                 return (
-                                    <button
+                                    <PageThumbCardButton
                                         key={page}
-                                        onClick={() => onJumpToPage(page - 1)}
-                                        className={`relative aspect-[3/4] rounded-lg border flex items-center justify-center text-sm font-bold transition-all ${
-                                            isActive 
-                                                ? 'border-slate-800 bg-slate-800 text-white shadow-md scale-105 z-10' 
-                                                : hasMark 
-                                                    ? 'border-amber-300 bg-amber-50 text-amber-700 hover:border-amber-400' 
-                                                    : 'border-stone-200 bg-white text-stone-400 hover:border-stone-300 hover:text-stone-600'
-                                        }`}
-                                    >
-                                        <span>{page}</span>
-                                        {hasMark && (
-                                            <div className="absolute top-1 right-1 flex flex-wrap gap-0.5">
-                                                {marks.slice(0, 3).map((mark, idx) => 
-                                                    mark.types.slice(0, 2).map((type, tIdx) => (
-                                                        <div key={`${mark.id}-${tIdx}`} className={`${MARK_TYPE_CONFIG[type]?.color || 'text-stone-400'}`}>
-                                                            {MARK_TYPE_CONFIG[type]?.icon || <Star className="w-2.5 h-2.5" />}
-                                                        </div>
-                                                    ))
-                                                )}
-                                            </div>
-                                        )}
-                                    </button>
+                                        page={page}
+                                        marks={marks}
+                                        thumbUrl={resolveThumbForPage(page)}
+                                        currentPage={currentPage}
+                                        onJumpToPage={onJumpToPage}
+                                        appearance="all"
+                                    />
                                 );
                             })}
                         </div>

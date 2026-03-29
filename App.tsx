@@ -37,14 +37,31 @@ import { ReviewPage, ReviewType } from './components/ReviewPage';
 import { TurtleSoupPanel } from './components/TurtleSoupPanel';
 import { ExamPredictionPanel } from './components/ExamPredictionPanel';
 import { ExamHubModal } from './components/ExamHubModal';
+import { ExamWorkspacePage } from './components/ExamWorkspacePage';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from './utils/pdfUtils';
-import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript } from './services/geminiService';
+import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap } from './services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from './services/transcriptionService';
 import { storageService } from './services/storageService';
-import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions } from './services/firebase';
+import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks } from './services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, DailySegment, StudyFlowStep, ExamMaterialLink } from './types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry } from './types';
+import {
+  computeExamWorkspaceLsapKey,
+  loadWorkspaceLsapBundle,
+  mergeAtomCoverageForMap,
+  saveWorkspaceLsapBundle,
+  truncateWorkspaceDialogue,
+  type WorkspaceDialogueTurn,
+} from './utils/examWorkspaceLsapKey';
+import { computePredictedScore } from './utils/lsapScore';
+import { normalizeTermKey } from './utils/extractBoldTermsFromMarkdown';
 import { Sparkles, X, ChevronDown, Loader2, Wand2 } from 'lucide-react';
+
+/** P0 备考工作台：当前考试 ID 存 localStorage */
+const EXAM_WORKSPACE_ACTIVE_EXAM_LS = 'examWorkspace_activeExamId';
+
+/** P2：备考台按单份材料抽逻辑原子时与 KC 图谱单份上限一致（120000），避免仍被 4 万截断 */
+const LSAP_ATOMS_PER_MATERIAL_MAX_CHARS = 120_000;
 
 // #region agent log
 const _debugLog = (location: string, message: string, data: Record<string, unknown>) => {
@@ -187,8 +204,61 @@ const App: React.FC = () => {
   const [examPredictionInitialKCId, setExamPredictionInitialKCId] = useState<string | null>(null);
   const [examHubOpen, setExamHubOpen] = useState(false);
   const [examHubInitialTab, setExamHubInitialTab] = useState<'exams' | 'daily' | 'flow'>('exams');
+  /** P0：主界面 study vs 全屏备考工作台 */
+  const [appMode, setAppMode] = useState<'study' | 'examWorkspace'>('study');
+  const [activeExamId, setActiveExamId] = useState<string | null>(null);
+  /** 避免登录后立即用 null 覆盖掉 localStorage 里已存的 activeExamId */
+  const [examWorkspaceStorageReady, setExamWorkspaceStorageReady] = useState(false);
   const [lsapContentMap, setLsapContentMap] = useState<LSAPContentMap | null>(null);
   const [lsapState, setLsapState] = useState<LSAPState | null>(null);
+  /** M1：备考工作台独立 LSAP（键含 userId+exam+材料，存 localStorage） */
+  const [workspaceLsapContentMap, setWorkspaceLsapContentMap] = useState<LSAPContentMap | null>(null);
+  const [workspaceLsapState, setWorkspaceLsapState] = useState<LSAPState | null>(null);
+  const [workspaceLsapKey, setWorkspaceLsapKey] = useState<string | null>(null);
+  const [examWorkspaceMaterials, setExamWorkspaceMaterials] = useState<ExamMaterialLink[]>([]);
+  const [workspaceLsapGenerating, setWorkspaceLsapGenerating] = useState(false);
+  /** P1：按材料逐份生成考点图谱时的进度（与 workspaceLsapGenerating 同时置位） */
+  const [workspaceLsapProgress, setWorkspaceLsapProgress] = useState<{
+    current: number;
+    total: number;
+    fileName: string;
+  } | null>(null);
+  /** P2：按材料逐份提取逻辑原子时的进度（与 workspaceAtomsGenerating 同时置位） */
+  const [workspaceAtomsProgress, setWorkspaceAtomsProgress] = useState<{
+    current: number;
+    total: number;
+    fileName: string;
+  } | null>(null);
+  /** M2：备考工作台逻辑原子覆盖（与 bundle 持久化，独立于考前预测 LSAPState） */
+  const [workspaceAtomCoverage, setWorkspaceAtomCoverage] = useState<AtomCoverageByKc>({});
+  /** M5：备考台对话留痕（与 bundle 同步） */
+  const [workspaceDialogueTranscript, setWorkspaceDialogueTranscript] = useState<WorkspaceDialogueTurn[]>([]);
+  /** KC 即时术语侧栏（按 kcId 分组，与 bundle 同步） */
+  const [workspaceKcGlossary, setWorkspaceKcGlossary] = useState<Record<string, KcGlossaryEntry[]>>({});
+  /** 与 bundle 保存同步，避免闭包覆盖旧 state */
+  const workspaceLsapStateRef = useRef<LSAPState | null>(null);
+  const workspaceAtomCoverageRef = useRef<AtomCoverageByKc>({});
+  const workspaceDialogueTranscriptRef = useRef<WorkspaceDialogueTurn[]>([]);
+  const workspaceKcGlossaryRef = useRef<Record<string, KcGlossaryEntry[]>>({});
+  const [workspaceAtomsGenerating, setWorkspaceAtomsGenerating] = useState(false);
+  useEffect(() => {
+    workspaceLsapStateRef.current = workspaceLsapState;
+  }, [workspaceLsapState]);
+  useEffect(() => {
+    workspaceAtomCoverageRef.current = workspaceAtomCoverage;
+  }, [workspaceAtomCoverage]);
+  useEffect(() => {
+    workspaceDialogueTranscriptRef.current = workspaceDialogueTranscript;
+  }, [workspaceDialogueTranscript]);
+  useEffect(() => {
+    workspaceKcGlossaryRef.current = workspaceKcGlossary;
+  }, [workspaceKcGlossary]);
+  const examWorkspaceMaterialsSorted = useMemo(() => {
+    if (!activeExamId) return [];
+    return [...examWorkspaceMaterials]
+      .filter((m) => m.examId === activeExamId)
+      .sort((a, b) => (a.sortIndex ?? a.addedAt) - (b.sortIndex ?? b.addedAt));
+  }, [activeExamId, examWorkspaceMaterials]);
   const [multiDocQAPanelOpen, setMultiDocQAPanelOpen] = useState(false);
   const [multiDocQAConversationKey, setMultiDocQAConversationKey] = useState<string | null>(null);
   const multiDocQAInitialMessages = useMemo(() => multiDocQAConversationKey ? loadMultiDocQAMessages(multiDocQAConversationKey) : [], [multiDocQAConversationKey]);
@@ -254,6 +324,8 @@ const App: React.FC = () => {
   const hiddenFileInputRef = useRef<HTMLInputElement>(null);
   const pendingNavSegmentRef = useRef<DailySegment | null>(null);
   const applyDailySegRef = useRef<(seg: DailySegment) => void>(() => {});
+  const pendingExamPredictionAfterHashRef = useRef<string | null>(null);
+  const skipMoodOnNextFileLoadRef = useRef(false);
   const selectionTimeoutRef = useRef<number | null>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
   
@@ -270,6 +342,53 @@ const App: React.FC = () => {
     const embedded = typeof window !== 'undefined' && window.self !== window.top;
     if ((host === 'localhost' || host === '127.0.0.1') && embedded) setIsEmbeddedDev(true);
   }, []);
+
+  /** M1：备考工作台材料；关考试中心后重拉以同步新关联 */
+  useEffect(() => {
+    if (appMode !== 'examWorkspace' || !user) {
+      setExamWorkspaceMaterials([]);
+      return;
+    }
+    listExamMaterialLinks(user).then(setExamWorkspaceMaterials).catch(() => setExamWorkspaceMaterials([]));
+  }, [appMode, user, examHubOpen]);
+
+  /** M1：本场 LSAP localStorage 恢复（键随考试+材料变） */
+  useEffect(() => {
+    if (appMode !== 'examWorkspace' || !user?.uid || !activeExamId) {
+      setWorkspaceLsapKey(null);
+      setWorkspaceLsapContentMap(null);
+      setWorkspaceLsapState(null);
+      setWorkspaceAtomCoverage({});
+      setWorkspaceDialogueTranscript([]);
+      setWorkspaceKcGlossary({});
+      return;
+    }
+    if (examWorkspaceMaterialsSorted.length === 0) {
+      setWorkspaceLsapKey(null);
+      setWorkspaceLsapContentMap(null);
+      setWorkspaceLsapState(null);
+      setWorkspaceAtomCoverage({});
+      setWorkspaceDialogueTranscript([]);
+      setWorkspaceKcGlossary({});
+      return;
+    }
+    const key = computeExamWorkspaceLsapKey(user.uid, activeExamId, examWorkspaceMaterialsSorted);
+    setWorkspaceLsapKey(key);
+    const bundle = loadWorkspaceLsapBundle(key);
+    if (bundle) {
+      setWorkspaceLsapContentMap(bundle.contentMap);
+      setWorkspaceLsapState(bundle.state);
+      setWorkspaceAtomCoverage(mergeAtomCoverageForMap(bundle.atomCoverage, bundle.contentMap));
+      setWorkspaceDialogueTranscript(bundle.dialogueTranscript ?? []);
+      setWorkspaceKcGlossary(bundle.kcGlossary ?? {});
+    } else {
+      setWorkspaceLsapContentMap(null);
+      setWorkspaceLsapState(null);
+      setWorkspaceAtomCoverage({});
+      setWorkspaceDialogueTranscript([]);
+      setWorkspaceKcGlossary({});
+    }
+  }, [appMode, user?.uid, activeExamId, examWorkspaceMaterialsSorted]);
   useEffect(() => { 
     localStorage.setItem('study_notebook_data', JSON.stringify(notebookData)); 
   }, [notebookData]);
@@ -453,6 +572,35 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  /** P0：备考工作台当前考试 — 登录后从 localStorage 恢复；登出则回到主界面 */
+  useEffect(() => {
+    if (!user) {
+      setAppMode('study');
+      setActiveExamId(null);
+      setExamWorkspaceStorageReady(false);
+      return;
+    }
+    try {
+      const key = `${EXAM_WORKSPACE_ACTIVE_EXAM_LS}_${user.uid}`;
+      const v = localStorage.getItem(key);
+      setActiveExamId(v && v.length > 0 ? v : null);
+    } catch {
+      setActiveExamId(null);
+    }
+    setExamWorkspaceStorageReady(true);
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user || !examWorkspaceStorageReady) return;
+    try {
+      const key = `${EXAM_WORKSPACE_ACTIVE_EXAM_LS}_${user.uid}`;
+      if (activeExamId) localStorage.setItem(key, activeExamId);
+      else localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }, [activeExamId, user, examWorkspaceStorageReady]);
+
   // --- AUTO-SAVE (IndexedDB & Cloud) logic omitted for brevity, same as previous ---
   useEffect(() => {
     if (!fileHash || !fileName) return;
@@ -579,9 +727,20 @@ const App: React.FC = () => {
         pendingNavSegmentRef.current = null;
         window.setTimeout(() => applyDailySegRef.current(pendLoc), 120);
       }
+      const pendPredHash = pendingExamPredictionAfterHashRef.current;
+      if (pendPredHash && pendPredHash === hash) {
+        pendingExamPredictionAfterHashRef.current = null;
+        setExamPredictionInitialKCId(null);
+        setExamPredictionPanelOpen(true);
+        /* 保持在备考工作台，不跳回主学习界面 */
+      }
       // 本页注释默认收起；文档加载完成后弹出一次「学习兴致」选择对话框
       setNotesPanelCollapsed(true);
-      setMoodDialogOpen(true);
+      if (skipMoodOnNextFileLoadRef.current) {
+        skipMoodOnNextFileLoadRef.current = false;
+      } else {
+        setMoodDialogOpen(true);
+      }
     } catch (error) {
       // #region agent log
       _debugLog('App.tsx:processFile', 'catch', { err: String(error) });
@@ -771,10 +930,6 @@ const App: React.FC = () => {
       case 'mindMap':
         setMindMapPanelOpen(true);
         break;
-      case 'examPrediction':
-        setExamPredictionInitialKCId(null);
-        setExamPredictionPanelOpen(true);
-        break;
       case 'multiDocQA':
         setMultiDocQAConversationKey(getMultiDocQAConversationKey(combinedReviewFileName ?? '当前文档', combinedReviewFileNames));
         setMultiDocQAPanelOpen(true);
@@ -952,41 +1107,564 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const buildMaintenanceMergedContent = useCallback(async (links: ExamMaterialLink[]) => {
-    const blocks: string[] = [];
-    const sessionIds = Array.from(new Set(
-      links.filter((x) => x.sourceType === 'cloudSession' && x.cloudSessionId).map((x) => x.cloudSessionId!)
-    ));
-    const sessions = sessionIds.length > 0 && user ? await getUserSessions(user) : [];
-    const sessionMap = new Map(sessions.map((s) => [s.id, s]));
-
-    for (const link of links) {
+  /**
+   * 单条考试材料 → 全文串（与合并函数内单 link 逻辑一致，避免重复实现漂移）。
+   * 空串表示该条无法解析出文本（云端无 URL、本地无 studyGuide 等）。
+   */
+  const getDocContentForExamLink = useCallback(
+    async (link: ExamMaterialLink, sessionMap: Map<string, CloudSession>): Promise<string> => {
       try {
-        if (link.sourceType === 'cloudSession' && link.cloudSessionId) {
+        if (link.sourceType === 'sessionId' && link.cloudSessionId) {
           const s = sessionMap.get(link.cloudSessionId);
-          if (!s?.fileUrl) continue;
+          if (!s?.fileUrl) return '';
           const file = await fetchFileFromUrl(s.fileUrl, s.fileName || link.fileName || '云端文件.pdf');
           const text = (await extractPdfText(file)).join('\n').trim();
-          if (text) blocks.push(`【${link.fileName || s.fileName || '材料'}】\n${text}`);
-          continue;
+          if (!text) return '';
+          return `【${link.fileName || s.fileName || '材料'}】\n${text}`;
         }
         if (link.sourceType === 'fileHash' && link.fileHash) {
           if (fileHash === link.fileHash && fullPdfText?.trim()) {
-            blocks.push(`【${link.fileName || fileName || '当前文件'}】\n${fullPdfText}`);
-            continue;
+            return `【${link.fileName || fileName || '当前文件'}】\n${fullPdfText}`;
           }
           const localState = await storageService.getFileState(link.fileHash);
           const fallbackText = localState?.state?.studyGuide?.content;
           if (fallbackText?.trim()) {
-            blocks.push(`【${link.fileName || localState.name || '本地材料'}】\n${fallbackText}`);
+            return `【${link.fileName || localState.name || '本地材料'}】\n${fallbackText}`;
           }
         }
       } catch (e) {
-        console.warn('buildMaintenanceMergedContent: skip one link', e);
+        console.warn('getDocContentForExamLink: skip one link', e);
       }
+      return '';
+    },
+    [fileHash, fullPdfText, fileName]
+  );
+
+  /**
+   * P0：备考台讲义预览 — 单条材料 → 原始 PDF File（与 getDocContentForExamLink 同源路径）。
+   * 本地 fileHash 仅当与当前主界面打开文件一致且 pdfDataUrl 为 PDF 时可解析；否则返回 null（需先在主界面打开该 PDF）。
+   */
+  const resolveExamMaterialPdf = useCallback(
+    async (link: ExamMaterialLink): Promise<File | null> => {
+      if (!user) return null;
+      try {
+        if (link.sourceType === 'sessionId' && link.cloudSessionId) {
+          const sessions = await getUserSessions(user);
+          const s = sessions.find((x) => x.id === link.cloudSessionId);
+          if (!s?.fileUrl) return null;
+          return await fetchFileFromUrl(s.fileUrl, s.fileName || link.fileName || '云端材料.pdf');
+        }
+        if (link.sourceType === 'fileHash' && link.fileHash) {
+          if (fileHash === link.fileHash && pdfDataUrl?.startsWith('data:application/pdf')) {
+            const res = await fetch(pdfDataUrl);
+            const blob = await res.blob();
+            return new File([blob], link.fileName || fileName || '材料.pdf', { type: 'application/pdf' });
+          }
+          // TODO：若日后在 IndexedDB 持久化 PDF 二进制，可在此按 fileHash 取回 File，无需「当前打开」限制。
+          return null;
+        }
+      } catch (e) {
+        console.warn('resolveExamMaterialPdf', e);
+      }
+      return null;
+    },
+    [user, fileHash, pdfDataUrl, fileName]
+  );
+
+  /** P2：备考工作台合并讲义（与保温流同一套逻辑与长度截断）；用于合并预览、逻辑原子整包等 */
+  const getMergedDocContentForExamLinks = useCallback(
+    async (links: ExamMaterialLink[]) => {
+      const sessionIds = Array.from(
+        new Set(links.filter((x) => x.sourceType === 'sessionId' && x.cloudSessionId).map((x) => x.cloudSessionId!))
+      );
+      const sessions = sessionIds.length > 0 && user ? await getUserSessions(user) : [];
+      const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+
+      const blocks: string[] = [];
+      for (const link of links) {
+        const t = await getDocContentForExamLink(link, sessionMap);
+        if (t.trim()) blocks.push(t);
+      }
+      return blocks.join('\n\n-----\n\n').slice(0, 60000);
+    },
+    [user, getDocContentForExamLink]
+  );
+
+  /**
+   * 结业探测：按材料 linkId 拉取**单份**讲义全文（与合并逻辑同源 `getDocContentForExamLink`），供出题/阅卷约束材料边界。
+   */
+  const loadExamWorkspaceMaterialTextForProbe = useCallback(
+    async (linkId: string): Promise<string | null> => {
+      const link = examWorkspaceMaterialsSorted.find((x) => x.id === linkId);
+      if (!link) return null;
+      const sessionIds = Array.from(
+        new Set(
+          examWorkspaceMaterialsSorted
+            .filter((x) => x.sourceType === 'sessionId' && x.cloudSessionId)
+            .map((x) => x.cloudSessionId!)
+        )
+      );
+      const sessions = sessionIds.length > 0 && user ? await getUserSessions(user) : [];
+      const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+      const text = await getDocContentForExamLink(link, sessionMap);
+      if (!text.trim()) return null;
+      return text;
+    },
+    [user, examWorkspaceMaterialsSorted, getDocContentForExamLink]
+  );
+
+  const buildMaintenanceMergedContent = getMergedDocContentForExamLinks;
+
+  const workspacePredictedScore = useMemo(() => {
+    if (!workspaceLsapContentMap || !workspaceLsapState) return null;
+    return computePredictedScore(workspaceLsapContentMap, workspaceLsapState.bktState);
+  }, [workspaceLsapContentMap, workspaceLsapState]);
+
+  /**
+   * M1 / P1：按 examWorkspaceMaterialsSorted **逐份**拉文本 → generateLSAPContentMap(workspaceChunk) → 合并 KC；
+   * 空文本跳过；单份返回 null 跳过；若最终 0 个 KC 则 alert。
+   */
+  const handleGenerateWorkspaceLsap = useCallback(async () => {
+    if (!user?.uid || !activeExamId || examWorkspaceMaterialsSorted.length === 0) {
+      window.alert('请先选择考试并关联材料。');
+      return;
     }
-    return blocks.join('\n\n-----\n\n').slice(0, 60000);
-  }, [user, fileHash, fullPdfText, fileName]);
+    setWorkspaceLsapGenerating(true);
+    setWorkspaceLsapProgress(null);
+    const sessionIds = Array.from(
+      new Set(
+        examWorkspaceMaterialsSorted
+          .filter((x) => x.sourceType === 'sessionId' && x.cloudSessionId)
+          .map((x) => x.cloudSessionId!)
+      )
+    );
+    let sessionMap = new Map<string, CloudSession>();
+    try {
+      const sessions = sessionIds.length > 0 && user ? await getUserSessions(user) : [];
+      sessionMap = new Map(sessions.map((s) => [s.id, s]));
+    } catch (e) {
+      console.warn('handleGenerateWorkspaceLsap: getUserSessions', e);
+    }
+
+    const total = examWorkspaceMaterialsSorted.length;
+    const mergedKcs: LSAPKnowledgeComponent[] = [];
+    let skippedEmpty = 0;
+    let skippedFail = 0;
+
+    try {
+      for (let i = 0; i < examWorkspaceMaterialsSorted.length; i++) {
+        const link = examWorkspaceMaterialsSorted[i];
+        const displayName = link.fileName?.trim() || '未命名材料';
+        setWorkspaceLsapProgress({ current: i + 1, total, fileName: displayName });
+
+        const text = await getDocContentForExamLink(link, sessionMap);
+        if (!text.trim()) {
+          skippedEmpty++;
+          console.warn(`[P1 LSAP] skip empty material link ${link.id}`);
+          continue;
+        }
+        const partMap = await generateLSAPContentMap(text, { mode: 'workspaceChunk' });
+        if (!partMap?.kcs?.length) {
+          skippedFail++;
+          console.warn(`[P1 LSAP] generateLSAPContentMap returned empty for link ${link.id}`);
+          continue;
+        }
+        const matKey = link.id;
+        for (const kc of partMap.kcs) {
+          mergedKcs.push({
+            ...kc,
+            id: `${matKey}__${kc.id}`,
+            sourceLinkId: link.id,
+            sourceFileName: displayName,
+          });
+        }
+      }
+
+      if (mergedKcs.length === 0) {
+        const parts = ['未能生成任何考点。'];
+        if (skippedEmpty) parts.push(`${skippedEmpty} 份材料无可用文本（请检查本地是否打开过 PDF / 云端是否可拉取）。`);
+        if (skippedFail) parts.push(`${skippedFail} 份材料生成失败。`);
+        window.alert(parts.join(' '));
+        return;
+      }
+
+      const key = computeExamWorkspaceLsapKey(user.uid, activeExamId, examWorkspaceMaterialsSorted);
+      const map: LSAPContentMap = {
+        id: `content-map-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        sourceKey: key,
+        kcs: mergedKcs,
+        createdAt: Date.now(),
+      };
+      const initialBkt: LSAPBKTState = {};
+      map.kcs.forEach((k) => {
+        initialBkt[k.id] = 0;
+      });
+      const state: LSAPState = {
+        contentMapId: map.id,
+        bktState: initialBkt,
+        probeHistory: [],
+        lastPredictedScore: 0,
+        lastUpdated: Date.now(),
+      };
+      setWorkspaceLsapContentMap(map);
+      setWorkspaceLsapState(state);
+      setWorkspaceLsapKey(key);
+      const atomCoverage = mergeAtomCoverageForMap(undefined, map);
+      setWorkspaceAtomCoverage(atomCoverage);
+      setWorkspaceDialogueTranscript([]);
+      setWorkspaceKcGlossary({});
+      saveWorkspaceLsapBundle(key, {
+        contentMap: map,
+        state,
+        atomCoverage,
+        dialogueTranscript: [],
+        kcGlossary: {},
+        dialogueUpdatedAt: Date.now(),
+        savedAt: Date.now(),
+      });
+    } finally {
+      setWorkspaceLsapGenerating(false);
+      setWorkspaceLsapProgress(null);
+    }
+  }, [user, activeExamId, examWorkspaceMaterialsSorted, getDocContentForExamLink]);
+
+  /**
+   * M2 / P2：逻辑原子。
+   * - 若全部 KC 无 `sourceLinkId`（旧 bundle）：回退为整包 merged 一次调用（与改动前一致，`maxDocChars: 60000` 对齐合并串上限）。
+   * - 否则：按 `examWorkspaceMaterialsSorted` 循环，每份 `getDocContentForExamLink` + 仅含该 `sourceLinkId` 的 KC 子集调用模型；
+   *   无 `sourceLinkId` 的 KC 另用「整包 merged」抽一次（子集），再按 `kc.id` 拼回。
+   * 某份失败则跳过并继续；若全部失败则 alert。未返回 atoms 的 KC 保留原 atoms（若有）。
+   */
+  const handleExtractLogicAtoms = useCallback(async () => {
+    if (!user?.uid || !activeExamId || !workspaceLsapContentMap?.kcs?.length) {
+      window.alert('请先生成本场考点图谱。');
+      return;
+    }
+    if (examWorkspaceMaterialsSorted.length === 0) {
+      window.alert('请先关联材料。');
+      return;
+    }
+    if (!workspaceLsapState) {
+      window.alert('本场 LSAP 状态缺失，请重新生成本场考点图谱。');
+      return;
+    }
+    const kcs = workspaceLsapContentMap.kcs;
+    const withSource = kcs.filter((k) => k.sourceLinkId);
+    const withoutSource = kcs.filter((k) => !k.sourceLinkId);
+
+    setWorkspaceAtomsGenerating(true);
+    setWorkspaceAtomsProgress(null);
+
+    const runLegacyFallback = async () => {
+      const merged = await getMergedDocContentForExamLinks(examWorkspaceMaterialsSorted);
+      if (!merged.trim()) {
+        window.alert('合并材料为空，请先在主界面打开过本地 PDF，或检查云端文件。');
+        return false;
+      }
+      setWorkspaceAtomsProgress({ current: 1, total: 1, fileName: '整包合并讲义（旧版考点图谱）' });
+      const newMap = await generateLogicAtomsForContentMap(merged, workspaceLsapContentMap, { maxDocChars: 60000 });
+      if (!newMap) {
+        window.alert('提取逻辑原子失败，请重试。');
+        return false;
+      }
+      const key = computeExamWorkspaceLsapKey(user.uid, activeExamId, examWorkspaceMaterialsSorted);
+      const atomCoverage = mergeAtomCoverageForMap(workspaceAtomCoverage, newMap);
+      setWorkspaceLsapContentMap(newMap);
+      setWorkspaceAtomCoverage(atomCoverage);
+      saveWorkspaceLsapBundle(key, {
+        contentMap: newMap,
+        state: workspaceLsapStateRef.current ?? workspaceLsapState,
+        atomCoverage,
+        dialogueTranscript: workspaceDialogueTranscriptRef.current,
+        kcGlossary: workspaceKcGlossaryRef.current,
+        dialogueUpdatedAt: Date.now(),
+        savedAt: Date.now(),
+      });
+      return true;
+    };
+
+    try {
+      if (withSource.length === 0) {
+        await runLegacyFallback();
+        return;
+      }
+
+      const sessionIds = Array.from(
+        new Set(
+          examWorkspaceMaterialsSorted
+            .filter((x) => x.sourceType === 'sessionId' && x.cloudSessionId)
+            .map((x) => x.cloudSessionId!)
+        )
+      );
+      let sessionMap = new Map<string, CloudSession>();
+      try {
+        const sessions = sessionIds.length > 0 && user ? await getUserSessions(user) : [];
+        sessionMap = new Map(sessions.map((s) => [s.id, s]));
+      } catch (e) {
+        console.warn('handleExtractLogicAtoms: getUserSessions', e);
+      }
+
+      type AtomStep = { kind: 'link'; link: (typeof examWorkspaceMaterialsSorted)[number] } | { kind: 'orphan' };
+      const steps: AtomStep[] = [];
+      for (const link of examWorkspaceMaterialsSorted) {
+        if (kcs.some((kc) => kc.sourceLinkId === link.id)) {
+          steps.push({ kind: 'link', link });
+        }
+      }
+      if (withoutSource.length > 0) {
+        steps.push({ kind: 'orphan' });
+      }
+
+      if (steps.length === 0) {
+        window.alert('无法将考点与关联材料匹配，请重新生成本场考点图谱。');
+        return;
+      }
+
+      const resultMap = JSON.parse(JSON.stringify(workspaceLsapContentMap)) as LSAPContentMap;
+      let skippedEmpty = 0;
+      let skippedFail = 0;
+      let anySuccess = false;
+
+      for (let i = 0; i < steps.length; i++) {
+        const step = steps[i];
+        const displayName =
+          step.kind === 'link'
+            ? step.link.fileName?.trim() || '未命名材料'
+            : '合并讲义（无材料归属的考点）';
+        setWorkspaceAtomsProgress({ current: i + 1, total: steps.length, fileName: displayName });
+
+        if (step.kind === 'link') {
+          const link = step.link;
+          const subset = kcs.filter((kc) => kc.sourceLinkId === link.id);
+          if (subset.length === 0) continue;
+
+          const text = await getDocContentForExamLink(link, sessionMap);
+          if (!text.trim()) {
+            skippedEmpty++;
+            console.warn(`[P2 atoms] skip empty text for link ${link.id}`);
+            continue;
+          }
+
+          const partialMap: LSAPContentMap = {
+            id: resultMap.id,
+            sourceKey: resultMap.sourceKey,
+            createdAt: resultMap.createdAt,
+            kcs: subset,
+          };
+
+          const newPartial = await generateLogicAtomsForContentMap(text, partialMap, {
+            maxDocChars: LSAP_ATOMS_PER_MATERIAL_MAX_CHARS,
+            perMaterial: true,
+          });
+          if (!newPartial) {
+            skippedFail++;
+            console.warn(`[P2 atoms] generateLogicAtomsForContentMap null for link ${link.id}`);
+            continue;
+          }
+          anySuccess = true;
+          for (const kc of newPartial.kcs) {
+            const target = resultMap.kcs.find((x) => x.id === kc.id);
+            if (target) target.atoms = kc.atoms;
+          }
+        } else {
+          const merged = await getMergedDocContentForExamLinks(examWorkspaceMaterialsSorted);
+          if (!merged.trim()) {
+            skippedEmpty++;
+            continue;
+          }
+          const partialMap: LSAPContentMap = {
+            id: resultMap.id,
+            sourceKey: resultMap.sourceKey,
+            createdAt: resultMap.createdAt,
+            kcs: withoutSource,
+          };
+          const newPartial = await generateLogicAtomsForContentMap(merged, partialMap, { maxDocChars: 60000 });
+          if (!newPartial) {
+            skippedFail++;
+            continue;
+          }
+          anySuccess = true;
+          for (const kc of newPartial.kcs) {
+            const target = resultMap.kcs.find((x) => x.id === kc.id);
+            if (target) target.atoms = kc.atoms;
+          }
+        }
+      }
+
+      if (!anySuccess) {
+        const parts = ['未能为任何考点生成逻辑原子。'];
+        if (skippedEmpty) parts.push(`${skippedEmpty} 步材料无可用文本。`);
+        if (skippedFail) parts.push(`${skippedFail} 步模型调用失败。`);
+        window.alert(parts.join(' '));
+        return;
+      }
+
+      const key = computeExamWorkspaceLsapKey(user.uid, activeExamId, examWorkspaceMaterialsSorted);
+      const atomCoverage = mergeAtomCoverageForMap(workspaceAtomCoverage, resultMap);
+      setWorkspaceLsapContentMap(resultMap);
+      setWorkspaceAtomCoverage(atomCoverage);
+      saveWorkspaceLsapBundle(key, {
+        contentMap: resultMap,
+        state: workspaceLsapStateRef.current ?? workspaceLsapState,
+        atomCoverage,
+        dialogueTranscript: workspaceDialogueTranscriptRef.current,
+        kcGlossary: workspaceKcGlossaryRef.current,
+        dialogueUpdatedAt: Date.now(),
+        savedAt: Date.now(),
+      });
+    } finally {
+      setWorkspaceAtomsGenerating(false);
+      setWorkspaceAtomsProgress(null);
+    }
+  }, [
+    user,
+    activeExamId,
+    workspaceLsapContentMap,
+    workspaceLsapState,
+    workspaceAtomCoverage,
+    examWorkspaceMaterialsSorted,
+    getMergedDocContentForExamLinks,
+    getDocContentForExamLink,
+  ]);
+
+  /** M3：对话中更新原子覆盖并持久化 bundle */
+  const handleWorkspaceAtomCoverageChange = useCallback(
+    (next: AtomCoverageByKc) => {
+      setWorkspaceAtomCoverage(next);
+      if (!user?.uid || !workspaceLsapKey || !workspaceLsapContentMap || !workspaceLsapStateRef.current) return;
+      saveWorkspaceLsapBundle(workspaceLsapKey, {
+        contentMap: workspaceLsapContentMap,
+        state: workspaceLsapStateRef.current,
+        atomCoverage: next,
+        dialogueTranscript: workspaceDialogueTranscriptRef.current,
+        kcGlossary: workspaceKcGlossaryRef.current,
+        dialogueUpdatedAt: Date.now(),
+        savedAt: Date.now(),
+      });
+    },
+    [user?.uid, workspaceLsapKey, workspaceLsapContentMap]
+  );
+
+  /** M4：结业探测后更新 LSAPState + bundle（与 atomCoverage 最新值一致） */
+  const commitWorkspaceLsapState = useCallback(
+    (next: LSAPState) => {
+      setWorkspaceLsapState(next);
+      if (!user?.uid || !workspaceLsapKey || !workspaceLsapContentMap) return;
+      saveWorkspaceLsapBundle(workspaceLsapKey, {
+        contentMap: workspaceLsapContentMap,
+        state: next,
+        atomCoverage: workspaceAtomCoverageRef.current,
+        dialogueTranscript: workspaceDialogueTranscriptRef.current,
+        kcGlossary: workspaceKcGlossaryRef.current,
+        dialogueUpdatedAt: Date.now(),
+        savedAt: Date.now(),
+      });
+    },
+    [user?.uid, workspaceLsapKey, workspaceLsapContentMap]
+  );
+
+  /** M5：对话留痕合并（按 chatSessionKey 分段）并持久化 */
+  const handleWorkspaceDialogueTranscriptChange = useCallback(
+    (turns: WorkspaceDialogueTurn[], chatSessionKey: string) => {
+      setWorkspaceDialogueTranscript((prev) => {
+        const filtered = prev.filter((t) => t.sessionKey !== chatSessionKey);
+        const marked = turns.map((t) => ({ ...t, sessionKey: chatSessionKey }));
+        const next = truncateWorkspaceDialogue([...filtered, ...marked]);
+        queueMicrotask(() => {
+          if (!user?.uid || !workspaceLsapKey || !workspaceLsapContentMap || !workspaceLsapStateRef.current) return;
+          saveWorkspaceLsapBundle(workspaceLsapKey, {
+            contentMap: workspaceLsapContentMap,
+            state: workspaceLsapStateRef.current,
+            atomCoverage: workspaceAtomCoverageRef.current,
+            dialogueTranscript: next,
+            kcGlossary: workspaceKcGlossaryRef.current,
+            dialogueUpdatedAt: Date.now(),
+            savedAt: Date.now(),
+          });
+        });
+        return next;
+      });
+    },
+    [user?.uid, workspaceLsapKey, workspaceLsapContentMap]
+  );
+
+  /** KC 即时术语：合并去重并写入 bundle */
+  const handleWorkspaceGlossaryAppend = useCallback(
+    (entries: KcGlossaryEntry[]) => {
+      if (!entries.length) return;
+      setWorkspaceKcGlossary((prev) => {
+        const next: Record<string, KcGlossaryEntry[]> = { ...prev };
+        for (const e of entries) {
+          const list = [...(next[e.kcId] ?? [])];
+          const nk = normalizeTermKey(e.term);
+          if (list.some((x) => normalizeTermKey(x.term) === nk)) continue;
+          list.push(e);
+          next[e.kcId] = list;
+        }
+        workspaceKcGlossaryRef.current = next;
+        queueMicrotask(() => {
+          if (!user?.uid || !workspaceLsapKey || !workspaceLsapContentMap || !workspaceLsapStateRef.current) return;
+          saveWorkspaceLsapBundle(workspaceLsapKey, {
+            contentMap: workspaceLsapContentMap,
+            state: workspaceLsapStateRef.current,
+            atomCoverage: workspaceAtomCoverageRef.current,
+            dialogueTranscript: workspaceDialogueTranscriptRef.current,
+            kcGlossary: workspaceKcGlossaryRef.current,
+            dialogueUpdatedAt: Date.now(),
+            savedAt: Date.now(),
+          });
+        });
+        return next;
+      });
+    },
+    [user?.uid, workspaceLsapKey, workspaceLsapContentMap]
+  );
+
+  /** P0：备考工作台 → 考前预测（单材料：优先第一份 fileHash，否则第一份云端 session） */
+  const handleWorkspaceEnterPrediction = async (links: ExamMaterialLink[]) => {
+    if (!user) {
+      setLoginModalOpen(true);
+      return;
+    }
+    const sorted = [...links].sort((a, b) => (a.sortIndex ?? a.addedAt) - (b.sortIndex ?? b.addedAt));
+    const firstFile = sorted.find((l) => l.sourceType === 'fileHash' && l.fileHash);
+    if (firstFile) {
+      const hasContent = !!(fullPdfText?.trim() || pdfDataUrl);
+      if (fileHash === firstFile.fileHash && hasContent) {
+        setExamPredictionInitialKCId(null);
+        setExamPredictionPanelOpen(true);
+        return;
+      }
+      pendingExamPredictionAfterHashRef.current = firstFile.fileHash;
+      skipMoodOnNextFileLoadRef.current = true;
+      window.alert(`请选择本地文件「${firstFile.fileName}」以加载与考试关联的 PDF，随后将打开考前预测。`);
+      hiddenFileInputRef.current?.click();
+      return;
+    }
+    const firstSession = sorted.find((l) => l.sourceType === 'sessionId' && l.cloudSessionId);
+    if (firstSession) {
+      skipMoodOnNextFileLoadRef.current = true;
+      try {
+        const sessions = await getUserSessions(user);
+        const s = sessions.find((x) => x.id === firstSession.cloudSessionId && x.type === 'file');
+        if (!s?.fileUrl) {
+          window.alert('无法找到云端文件或下载链接缺失。请先在主界面侧栏从「云端」恢复该 PDF，或到考试中心检查材料关联。');
+          skipMoodOnNextFileLoadRef.current = false;
+          return;
+        }
+        await handleRestoreCloudSession(s);
+        setExamPredictionInitialKCId(null);
+        setExamPredictionPanelOpen(true);
+        /* 保持在备考工作台，不跳回主学习界面 */
+      } catch (e) {
+        console.error(e);
+        window.alert('从云端打开材料失败，请检查网络后重试。');
+        skipMoodOnNextFileLoadRef.current = false;
+      }
+      return;
+    }
+    window.alert('当前考试没有可打开的关联材料。');
+  };
 
   const filePersistedSnapshot: FilePersistedState | null = useMemo(() => {
     if (!fileHash && !fileName) return null;
@@ -1282,7 +1960,15 @@ const App: React.FC = () => {
   };
 
   const currentSlide = slides[currentIndex];
-  
+
+  /**
+   * Sidebar 页缩略图：与 slides 同源（processFile → convertPdfToImages 已为每页生成 imageUrl，无需再跑 pdf.js）。
+   * - 换文档：`setSlides(newSlides)` 整表替换，缩略图数组与 totalPages 同步，不会残留上一本书。
+   * - 清空：`slides === []` 时此处为 `[]`，Sidebar 无页格或仅「无预览」占位，不引用旧 data URL。
+   * - 泄漏：当前为 data: URL 字符串，无 blob: revoke 需求；若未来改为 blob URL，需在替换/卸载时 revoke。
+   */
+  const pageThumbnails = useMemo(() => slides.map((s) => s.imageUrl), [slides]);
+
   const renderVideoOverlay = () => {
     if (!externalVideo) return null;
     return (
@@ -1346,13 +2032,12 @@ const App: React.FC = () => {
       onStartClass={handleStartClass}
       isTranscriptionSupported={transcriptionSupported}
       onOpenReview={() => setReviewPageOpen(true)}
-      onOpenExamHub={() => {
+      onOpenExamWorkspace={() => {
         if (!user) {
           setLoginModalOpen(true);
           return;
         }
-        setExamHubInitialTab('exams');
-        setExamHubOpen(true);
+        setAppMode('examWorkspace');
       }}
       onOpenFiveMin={() => setFiveMinFlowOpen(true)}
       onOpenTurtleSoup={() => setTurtleSoupOpen(true)}
@@ -1967,6 +2652,40 @@ const App: React.FC = () => {
         className="hidden"
       />
 
+      {appMode === 'examWorkspace' && user ? (
+        <ExamWorkspacePage
+          user={user}
+          activeExamId={activeExamId}
+          onActiveExamIdChange={setActiveExamId}
+          onBack={() => setAppMode('study')}
+          onOpenExamHub={() => {
+            setExamHubInitialTab('exams');
+            setExamHubOpen(true);
+          }}
+          onEnterExamPrediction={handleWorkspaceEnterPrediction}
+          onLoadMergedContent={getMergedDocContentForExamLinks}
+          onLoadProbeMaterialText={loadExamWorkspaceMaterialTextForProbe}
+          workspaceLsapContentMap={workspaceLsapContentMap}
+          workspaceLsapState={workspaceLsapState}
+          onWorkspaceLsapStateCommit={commitWorkspaceLsapState}
+          predictedScore={workspacePredictedScore}
+          onGenerateWorkspaceLsap={handleGenerateWorkspaceLsap}
+          workspaceLsapGenerating={workspaceLsapGenerating}
+          workspaceLsapProgress={workspaceLsapProgress}
+          workspaceAtomsProgress={workspaceAtomsProgress}
+          workspaceAtomCoverage={workspaceAtomCoverage}
+          onExtractLogicAtoms={handleExtractLogicAtoms}
+          workspaceAtomsGenerating={workspaceAtomsGenerating}
+          onWorkspaceAtomCoverageChange={handleWorkspaceAtomCoverageChange}
+          workspaceDialogueTranscript={workspaceDialogueTranscript}
+          workspaceLsapKey={workspaceLsapKey}
+          onWorkspaceDialogueTranscriptChange={handleWorkspaceDialogueTranscriptChange}
+          workspaceKcGlossary={workspaceKcGlossary}
+          onWorkspaceGlossaryAppend={handleWorkspaceGlossaryAppend}
+          resolveExamMaterialPdf={resolveExamMaterialPdf}
+        />
+      ) : (
+        <>
       <section className={`h-screen flex flex-col relative z-20 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] ${isImmersive ? 'bg-[#F3F4F6]' : 'bg-[#FFFBF7]'}`}>
         {isEmbeddedDev && !devBannerDismissed && (
           <div className="flex items-center justify-between gap-4 px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-800 text-sm shrink-0">
@@ -1996,6 +2715,7 @@ const App: React.FC = () => {
             totalPages={slides.length} 
             currentPage={currentIndex + 1} 
             onJumpToPage={handleJumpToPage}
+            pageThumbnails={pageThumbnails}
             hasPdfLoaded={!!fileName && slides.length > 0}
             onOpenQuiz={() => setReviewPanel('quiz')}
             onOpenFlashCard={() => setReviewPanel('flashcard')}
@@ -2120,6 +2840,8 @@ const App: React.FC = () => {
              <Notebook fileName={fileName} notes={fileName ? (notebookData[fileName] || {}) : {}} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />
              <footer className="mt-10 text-center text-stone-300 text-sm font-bold tracking-widest">逃课神器 · POWERED BY GEMINI 3.0 PRO</footer>
           </section>
+        </>
+      )}
         </>
       )}
     </div>

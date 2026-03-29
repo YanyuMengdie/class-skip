@@ -10,11 +10,13 @@ import {
   evaluateLSAPAnswer,
   generateLSAPTargetedTeaching,
   answerLSAPTeachingQuestion,
+  type LSAPProbeDocScope,
   LSAPProbeResult,
   LSAPEvalResult
 } from '../services/geminiService';
 import { updateBKT } from '../utils/bkt';
 import type { LSAPContentMap, LSAPState, ProbeRecord, LSAPBKTState, LSAPKnowledgeComponent } from '../types';
+import { computePredictedScore } from '../utils/lsapScore';
 
 interface ExamPredictionPanelProps {
   onClose: () => void;
@@ -29,19 +31,6 @@ interface ExamPredictionPanelProps {
   /** 外部引导：打开后选中指定考点（如每日计划 lsap_probe） */
   initialKCId?: string | null;
   onSaveState?: (contentMap: LSAPContentMap, state: LSAPState) => void;
-}
-
-function computePredictedScore(contentMap: LSAPContentMap, bktState: LSAPBKTState): number {
-  let weightedSum = 0;
-  let totalWeight = 0;
-  for (const kc of contentMap.kcs) {
-    const p = bktState[kc.id] ?? 0;
-    const w = kc.examWeight || 1;
-    weightedSum += p * w;
-    totalWeight += w;
-  }
-  if (totalWeight <= 0) return 0;
-  return Math.round((weightedSum / totalWeight) * 100);
 }
 
 const TeachingMarkdown: React.CSSProperties = {
@@ -119,6 +108,15 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
     if (!contentMap) return 0;
     return computePredictedScore(contentMap, bktState);
   }, [contentMap, bktState]);
+
+  /** 与备考台 `LSAPProbeDocScope` 一致：本面板始终针对当前打开的单一 PDF */
+  const lsapSingleDocScope = useMemo(
+    (): LSAPProbeDocScope => ({
+      docIsSingleMaterial: true,
+      materialDisplayName: displayFileName,
+    }),
+    [displayFileName]
+  );
 
   const kcOrdered = useMemo(() => {
     if (!contentMap) return [];
@@ -217,7 +215,7 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
     setUserAnswer('');
     setError(null);
     setLastScoreDelta(null);
-    generateLSAPProbeQuestion(pdfContent, contentMap, kc.id, currentBloomLevel)
+    generateLSAPProbeQuestion(pdfContent, contentMap, kc.id, currentBloomLevel, undefined, lsapSingleDocScope)
       .then((res) => {
         if (res) {
           setCurrentQuestion(res);
@@ -225,7 +223,7 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
         } else setError('出题失败，请重试');
       })
       .catch(() => setError('出题失败，请重试'));
-  }, [contentMap, pdfContent, currentKCIndex, currentBloomLevel, kcOrdered]);
+  }, [contentMap, pdfContent, currentKCIndex, currentBloomLevel, kcOrdered, lsapSingleDocScope]);
 
   useEffect(() => {
     if (
@@ -244,18 +242,25 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
   useEffect(() => {
     if (!teachingActive || !teachingKC || !pdfContent || teachingContent !== null || teachingLoading) return;
     setTeachingLoading(true);
-    generateLSAPTargetedTeaching(pdfContent, teachingKC, teachingEvidence)
+    generateLSAPTargetedTeaching(pdfContent, teachingKC, teachingEvidence, lsapSingleDocScope)
       .then(setTeachingContent)
       .catch(() => setTeachingContent(`请查看【${displayFileName}】第 ${teachingSourcePages.length ? teachingSourcePages.join('、') : '—'} 页复习「${teachingKC.concept}」。`))
       .finally(() => setTeachingLoading(false));
-  }, [teachingActive, teachingKC, teachingEvidence, pdfContent, displayFileName, teachingSourcePages]);
+  }, [teachingActive, teachingKC, teachingEvidence, pdfContent, displayFileName, teachingSourcePages, lsapSingleDocScope]);
 
   const handleSubmit = () => {
     if (!currentQuestion || !currentKC || !pdfContent || !userAnswer.trim()) return;
     setIsEvaluating(true);
     setError(null);
     const prevScore = predictedScore;
-    evaluateLSAPAnswer(pdfContent, currentKC.id, currentQuestion.question, userAnswer.trim(), currentSourceRef)
+    evaluateLSAPAnswer(
+      pdfContent,
+      currentKC.id,
+      currentQuestion.question,
+      userAnswer.trim(),
+      currentSourceRef,
+      lsapSingleDocScope
+    )
       .then((evalRes: LSAPEvalResult | null) => {
         if (!evalRes) {
           setError('评判失败，请重试');
@@ -317,6 +322,26 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
     onClose();
   };
 
+  const handleBackToModeChoose = () => {
+    setPanelMode('choose');
+    setTeachingActive(false);
+    setTeachingKC(null);
+    setTeachingContent(null);
+    setTeachingEvidence('');
+    setTeachingSourcePages([]);
+    setTeachingChatMessages([]);
+    setShowTeachingOffer(false);
+    setLastEvalResult(null);
+    setLastWrongKC(null);
+    setReviewPhase('list');
+    setReviewSelectedKC(null);
+    setReviewQuizQuestion(null);
+    setReviewQuizUserAnswer('');
+    setReviewQuizShowTeachOffer(false);
+    setReviewQuizEvalResult(null);
+    setError(null);
+  };
+
   const handleEnterTeaching = () => {
     if (!lastWrongKC || !lastEvalResult) return;
     const pages = [...(lastWrongKC.sourcePages || [])];
@@ -366,7 +391,7 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
       setReviewQuizUserAnswer('');
       setReviewQuizLoading(true);
       setError(null);
-      generateLSAPProbeQuestion(pdfContent, contentMap, kcId, level)
+      generateLSAPProbeQuestion(pdfContent, contentMap, kcId, level, undefined, lsapSingleDocScope)
         .then((res) => {
           if (res) {
             setReviewQuizQuestion(res);
@@ -376,7 +401,7 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
         .catch(() => setError('出题失败，请重试'))
         .finally(() => setReviewQuizLoading(false));
     },
-    [contentMap, pdfContent]
+    [contentMap, pdfContent, lsapSingleDocScope]
   );
 
   const handleReviewClaimDone = (kc: LSAPKnowledgeComponent) => {
@@ -401,7 +426,8 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
       kc.id,
       reviewQuizQuestion.question,
       reviewQuizUserAnswer.trim(),
-      reviewQuizSourceRef
+      reviewQuizSourceRef,
+      lsapSingleDocScope
     )
       .then((evalRes: LSAPEvalResult | null) => {
         if (!evalRes) {
@@ -486,7 +512,7 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
     setTeachingChatInput('');
     setTeachingChatMessages((m) => [...m, { role: 'user', text: q }]);
     setTeachingChatLoading(true);
-    answerLSAPTeachingQuestion(pdfContent, teachingKC, teachingContent, teachingChatMessages, q)
+    answerLSAPTeachingQuestion(pdfContent, teachingKC, teachingContent, teachingChatMessages, q, lsapSingleDocScope)
       .then((reply) => {
         setTeachingChatMessages((m) => [...m, { role: 'model', text: reply }]);
       })
@@ -618,6 +644,16 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
 
           {contentMap && !isLoadingMap && panelMode !== 'choose' && (
             <>
+              <div className="flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={handleBackToModeChoose}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-stone-100 text-slate-700 hover:bg-stone-200"
+                >
+                  返回模式选择
+                </button>
+              </div>
+
               {panelMode === 'probe' && (
                 <div className="rounded-xl bg-amber-50 border border-amber-100 p-4">
                   {allKCsProbedOnce ? (
@@ -673,6 +709,9 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
                     <BookOpen className="w-4 h-4" />
                     针对性教学：{teachingKC.concept}
                   </h3>
+                  <p className="text-[11px] text-sky-800/90 leading-snug">
+                    讲解与追问仅依据当前打开的「{displayFileName}」全文，页码均为该文档内页码。
+                  </p>
                   <p className="text-sm text-slate-700">
                     对应材料：<strong>{displayFileName}</strong> 第 {teachingSourcePages.length ? teachingSourcePages.join('、') : '—'} 页
                   </p>
@@ -757,6 +796,20 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
                     共 {contentMap.kcs.length} 个知识点单元，学完且学一个少一个即可基本完全掌握本 PDF。
                   </p>
                   <p className="text-sm text-slate-600">剩余 {reviewRemainingKCs.length} 个</p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={reviewRemainingKCs.length === 0}
+                      onClick={() => {
+                        const target = reviewRemainingKCs[0];
+                        if (!target) return;
+                        handleReviewClaimDone(target);
+                      }}
+                      className="flex items-center gap-1 py-2 px-3 rounded-lg bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 disabled:opacity-50"
+                    >
+                      我准备好了！可以测试了！
+                    </button>
+                  </div>
                   <ul className="space-y-3 max-h-64 overflow-y-auto">
                     {reviewRemainingKCs.map((kc) => (
                       <li
@@ -836,6 +889,9 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
                   )}
                   {(reviewQuizQuestion || reviewQuizLoading) && !reviewQuizShowTeachOffer && (
                     <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-3">
+                      <p className="text-[11px] leading-snug text-sky-900/80 bg-white/80 border border-sky-100 rounded-lg px-2.5 py-1.5">
+                        测验题目基于当前打开的「{displayFileName}」，与摸底探测使用同一材料范围。
+                      </p>
                       <p className="text-xs text-slate-500">
                         考点：{reviewSelectedKC.concept}（{reviewQuizLevel === 1 ? '验证' : '深层'}题）
                       </p>
@@ -916,6 +972,9 @@ export const ExamPredictionPanel: React.FC<ExamPredictionPanelProps> = ({
 
               {panelMode === 'probe' && currentKC && currentQuestion && !isEvaluating && !showTeachingOffer && !teachingActive && (
                 <div className="space-y-3">
+                  <p className="text-[11px] leading-snug text-amber-900/85 bg-amber-50/90 border border-amber-100 rounded-lg px-2.5 py-1.5">
+                    本题基于当前打开的讲义「{displayFileName}」出题；出处与阅卷均约束在该文档内。
+                  </p>
                   <p className="text-xs text-slate-500">考点：{currentKC.concept}（层级 {currentBloomLevel}）</p>
                   <p className="font-medium text-slate-800">{currentQuestion.question}</p>
                   <textarea

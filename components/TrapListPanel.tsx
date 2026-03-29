@@ -6,9 +6,10 @@ interface TrapListPanelProps {
   onClose: () => void;
   items: TrapItem[];
   onRemove: (id: string) => void;
+  onSaveToStudio?: () => void;
 }
 
-export const TrapListPanel: React.FC<TrapListPanelProps> = ({ onClose, items, onRemove }) => {
+export const TrapListPanel: React.FC<TrapListPanelProps> = ({ onClose, items, onRemove, onSaveToStudio }) => {
   return (
     <div className="fixed inset-0 z-[300] bg-black/40 flex items-center justify-center p-4 animate-in fade-in duration-200">
       <div className="bg-white rounded-3xl shadow-2xl border border-stone-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
@@ -59,6 +60,15 @@ export const TrapListPanel: React.FC<TrapListPanelProps> = ({ onClose, items, on
                   <p className="mt-2 text-xs text-slate-500 border-t border-amber-100 pt-2">解析：{item.explanation}</p>
                 </div>
               ))}
+              {onSaveToStudio && items.length > 0 && (
+                <button
+                  type="button"
+                  onClick={onSaveToStudio}
+                  className="w-full mt-4 py-3 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors"
+                >
+                  保存到 Studio
+                </button>
+              )}
             </div>
           )}
         </div>

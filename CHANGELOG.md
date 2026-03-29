@@ -1,5 +1,18 @@
 # 更新日志
 
+## [Unreleased]
+
+### 考前预测 · LSAP 单材料 scope（第二期）
+
+- **ExamPredictionPanel**：摸底探测、复习验证/深层题、阅卷与针对性教学（含内联追问）调用 `generateLSAPProbeQuestion` / `evaluateLSAPAnswer` / `generateLSAPTargetedTeaching` / `answerLSAPTeachingQuestion` 时统一传入 `LSAPProbeDocScope`（`docIsSingleMaterial` + `materialDisplayName`），与备考工作台按 `sourceLinkId` 切片后的 prompt 边界语义对齐；本面板始终针对当前打开的单一 PDF。
+- **geminiService**：上述两条教学 API 增加可选 scope，prompt 中约束讲解与页码引用不得越界到其它讲义。
+
+### 🔀 略读 / 备考对话 API 分离
+
+- **略读 / 智能导读（`SkimPanel`）**：改为调用 `chatWithSkimAdaptiveTutor`，并按 `docType` 使用 `utils/prompts.ts` 的 `STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT`。
+- **备考苏格拉底（`ExamWorkspaceSocraticChat`）**：继续使用 `chatWithAdaptiveTutor`，chunk / citations / KC / 支架附录行为保持原路径。
+- **成本提示**：略读侧改用长 system prompt 后，请求 token 可能高于旧的通用短 system，属于预期换取更稳定导读风格。
+
 ## [2026-02-18] 版本更新
 
 ### ✨ 新增功能

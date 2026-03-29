@@ -6,12 +6,14 @@ interface TerminologyPanelProps {
   onClose: () => void;
   pdfContent: string | null;
   onGenerateFlashCards?: (terms: TerminologyItem[]) => void;
+  onSaveToStudio?: (terms: TerminologyItem[]) => void;
 }
 
 export const TerminologyPanel: React.FC<TerminologyPanelProps> = ({
   onClose,
   pdfContent,
-  onGenerateFlashCards
+  onGenerateFlashCards,
+  onSaveToStudio
 }) => {
   const [items, setItems] = useState<TerminologyItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -91,14 +93,24 @@ export const TerminologyPanel: React.FC<TerminologyPanelProps> = ({
                   </div>
                 );
               })}
-              {onGenerateFlashCards && items.length > 0 && (
-                <button
-                  onClick={() => { onGenerateFlashCards(items); onClose(); }}
-                  className="w-full mt-4 py-3 rounded-xl bg-cyan-100 text-cyan-800 font-bold text-sm hover:bg-cyan-200 transition-colors"
-                >
-                  生成术语闪卡
-                </button>
-              )}
+              <div className="flex flex-wrap gap-2 mt-4">
+                {onGenerateFlashCards && items.length > 0 && (
+                  <button
+                    onClick={() => { onGenerateFlashCards(items); onClose(); }}
+                    className="flex-1 min-w-0 py-3 rounded-xl bg-cyan-100 text-cyan-800 font-bold text-sm hover:bg-cyan-200 transition-colors"
+                  >
+                    生成术语闪卡
+                  </button>
+                )}
+                {onSaveToStudio && items.length > 0 && (
+                  <button
+                    onClick={() => onSaveToStudio(items)}
+                    className="flex-1 min-w-0 py-3 rounded-xl bg-stone-100 text-slate-700 font-bold text-sm hover:bg-stone-200 transition-colors"
+                  >
+                    保存到 Studio
+                  </button>
+                )}
+              </div>
             </div>
           )}
         </div>

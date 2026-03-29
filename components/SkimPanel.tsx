@@ -1,12 +1,20 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useDeferredValue,
+  Component,
+  type ErrorInfo,
+  type ReactNode,
+} from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType } from '../types';
-import { Rocket, Send, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2 } from 'lucide-react';
-import { chatWithAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '../services/geminiService';
+import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2 } from 'lucide-react';
+import { chatWithSkimAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '../services/geminiService';
 
 interface SkimPanelProps {
   studyMap: StudyMap | null;
@@ -31,6 +39,11 @@ interface SkimPanelProps {
 
   // Note Taking
   onNotebookAdd?: (text: string, category: 'skim') => void;
+
+  /** 按所选模块数重新生成 studyMap（知识检查通过后可选） */
+  onRegenerateStudyMap?: (moduleCount: number) => Promise<void>;
+  /** 当前学习地图的模块数（用于判断是否需要重新生成） */
+  studyMapModuleCount?: number | null;
 }
 
 const MarkdownComponents: Components = {
@@ -63,6 +76,52 @@ const MarkdownComponents: Components = {
     ),
 };
 
+/** 「发给导读」时追加在草稿前传给模型；用户气泡仍仅展示草稿原文 */
+const SKIM_DRAFT_GUIDE_PREFIX =
+  '【请点评我对本模块的理解（不用重复全文，可指出偏差与补充）】';
+
+/** 略读草稿预览：KaTeX 解析失败时降级为纯文本，不抛错打断输入 */
+class TakeawaysDraftMarkdownPreview extends Component<
+  { markdown: string },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  componentDidUpdate(prev: { markdown: string }) {
+    if (prev.markdown !== this.props.markdown) {
+      this.setState({ hasError: false });
+    }
+  }
+
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.warn('[TakeawaysDraftMarkdownPreview]', error, info);
+  }
+
+  render(): ReactNode {
+    if (this.state.hasError) {
+      return (
+        <pre className="whitespace-pre-wrap break-words text-xs leading-relaxed text-slate-700 font-sans">
+          {this.props.markdown}
+        </pre>
+      );
+    }
+    return (
+      <ReactMarkdown
+        components={MarkdownComponents}
+        remarkPlugins={[remarkMath, remarkGfm]}
+        rehypePlugins={[rehypeKatex]}
+        className="text-xs text-slate-700"
+      >
+        {this.props.markdown}
+      </ReactMarkdown>
+    );
+  }
+}
+
 export const SkimPanel: React.FC<SkimPanelProps> = ({
   studyMap,
   isLoading,
@@ -79,7 +138,9 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   setQuizData,
   docType,
   onToggleDocType,
-  onNotebookAdd
+  onNotebookAdd,
+  onRegenerateStudyMap,
+  studyMapModuleCount = null,
 }) => {
   const [input, setInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -88,6 +149,10 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   // Quiz State
   const [quizSelectedOption, setQuizSelectedOption] = useState<number | null>(null);
   const [quizSubmitted, setQuizSubmitted] = useState(false);
+  const [isRegeneratingMap, setIsRegeneratingMap] = useState(false);
+  const [showGranularityModal, setShowGranularityModal] = useState(false);
+  const [selectedModuleCount, setSelectedModuleCount] = useState<number>(4);
+  const MODULE_OPTIONS = [2, 3, 4, 5, 6, 7];
 
   // 本模块要点 & 模块小题（reading 阶段）
   const [moduleTakeaways, setModuleTakeaways] = useState<string[] | null>(null);
@@ -98,9 +163,24 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const [moduleQuizSelected, setModuleQuizSelected] = useState<number | null>(null);
   const [moduleQuizSubmitted, setModuleQuizSubmitted] = useState(false);
 
+  /** 本模块要点「自整理」草稿：按每次成功生成要点分配新键，仅存内存 */
+  const nextTakeawaysDraftIdRef = useRef(0);
+  const [activeTakeawaysDraftId, setActiveTakeawaysDraftId] = useState<number | null>(null);
+  const [takeawaysDrafts, setTakeawaysDrafts] = useState<Record<number, string>>({});
+  const [takeawaysWriteOpen, setTakeawaysWriteOpen] = useState(false);
+  const [notebookDraftHint, setNotebookDraftHint] = useState(false);
+  const takeawaysDraftTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const draftToGuideLockRef = useRef(false);
+  const notebookHintTimerRef = useRef<number | null>(null);
+
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const isResizingRef = useRef(false);
+  /** 略读对话：取消进行中的 `chatWithSkimAdaptiveTutor`（与 `@google/genai` 的 `config.abortSignal` 对齐） */
+  const skimAbortControllerRef = useRef<AbortController | null>(null);
+  /** SDK 偶发在 abort 后仍 resolve 时，与 `signal.aborted` 双保险，避免误追加助手气泡 */
+  const skimGenerationCancelledRef = useRef(false);
+  const chatInputRef = useRef<HTMLInputElement>(null);
 
   // Text Selection State
   const [selectionRect, setSelectionRect] = useState<{top: number, left: number} | null>(null);
@@ -118,6 +198,20 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [messages, isChatLoading]);
+
+  useEffect(() => {
+    return () => {
+      if (notebookHintTimerRef.current != null) {
+        window.clearTimeout(notebookHintTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!takeawaysWriteOpen) return;
+    const id = requestAnimationFrame(() => takeawaysDraftTextareaRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [takeawaysWriteOpen]);
 
   // --- SELECTION LOGIC (Similar to ExplanationPanel) ---
   useEffect(() => {
@@ -168,6 +262,10 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       if (selectionTimerRef.current) window.clearTimeout(selectionTimerRef.current);
     };
   }, [selectionRect]);
+
+  const takeawaysDraftText =
+    activeTakeawaysDraftId != null ? takeawaysDrafts[activeTakeawaysDraftId] ?? '' : '';
+  const deferredTakeawaysPreview = useDeferredValue(takeawaysDraftText);
 
   const handleAddToNotebook = (e: React.MouseEvent) => {
     e.preventDefault(); 
@@ -251,50 +349,141 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
   const startFormalReading = async () => {
       setStage('reading');
-      // Trigger the structure map generation (Step 1)
       await handleSend(docType === 'STEM' 
           ? "前置知识已确认，请输出本文的【逻辑路线图】与【核心结构】，并开始正式带读。"
           : "请生成深度略读报告 (Deep Skim Report)。", 
-      'reading');
+      'reading', { moduleCount: selectedModuleCount, studyMapBriefing: studyMap?.initialBriefing });
   };
 
-  const handleSkipToReading = async () => {
-      // Directly jump to reading phase, bypassing quiz/tutoring
+  const needRegenerate = onRegenerateStudyMap && (studyMapModuleCount == null || studyMapModuleCount !== selectedModuleCount);
+
+  const handleStartWithModuleCount = async () => {
+      setShowGranularityModal(false);
+      if (needRegenerate) {
+          setIsRegeneratingMap(true);
+          await onRegenerateStudyMap?.(selectedModuleCount);
+          setIsRegeneratingMap(false);
+      }
       startFormalReading();
   };
 
-  const handleSend = async (textOverride?: string, forceMode?: 'tutoring' | 'reading') => {
-      const textToSend = textOverride || input;
-      // CRITICAL: Prioritize PDF Vision Data over Text to avoid hallucination on scanned docs
-      const content = pdfDataUrl || fullText;
+  const handleSkipToReading = () => {
+      if (onRegenerateStudyMap) {
+          setShowGranularityModal(true);
+          return;
+      }
+      startFormalReading();
+  };
 
-      if (!textToSend.trim() || !content || isChatLoading) return;
+  const handleStopSkimChat = () => {
+      skimGenerationCancelledRef.current = true;
+      skimAbortControllerRef.current?.abort();
+      setIsChatLoading(false);
+  };
 
-      // 进入下一模块或继续对话时清空本模块要点/小题
+  /** 截断后与本模块要点/小题状态不一致时清空（与 handleSend 开头一致） */
+  const resetReadingModuleArtifacts = () => {
       setModuleTakeaways(null);
       setModuleQuiz(null);
       setModuleQuizIndex(0);
       setModuleQuizSelected(null);
       setModuleQuizSubmitted(false);
+  };
+
+  /**
+   * 从任意一条 user 消息起「编辑并重发」：丢弃该条及之后所有消息，回填原文；不发请求。
+   * loading 时先 `handleStopSkimChat`，避免异步仍追加 model。
+   * 删除 ≥2 条时用 `window.confirm` 提示（避免误触大量删历史）。
+   */
+  const handleEditUserMessageAtIndex = (idx: number) => {
+      if (idx < 0 || idx >= messages.length || messages[idx].role !== 'user') return;
+
+      if (isChatLoading) {
+          handleStopSkimChat();
+      }
+
+      const toDeleteCount = messages.length - idx;
+      if (toDeleteCount >= 2) {
+          if (!window.confirm(`将删除此后 ${toDeleteCount} 条对话，确定吗？`)) return;
+      }
+
+      const textToEdit = messages[idx].text;
+      setMessages((prev) => {
+          if (idx >= prev.length || prev[idx].role !== 'user') return prev;
+          return prev.slice(0, idx);
+      });
+      resetReadingModuleArtifacts();
+      setInput(textToEdit);
+      requestAnimationFrame(() => {
+          chatInputRef.current?.focus();
+      });
+  };
+
+  const handleSend = async (
+      textOverride?: string,
+      forceMode?: 'tutoring' | 'reading',
+      readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number },
+      sendOpts?: { appendUserWhenOverride?: boolean; tutorUserText?: string }
+  ) => {
+      const raw = textOverride ?? input;
+      const trimmed = raw.trim();
+      // CRITICAL: Prioritize PDF Vision Data over Text to avoid hallucination on scanned docs
+      const content = pdfDataUrl || fullText;
+
+      if (!trimmed || !content || isChatLoading) return;
+
+      const payloadForTutor = sendOpts?.tutorUserText ?? trimmed;
+
+      // 进入下一模块或继续对话时清空本模块要点/小题
+      resetReadingModuleArtifacts();
       
       if (!textOverride) {
-          const userMsg: ChatMessage = { role: 'user', text: textToSend, timestamp: Date.now() };
+          const userMsg: ChatMessage = { role: 'user', text: trimmed, timestamp: Date.now() };
           setMessages(prev => [...prev, userMsg]);
           setInput('');
-      } 
+      } else if (sendOpts?.appendUserWhenOverride) {
+          const userMsg: ChatMessage = { role: 'user', text: trimmed, timestamp: Date.now() };
+          setMessages((prev) => [...prev, userMsg]);
+      }
       
+      skimGenerationCancelledRef.current = false;
+      const abortController = new AbortController();
+      skimAbortControllerRef.current = abortController;
       setIsChatLoading(true);
 
       try {
           const modeToUse = forceMode || (stage === 'reading' ? 'reading' : 'tutoring');
-          // Pass the content (PDF or Text) to the service
-          const response = await chatWithAdaptiveTutor(content, messages, textToSend, modeToUse, docType);
+          const skimReadingOpts =
+            forceMode === 'reading' && readingOptions != null
+              ? readingOptions
+              : modeToUse === 'reading' && stage === 'reading'
+                ? { moduleCount: selectedModuleCount, studyMapBriefing: studyMap?.initialBriefing }
+                : undefined;
+          // Pass the content (PDF or Text) to the service; readingOptions only for reading mode
+          const response = await chatWithSkimAdaptiveTutor(
+            content,
+            messages,
+            payloadForTutor,
+            modeToUse,
+            docType,
+            skimReadingOpts,
+            abortController.signal
+          );
+          if (abortController.signal.aborted || skimGenerationCancelledRef.current) return;
           const aiMsg: ChatMessage = { role: 'model', text: response, timestamp: Date.now() };
           setMessages(prev => [...prev, aiMsg]);
       } catch (e) {
+          if (abortController.signal.aborted || skimGenerationCancelledRef.current) return;
+          const isAbort =
+              e instanceof DOMException && e.name === 'AbortError'
+              || (typeof e === 'object' && e !== null && 'name' in e && (e as { name: string }).name === 'AbortError');
+          if (isAbort) return;
           console.error(e);
       } finally {
           setIsChatLoading(false);
+          if (skimAbortControllerRef.current === abortController) {
+              skimAbortControllerRef.current = null;
+          }
       }
   };
 
@@ -306,9 +495,19 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       try {
           const list = await generateModuleTakeaways(messages, docType);
           setModuleTakeaways(list.length > 0 ? list : ['暂无提炼要点，可继续与导读交流后重试。']);
+          nextTakeawaysDraftIdRef.current += 1;
+          const draftId = nextTakeawaysDraftIdRef.current;
+          setTakeawaysDrafts((prev) => ({ ...prev, [draftId]: '' }));
+          setActiveTakeawaysDraftId(draftId);
+          setTakeawaysWriteOpen(false);
       } catch (e) {
           console.error(e);
           setModuleTakeaways(['生成失败，请重试。']);
+          nextTakeawaysDraftIdRef.current += 1;
+          const draftId = nextTakeawaysDraftIdRef.current;
+          setTakeawaysDrafts((prev) => ({ ...prev, [draftId]: '' }));
+          setActiveTakeawaysDraftId(draftId);
+          setTakeawaysWriteOpen(false);
       } finally {
           setTakeawaysLoading(false);
       }
@@ -330,6 +529,51 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       } finally {
           setQuizLoading(false);
       }
+  };
+
+  const updateTakeawaysDraft = (value: string) => {
+      if (activeTakeawaysDraftId == null) return;
+      const id = activeTakeawaysDraftId;
+      setTakeawaysDrafts((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const handleUploadTakeawaysDraft = () => {
+      if (!onNotebookAdd || activeTakeawaysDraftId == null) return;
+      const body = takeawaysDraftText.trim();
+      if (!body) return;
+      const topicLine = studyMap?.topic ? ` · ${studyMap.topic}` : '';
+      onNotebookAdd(`【本模块自整理】${topicLine}\n${body}`, 'skim');
+      setNotebookDraftHint(true);
+      if (notebookHintTimerRef.current != null) {
+        window.clearTimeout(notebookHintTimerRef.current);
+      }
+      notebookHintTimerRef.current = window.setTimeout(() => {
+        setNotebookDraftHint(false);
+        notebookHintTimerRef.current = null;
+      }, 1500);
+  };
+
+  const handleSendDraftToGuide = async () => {
+      const body = takeawaysDraftText.trim();
+      if (!body || isChatLoading) return;
+      if (draftToGuideLockRef.current) return;
+      draftToGuideLockRef.current = true;
+      try {
+        const payloadForTutor = `${SKIM_DRAFT_GUIDE_PREFIX}\n\n${body}`;
+        await handleSend(body, undefined, undefined, {
+          appendUserWhenOverride: true,
+          tutorUserText: payloadForTutor,
+        });
+      } finally {
+        draftToGuideLockRef.current = false;
+      }
+  };
+
+  const handleClearTakeawaysDraft = () => {
+      if (activeTakeawaysDraftId == null) return;
+      if (!window.confirm('确定清空本块自整理草稿？此操作不可撤销。')) return;
+      const id = activeTakeawaysDraftId;
+      setTakeawaysDrafts((prev) => ({ ...prev, [id]: '' }));
   };
 
   const currentModuleQuestion = moduleQuiz && moduleQuiz[moduleQuizIndex];
@@ -598,13 +842,44 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                             </div>
                                             {quizData.explanation}
                                         </div>
-                                        <button
-                                            onClick={startFormalReading}
-                                            className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all flex items-center justify-center space-x-2 shadow-xl"
-                                        >
-                                            {quizSelectedOption === quizData.correctIndex ? <Lock className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
-                                            <span>确认开始正式学习</span>
-                                        </button>
+                                        {onRegenerateStudyMap && quizSelectedOption === quizData.correctIndex ? (
+                                            <>
+                                                <p className="text-xs font-bold text-stone-500 mb-2">选择模块数</p>
+                                                {isRegeneratingMap ? (
+                                                    <div className="flex items-center justify-center gap-2 py-4 text-stone-500 text-sm">
+                                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                                        <span>正在按所选模块数重新划分…</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="flex flex-col gap-2">
+                                                        <label className="text-xs text-stone-500 mb-1">用几个模块解读本文（2～7）</label>
+                                                        <select
+                                                            value={selectedModuleCount}
+                                                            onChange={(e) => setSelectedModuleCount(Number(e.target.value))}
+                                                            className="w-full py-2.5 rounded-xl border-2 border-stone-200 focus:border-indigo-300 px-4 text-slate-700 text-sm font-medium bg-white"
+                                                        >
+                                                            {MODULE_OPTIONS.map((n) => (
+                                                                <option key={n} value={n}>{n} 个模块</option>
+                                                            ))}
+                                                        </select>
+                                                        <button
+                                                            onClick={handleStartWithModuleCount}
+                                                            className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all flex items-center justify-center space-x-2 shadow-xl"
+                                                        >
+                                                            <span>{needRegenerate ? '按此模块数重新生成并开始领读' : '开始领读'}</span>
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </>
+                                        ) : (
+                                            <button
+                                                onClick={startFormalReading}
+                                                className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all flex items-center justify-center space-x-2 shadow-xl"
+                                            >
+                                                {quizSelectedOption === quizData.correctIndex ? <Lock className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
+                                                <span>确认开始正式学习</span>
+                                            </button>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -671,11 +946,24 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                  <>
                  {messages.map((msg, idx) => (
                     <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[90%] px-4 py-3 text-sm shadow-sm transition-all ${
-                            msg.role === 'user' 
-                            ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-indigo-100' 
+                        <div
+                            className={`relative max-w-[90%] px-4 py-3 text-sm shadow-sm transition-all ${
+                            msg.role === 'user'
+                            ? 'group bg-indigo-600 text-white rounded-2xl rounded-tr-none shadow-indigo-100'
                             : 'bg-stone-50 text-slate-700 border border-stone-100 rounded-2xl rounded-tl-none'
-                        }`}>
+                        }`}
+                        >
+                            {msg.role === 'user' && stage !== 'diagnosis' && stage !== 'quiz' && (
+                                <button
+                                    type="button"
+                                    title="编辑并重发"
+                                    aria-label="编辑并重发"
+                                    onClick={() => handleEditUserMessageAtIndex(idx)}
+                                    className="absolute top-1.5 right-1.5 z-10 rounded-md bg-indigo-700/90 p-1.5 text-white opacity-0 shadow-sm transition-opacity hover:bg-indigo-800 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/60 min-h-[32px] min-w-[32px] flex items-center justify-center"
+                                >
+                                    <PencilLine className="w-3.5 h-3.5" aria-hidden />
+                                </button>
+                            )}
                             <ReactMarkdown 
                                 components={MarkdownComponents}
                                 remarkPlugins={[remarkMath, remarkGfm]}
@@ -715,6 +1003,21 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                              </button>
                              <button
                                  type="button"
+                                 id="skim-takeaways-write-toggle"
+                                 onClick={() => setTakeawaysWriteOpen((o) => !o)}
+                                 aria-expanded={takeawaysWriteOpen}
+                                 aria-controls="skim-takeaways-write-panel"
+                                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white border border-amber-300 text-amber-900 text-xs font-bold hover:bg-amber-100 transition-colors"
+                             >
+                                 <ChevronDown
+                                     className={`w-3.5 h-3.5 shrink-0 transition-transform ${takeawaysWriteOpen ? 'rotate-180' : ''}`}
+                                     aria-hidden
+                                 />
+                                 <PencilLine className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                 我要写笔记
+                             </button>
+                             <button
+                                 type="button"
                                  onClick={handleGenerateModuleQuiz}
                                  disabled={quizLoading}
                                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500 text-white text-xs font-bold hover:bg-amber-600 disabled:opacity-50 transition-colors"
@@ -723,6 +1026,107 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                  针对本模块生成小题
                              </button>
                          </div>
+                         {takeawaysWriteOpen && activeTakeawaysDraftId != null && (
+                             <div
+                                 id="skim-takeaways-write-panel"
+                                 role="region"
+                                 aria-labelledby="skim-takeaways-write-toggle"
+                                 className="mt-1 space-y-3 border-t border-amber-200/80 pt-3"
+                             >
+                                 <textarea
+                                     ref={takeawaysDraftTextareaRef}
+                                     id="skim-takeaways-draft-input"
+                                     value={takeawaysDraftText}
+                                     onChange={(e) => updateTakeawaysDraft(e.target.value)}
+                                     rows={5}
+                                     placeholder="用自己的话整理，支持数学公式（如行内 $x^2$、块级 $$\int_0^1 f$$，见下方预览）"
+                                     lang="zh-Hans"
+                                     autoComplete="off"
+                                     aria-label="本模块自整理笔记草稿"
+                                     className="min-h-[120px] w-full resize-y rounded-xl border border-amber-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-amber-400 focus:outline-none focus:ring-2 focus:ring-amber-100"
+                                     spellCheck
+                                 />
+                                 <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch">
+                                     <button
+                                         type="button"
+                                         onClick={handleUploadTakeawaysDraft}
+                                         disabled={!onNotebookAdd || !takeawaysDraftText.trim()}
+                                         title={
+                                             !onNotebookAdd
+                                                 ? '未连接学习手帐'
+                                                 : !takeawaysDraftText.trim()
+                                                   ? '请先输入内容再保存'
+                                                   : undefined
+                                         }
+                                         aria-disabled={!onNotebookAdd || !takeawaysDraftText.trim()}
+                                         className="inline-flex w-full min-h-[40px] items-center justify-center gap-1.5 rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs font-bold text-amber-900 hover:bg-amber-50 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-0"
+                                     >
+                                         <Upload className="w-3.5 h-3.5 shrink-0" aria-hidden />
+                                         保存到学习手帐
+                                     </button>
+                                     <button
+                                         type="button"
+                                         onClick={() => void handleSendDraftToGuide()}
+                                         disabled={isChatLoading || !takeawaysDraftText.trim()}
+                                         title={!takeawaysDraftText.trim() ? '请先输入内容' : undefined}
+                                         aria-busy={isChatLoading}
+                                         aria-disabled={isChatLoading || !takeawaysDraftText.trim()}
+                                         className="inline-flex w-full min-h-[40px] items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-0"
+                                     >
+                                         {isChatLoading ? (
+                                             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                                         ) : (
+                                             <Send className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                         )}
+                                         把这段发给导读
+                                     </button>
+                                     <button
+                                         type="button"
+                                         onClick={handleClearTakeawaysDraft}
+                                         disabled={!takeawaysDraftText}
+                                         title="清空当前草稿"
+                                         className="inline-flex w-full min-h-[40px] items-center justify-center gap-1.5 rounded-lg border border-stone-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40 sm:w-auto sm:min-w-0"
+                                     >
+                                         <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                                         清空本块草稿
+                                     </button>
+                                 </div>
+                                 {notebookDraftHint ? (
+                                     <p className="text-[11px] font-medium text-emerald-700" role="status" aria-live="polite">
+                                         已追加到学习手帐（略读）
+                                     </p>
+                                 ) : null}
+                                 <div className="rounded-xl border border-amber-100 bg-white/95 p-3 shadow-sm">
+                                     <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                                         <span className="text-[10px] font-bold uppercase tracking-wide text-amber-900/70">
+                                             预览（只读）
+                                         </span>
+                                         {takeawaysDraftText.trim() &&
+                                         deferredTakeawaysPreview !== takeawaysDraftText ? (
+                                             <span className="text-[10px] text-slate-400">预览略延迟更新…</span>
+                                         ) : null}
+                                     </div>
+                                     <div className="max-h-48 min-h-[2.5rem] overflow-y-auto custom-scrollbar text-left">
+                                         {takeawaysDraftText.trim() ? (
+                                             <TakeawaysDraftMarkdownPreview
+                                                 markdown={
+                                                     deferredTakeawaysPreview.trim()
+                                                         ? deferredTakeawaysPreview
+                                                         : takeawaysDraftText
+                                                 }
+                                             />
+                                         ) : (
+                                             <p className="text-xs italic text-slate-400">
+                                                 输入后在此预览 Markdown 与公式
+                                             </p>
+                                         )}
+                                     </div>
+                                 </div>
+                                 <p className="text-[10px] leading-snug text-slate-500">
+                                     刷新页面后本块草稿会清空（未保存到学习手帐的内容不保留）。
+                                 </p>
+                             </div>
+                         )}
                      </div>
                  )}
 
@@ -830,6 +1234,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             )}
             <div className="flex items-center space-x-2 bg-stone-50 p-1.5 rounded-full border border-stone-100 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
                 <input
+                    ref={chatInputRef}
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -838,17 +1243,67 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm focus:ring-0 focus:outline-none text-slate-700 placeholder:text-stone-400"
                     disabled={isChatLoading || stage === 'diagnosis'}
                 />
-                <button 
-                    onClick={() => handleSend()}
-                    disabled={!input.trim() || isChatLoading || stage === 'diagnosis'}
-                    className="p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md"
-                >
-                    <Send className="w-3.5 h-3.5 ml-0.5" />
-                </button>
+                {isChatLoading ? (
+                    <button
+                        type="button"
+                        onClick={handleStopSkimChat}
+                        title="停止生成"
+                        className="p-2 bg-rose-600 text-white rounded-full hover:bg-rose-700 transition-all shadow-md flex items-center gap-1 px-3"
+                    >
+                        <Square className="w-3 h-3 fill-current" />
+                        <span className="text-xs font-bold">停止</span>
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={() => handleSend()}
+                        disabled={!input.trim() || stage === 'diagnosis'}
+                        className="p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md"
+                    >
+                        <Send className="w-3.5 h-3.5 ml-0.5" />
+                    </button>
+                )}
             </div>
         </div>
 
       </div>
+      )}
+
+      {/* 选择模块数弹层（跳过测验/直接阅读时弹出） */}
+      {showGranularityModal && onRegenerateStudyMap && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+          <div className="bg-white rounded-2xl shadow-xl border border-stone-200 p-5 w-full max-w-sm space-y-4">
+            <h3 className="text-sm font-bold text-slate-800">选择模块数</h3>
+            <p className="text-xs text-stone-500">用几个模块解读本文（2～7），选完后即开始领读。</p>
+            <div className="flex flex-col gap-2">
+              <select
+                value={selectedModuleCount}
+                onChange={(e) => setSelectedModuleCount(Number(e.target.value))}
+                className="w-full py-2.5 rounded-xl border-2 border-stone-200 focus:border-indigo-300 px-4 text-slate-700 text-sm font-medium bg-white"
+              >
+                {MODULE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>{n} 个模块</option>
+                ))}
+              </select>
+              <button
+                onClick={handleStartWithModuleCount}
+                className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all"
+              >
+                {needRegenerate ? '按此模块数重新生成并开始领读' : '开始领读'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 正在重新划分模块时的 loading */}
+      {isRegeneratingMap && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/80">
+          <div className="flex items-center gap-2 text-stone-600 text-sm font-medium">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            <span>正在按所选模块数重新划分…</span>
+          </div>
+        </div>
       )}
     </div>
   );

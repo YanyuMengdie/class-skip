@@ -13,6 +13,8 @@ export type ReviewType =
   | 'examTraps'
   | 'terminology'
   | 'trickyProfessor'
+  | 'mindMap'
+  | 'multiDocQA'
   | 'trapList';
 
 interface ReviewPageProps {
@@ -23,17 +25,6 @@ interface ReviewPageProps {
   onStartReview: (sessions: CloudSession[] | null, type: ReviewType) => void;
   trapCount?: number;
 }
-
-const REVIEW_OPTIONS: { type: ReviewType; label: string; color: string }[] = [
-  { type: 'quiz', label: '测验', color: 'bg-violet-100 text-violet-800 hover:bg-violet-200' },
-  { type: 'flashcard', label: '闪卡', color: 'bg-amber-100 text-amber-800 hover:bg-amber-200' },
-  { type: 'studyGuide', label: '学习指南', color: 'bg-indigo-100 text-indigo-800 hover:bg-indigo-200' },
-  { type: 'examSummary', label: '考前速览', color: 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' },
-  { type: 'feynman', label: '费曼检验', color: 'bg-sky-100 text-sky-800 hover:bg-sky-200' },
-  { type: 'examTraps', label: '考点与陷阱', color: 'bg-rose-100 text-rose-800 hover:bg-rose-200' },
-  { type: 'terminology', label: '术语精确定义', color: 'bg-cyan-100 text-cyan-800 hover:bg-cyan-200' },
-  { type: 'trickyProfessor', label: '刁钻教授', color: 'bg-orange-100 text-orange-800 hover:bg-orange-200' }
-];
 
 export const ReviewPage: React.FC<ReviewPageProps> = ({
   user,
@@ -161,27 +152,40 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
           </div>
         </section>
 
-        {/* 选择复习方式 */}
+        {/* 选择喜欢的学习方式 */}
         <section>
-          <h3 className="text-sm font-bold text-slate-600 mb-3">选择复习方式</h3>
-          <div className="grid grid-cols-2 gap-2">
-            {REVIEW_OPTIONS.map(({ type, label, color }) => (
-              <button
-                key={type}
-                onClick={() => handleStart(type)}
-                disabled={!hasSelection}
-                className={`py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${color}`}
-              >
-                {label}
-              </button>
-            ))}
+          <h3 className="text-sm font-bold text-slate-600 mb-3">选择喜欢的学习方式</h3>
+          <div className="space-y-4">
+            <div>
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">巩固记忆</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => handleStart('flashcard')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-amber-100 text-amber-800 hover:bg-amber-200">闪卡</button>
+                <button onClick={() => handleStart('studyGuide')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-indigo-100 text-indigo-800 hover:bg-indigo-200">学习指南</button>
+                <button onClick={() => handleStart('terminology')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-100 text-cyan-800 hover:bg-cyan-200">术语精确定义</button>
+                <button onClick={() => handleStart('mindMap')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-teal-100 text-teal-800 hover:bg-teal-200">思维导图</button>
+              </div>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">自我检测</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => handleStart('quiz')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-violet-100 text-violet-800 hover:bg-violet-200">测验</button>
+                <button onClick={() => handleStart('feynman')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-sky-100 text-sky-800 hover:bg-sky-200">费曼检验</button>
+                <button onClick={() => handleStart('trickyProfessor')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-orange-100 text-orange-800 hover:bg-orange-200">刁钻教授</button>
+                <button onClick={() => handleStart('trapList')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-amber-100 text-amber-800 hover:bg-amber-200 col-span-2">我的陷阱清单{trapCount > 0 ? ` (${trapCount})` : ''}</button>
+              </div>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">考前冲刺</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => handleStart('examSummary')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-100 text-emerald-800 hover:bg-emerald-200">考前速览</button>
+                <button onClick={() => handleStart('examTraps')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-rose-100 text-rose-800 hover:bg-rose-200">考点与陷阱</button>
+              </div>
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">自由问答</h4>
+              <button onClick={() => handleStart('multiDocQA')} disabled={!hasSelection} className="w-full py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-indigo-100 text-indigo-800 hover:bg-indigo-200">多文档问答</button>
+            </div>
           </div>
-          <button
-            onClick={() => handleStart('trapList')}
-            className="mt-2 text-amber-600 text-sm font-medium hover:underline"
-          >
-            我的陷阱清单{trapCount > 0 ? ` (${trapCount})` : ''}
-          </button>
         </section>
       </div>
     </div>
