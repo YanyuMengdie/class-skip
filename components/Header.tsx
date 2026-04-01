@@ -241,7 +241,6 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="hidden md:block">
             <h1 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-1.5">
               逃课神器
-              {onOpenFiveMin && <span className="text-[10px] font-normal text-amber-600 bg-amber-100 px-1.5 py-0.5 rounded">9.13</span>}
             </h1>
             {fileName && <p className="text-[10px] text-slate-400 max-w-[150px] truncate font-medium">{fileName}</p>}
           </div>
