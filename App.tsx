@@ -39,6 +39,7 @@ import { ExamPredictionPanel } from './components/ExamPredictionPanel';
 import { ExamHubModal } from './components/ExamHubModal';
 import { ExamWorkspacePage } from './components/ExamWorkspacePage';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from './utils/pdfUtils';
+import { buildArtifactSourceLabel } from './utils/artifactSourceLabel';
 import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap } from './services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from './services/transcriptionService';
 import { storageService } from './services/storageService';
@@ -2334,7 +2335,7 @@ const App: React.FC = () => {
               type: 'quiz',
               title: `测验 · ${sourceName}`,
               createdAt: Date.now(),
-              sourceLabel: '1个来源',
+              sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
               payload: { roundIndex: rounds.length - 1, questionCount: lastRound?.items?.length ?? 0 }
             });
           }}
@@ -2369,7 +2370,7 @@ const App: React.FC = () => {
               type: 'flashcard',
               title: `闪卡 · ${sourceName}`,
               createdAt: Date.now(),
-              sourceLabel: '1个来源',
+              sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
               payload: { count: cards.length }
             });
           }}
@@ -2410,7 +2411,7 @@ const App: React.FC = () => {
               type: 'feynman',
               title: title ? `${title} · ${sourceName}` : `费曼大白话 · ${sourceName}`,
               createdAt: Date.now(),
-              sourceLabel: '1个来源',
+              sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
               payload: { markdown }
             });
           }}
@@ -2431,7 +2432,7 @@ const App: React.FC = () => {
               type: 'examSummary',
               title: `考前速览 · ${sourceName}`,
               createdAt: Date.now(),
-              sourceLabel: '1个来源',
+              sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
               payload: { markdown }
             });
           }}
@@ -2450,7 +2451,7 @@ const App: React.FC = () => {
               type: 'examTraps',
               title: `考点与陷阱 · ${sourceName}`,
               createdAt: Date.now(),
-              sourceLabel: '1个来源',
+              sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
               payload: { markdown }
             });
           }}
@@ -2500,7 +2501,7 @@ const App: React.FC = () => {
               type: 'terminology',
               title: `术语定义 · ${sourceName}`,
               createdAt: Date.now(),
-              sourceLabel: '1个来源',
+              sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
               payload: { terms: terms.map((t) => ({ term: t.term, definition: t.definition, keyWords: t.keyWords })) }
             });
           }}
@@ -2519,7 +2520,7 @@ const App: React.FC = () => {
               type: 'trickyProfessor',
               title: `刁钻教授 · ${sourceName}`,
               createdAt: Date.now(),
-              sourceLabel: '1个来源',
+              sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
               payload: { markdown }
             });
           }}
@@ -2541,7 +2542,11 @@ const App: React.FC = () => {
               type: 'mindMap',
               title,
               createdAt: Date.now(),
-              sourceLabel: 'tree' in payload ? '1个来源' : `${(payload.multiResult?.perDoc?.length ?? 0)} 个来源`,
+              sourceLabel: buildArtifactSourceLabel(
+                combinedReviewFileNames ?? ('multiResult' in payload ? payload.multiResult.perDoc.map((d) => d.fileName) : null),
+                combinedReviewFileName,
+                fileName
+              ),
               payload
             });
           }}
@@ -2575,7 +2580,7 @@ const App: React.FC = () => {
                     type: 'trapList',
                     title: `陷阱清单 · ${sourceName}`,
                     createdAt: Date.now(),
-                    sourceLabel: '1个来源',
+                    sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
                     payload: { itemIds: trapList.map((t) => t.id) }
                   });
                 }
@@ -2599,7 +2604,7 @@ const App: React.FC = () => {
               type: 'studyGuide',
               title,
               createdAt: guide.createdAt,
-              sourceLabel: '1个来源',
+              sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
               payload: guide
             });
           }}
