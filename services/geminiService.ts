@@ -1913,8 +1913,12 @@ ${atomLines || '（暂无原子，仅围绕考点概念讨论）'}
 
 /**
  * reading 模式下对用户本轮消息的追加（略读 / 备考 reading 共用）。
- * - `moduleCount`(2–8) 与 `studyMapBriefing`（trim 非空）**可同时存在**：先拼模块数段，再拼「必须一致」+ 地图正文；**禁止**二选一。
- * - 仅有其一时与旧行为一致；二者皆无时由 `skimGranularity` 兜底（与旧「第三分支」一致）。
+ * - 当 `studyMapBriefing`（trim 非空）存在时：以地图为唯一结构锚，追加「必须一致」+ 地图正文；
+ *   不再重复追加带具体数字的「领读模块数」段，避免与地图模块数冲突。
+ * - 当无地图且 `moduleCount`(2–8) 有效时：保留旧行为，追加「领读模块数」段。
+ * - 当二者皆无且有 `skimGranularity` 时：保留旧「第三分支」兜底。
+ * - 该函数由 `chatWithSkimAdaptiveTutor` 与 `chatWithAdaptiveTutor` 的 reading 分支共用；
+ *   备考 reading 若未来传入 options，同样遵循本规则。
  */
 export function appendReadingModeUserMessageSuffix(
   newMessage: string,
@@ -1929,13 +1933,12 @@ export function appendReadingModeUserMessageSuffix(
 
   let out = newMessage;
 
-  if (hasModuleCount) {
-    out += `\n\n【领读模块数】请将文档拆解为 ${n} 个大模块后再输出逻辑路线图与带读。本次要求：${n} 个模块。`;
-  }
   if (brief) {
     out +=
-      "\n\n【必须一致】当前学习地图的模块划分如下，请严格按相同模块数量与结构进行深度领读，不要自行改为其他模块数：\n\n" +
+      "\n\n【必须一致】模块数量、标题与页码范围以紧接其下的学习地图为准。深度领读时必须与该地图保持一致，禁止擅自合并、删减模块或另起一套块数不同的大模块列表：\n\n" +
       brief;
+  } else if (hasModuleCount) {
+    out += `\n\n【领读模块数】请将文档拆解为 ${n} 个大模块后再输出逻辑路线图与带读。本次要求：${n} 个模块。`;
   }
   if (!hasModuleCount && !brief && readingOptions.skimGranularity) {
     out +=

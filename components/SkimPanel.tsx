@@ -381,7 +381,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       setIsChatLoading(false);
   };
 
-  /** 截断后与本模块要点/小题状态不一致时清空（与 handleSend 开头一致） */
+  /** 仅在重开正式领读上下文时清空（编辑重发/显式 readingOptions 开场） */
   const resetReadingModuleArtifacts = () => {
       setModuleTakeaways(null);
       setModuleQuiz(null);
@@ -434,8 +434,11 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
       const payloadForTutor = sendOpts?.tutorUserText ?? trimmed;
 
-      // 进入下一模块或继续对话时清空本模块要点/小题
-      resetReadingModuleArtifacts();
+      const shouldResetReadingArtifacts = forceMode === 'reading' && readingOptions != null;
+      if (shouldResetReadingArtifacts) {
+        // 仅正式领读开场（携带整块 readingOptions）时重置
+        resetReadingModuleArtifacts();
+      }
       
       if (!textOverride) {
           const userMsg: ChatMessage = { role: 'user', text: trimmed, timestamp: Date.now() };
@@ -454,11 +457,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       try {
           const modeToUse = forceMode || (stage === 'reading' ? 'reading' : 'tutoring');
           const skimReadingOpts =
-            forceMode === 'reading' && readingOptions != null
-              ? readingOptions
-              : modeToUse === 'reading' && stage === 'reading'
-                ? { moduleCount: selectedModuleCount, studyMapBriefing: studyMap?.initialBriefing }
-                : undefined;
+            forceMode === 'reading' && readingOptions != null ? readingOptions : undefined;
           // Pass the content (PDF or Text) to the service; readingOptions only for reading mode
           const response = await chatWithSkimAdaptiveTutor(
             content,
