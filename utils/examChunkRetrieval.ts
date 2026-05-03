@@ -155,11 +155,6 @@ export function searchBm25(index: Bm25ChunkIndex, query: string, topK: number): 
   return scored.slice(0, k).map((x) => ({ chunk: x.chunk, score: x.score }));
 }
 
-/** 与 `searchBm25` 相同，便于与 `buildIndexFromChunks` 配对命名。 */
-export function search(index: Bm25ChunkIndex, query: string, topK: number): RetrievedChunk[] {
-  return searchBm25(index, query, topK);
-}
-
 export interface RetrieveCandidateChunksInput {
   workspaceKey: string;
   query: string;
