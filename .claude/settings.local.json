@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p d:/Projects/class-skip/features/lecture)",
+      "Bash(git mv *)",
+      "Bash(echo \"exit=$?\")",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
