@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Zap, ArrowRight, CheckCircle2, Circle, Play, Pause, RotateCcw, Sparkles, Send } from 'lucide-react';
-import { runTaskHugAgent, runTaskHugChat, TaskHugResponse } from '../services/geminiService';
-import { ChatMessage } from '../types';
+import { runTaskHugAgent, runTaskHugChat, TaskHugResponse } from '@/services/geminiService';
+import { ChatMessage } from '@/types';
 
 export const TaskHug: React.FC = () => {
   const [input, setInput] = useState('');

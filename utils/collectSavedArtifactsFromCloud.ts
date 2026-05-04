@@ -1,6 +1,6 @@
 import type { User } from 'firebase/auth';
-import { fetchSessionDetails } from '../services/firebase';
-import type { CloudSession, SavedArtifact } from '../types';
+import { fetchSessionDetails } from '@/services/firebase';
+import type { CloudSession, SavedArtifact } from '@/types';
 
 export interface CloudArtifactEntry {
   artifact: SavedArtifact;

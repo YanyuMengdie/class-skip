@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Star, Lightbulb, FileText, AlertTriangle, Target, Flame, Sparkles, Plus, Trash2 } from 'lucide-react';
-import { MarkType, MarkPriority, PageMark } from '../types';
+import { MarkType, MarkPriority, PageMark } from '@/types';
 
 interface PageMarkPanelProps {
   pageNumber: number;

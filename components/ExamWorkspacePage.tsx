@@ -32,18 +32,18 @@ import type {
   LSAPKnowledgeComponent,
   LSAPState,
   RetrievedChunk,
-} from '../types';
-import { listExams, listExamMaterialLinks } from '../services/firebase';
-import { ExamWorkspaceSocraticChat, type ExamWorkspaceSocraticChatHandle } from './ExamWorkspaceSocraticChat';
-import { KcGlossarySidebar } from './KcGlossarySidebar';
-import { KnowledgePointInspectPanel } from './KnowledgePointInspectPanel';
-import { WorkspaceKcProbeModal } from './WorkspaceKcProbeModal';
-import { WorkspaceEvidenceReportModal } from './WorkspaceEvidenceReportModal';
-import { ExamWorkspaceMaterialPreview } from './ExamWorkspaceMaterialPreview';
-import type { WorkspaceDialogueTurn } from '../utils/examWorkspaceLsapKey';
-import { buildExamMaterialChunkIndexForLinks, findChunkById } from '../utils/examChunkIndex';
-import { getExamChunkIndexStats, loadExamMaterialChunkIndex, saveExamMaterialChunkIndex } from '../services/examChunkIndexStorage';
-import { DEFAULT_TOP_K, retrieveCandidateChunks } from '../utils/examChunkRetrieval';
+} from '@/types';
+import { listExams, listExamMaterialLinks } from '@/services/firebase';
+import { ExamWorkspaceSocraticChat, type ExamWorkspaceSocraticChatHandle } from '@/components/ExamWorkspaceSocraticChat';
+import { KcGlossarySidebar } from '@/components/KcGlossarySidebar';
+import { KnowledgePointInspectPanel } from '@/components/KnowledgePointInspectPanel';
+import { WorkspaceKcProbeModal } from '@/components/WorkspaceKcProbeModal';
+import { WorkspaceEvidenceReportModal } from '@/components/WorkspaceEvidenceReportModal';
+import { ExamWorkspaceMaterialPreview } from '@/components/ExamWorkspaceMaterialPreview';
+import type { WorkspaceDialogueTurn } from '@/utils/examWorkspaceLsapKey';
+import { buildExamMaterialChunkIndexForLinks, findChunkById } from '@/utils/examChunkIndex';
+import { getExamChunkIndexStats, loadExamMaterialChunkIndex, saveExamMaterialChunkIndex } from '@/services/examChunkIndexStorage';
+import { DEFAULT_TOP_K, retrieveCandidateChunks } from '@/utils/examChunkRetrieval';
 
 export interface ExamWorkspacePageProps {
   user: User;

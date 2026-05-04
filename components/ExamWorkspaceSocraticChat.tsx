@@ -14,7 +14,7 @@ import type {
   RetrievedChunk,
   ScaffoldingPhase,
   SocraticProbeMode,
-} from '../types';
+} from '@/types';
 import {
   analyzeKcUtteranceForAtoms,
   buildExamChunkCitationAppendix,
@@ -22,21 +22,21 @@ import {
   classifyDocument,
   classifyLearnerTurn,
   defineTermInLectureContext,
-} from '../services/geminiService';
-import { buildKcGlossaryEntryId, extractBoldTermsFromMarkdown, normalizeTermKey } from '../utils/extractBoldTermsFromMarkdown';
-import { filterGlossaryTermCandidates } from '../utils/glossaryTermFilter';
-import { computeScaffoldingPhase, heuristicQuality } from '../utils/scaffoldingClassifier';
-import { computeNextProbeState } from '../utils/examWorkspaceOrchestrator';
-import type { WorkspaceDialogueTurn } from '../utils/examWorkspaceLsapKey';
+} from '@/services/geminiService';
+import { buildKcGlossaryEntryId, extractBoldTermsFromMarkdown, normalizeTermKey } from '@/utils/extractBoldTermsFromMarkdown';
+import { filterGlossaryTermCandidates } from '@/utils/glossaryTermFilter';
+import { computeScaffoldingPhase, heuristicQuality } from '@/utils/scaffoldingClassifier';
+import { computeNextProbeState } from '@/utils/examWorkspaceOrchestrator';
+import type { WorkspaceDialogueTurn } from '@/utils/examWorkspaceLsapKey';
 import {
   parseAssistantCitations,
   parseExamWorkspaceModelReply,
   parseOptsFromSnapshot,
-} from '../utils/examWorkspaceCitations';
-import { DEFAULT_TOP_K, EXAM_CHUNK_QUERY_ASSISTANT_TAIL_CHARS, retrieveCandidateChunks } from '../utils/examChunkRetrieval';
-import { loadExamMaterialChunkIndex } from '../services/examChunkIndexStorage';
-import type { OpenMaterialPageOptions } from './ExamWorkspaceCitationBlock';
-import { ExamWorkspaceAssistantMarkdown } from './ExamWorkspaceAssistantMarkdown';
+} from '@/utils/examWorkspaceCitations';
+import { DEFAULT_TOP_K, EXAM_CHUNK_QUERY_ASSISTANT_TAIL_CHARS, retrieveCandidateChunks } from '@/utils/examChunkRetrieval';
+import { loadExamMaterialChunkIndex } from '@/services/examChunkIndexStorage';
+import type { OpenMaterialPageOptions } from '@/components/ExamWorkspaceCitationBlock';
+import { ExamWorkspaceAssistantMarkdown } from '@/components/ExamWorkspaceAssistantMarkdown';
 
 export interface ExamWorkspaceSocraticChatHandle {
   /** P3：滚动到指定 paragraphIndex 对应的块（data-exam-block-index） */

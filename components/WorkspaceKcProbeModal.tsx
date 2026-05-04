@@ -6,16 +6,16 @@
  */
 import React, { useEffect, useState } from 'react';
 import { X, Loader2, ClipboardCheck } from 'lucide-react';
-import type { LSAPContentMap, LSAPKnowledgeComponent, LSAPState, ProbeRecord } from '../types';
+import type { LSAPContentMap, LSAPKnowledgeComponent, LSAPState, ProbeRecord } from '@/types';
 import {
   evaluateLSAPAnswer,
   generateLSAPProbeQuestion,
   type LSAPEvalResult,
   type LSAPProbeDocScope,
-} from '../services/geminiService';
-import { updateBKT } from '../utils/bkt';
-import { computePredictedScore } from '../utils/lsapScore';
-import { ConflictPageHint } from './WorkspaceEvidenceReportModal';
+} from '@/services/geminiService';
+import { updateBKT } from '@/utils/bkt';
+import { computePredictedScore } from '@/utils/lsapScore';
+import { ConflictPageHint } from '@/components/WorkspaceEvidenceReportModal';
 
 export function bloomLevelForWorkspaceProbe(kc: LSAPKnowledgeComponent): number {
   return Math.min(3, Math.max(1, kc.bloomTargetLevel ?? 1));

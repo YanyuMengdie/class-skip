@@ -4,7 +4,7 @@
  * 1-3：若提供 chunk 白名单快照，优先解析行内 †chunkId†（U+2020）与可选 citedChunkIds JSON；否则回退到仅 JSON citations。
  */
 
-import type { ExamChunkCitationSnapshot } from '../types';
+import type { ExamChunkCitationSnapshot } from '@/types';
 
 export interface ExamWorkspaceCitation {
   materialId: string;

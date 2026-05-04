@@ -1,5 +1,5 @@
-import type { Exam, ExamMaterialLink, FilePersistedState, LearnerMood, LSAPState } from '../types';
-import type { MaterialFamiliarity, UrgencyBand } from '../types';
+import type { Exam, ExamMaterialLink, FilePersistedState, LearnerMood, LSAPState } from '@/types';
+import type { MaterialFamiliarity, UrgencyBand } from '@/types';
 
 const DAY_MS = 86_400_000;
 

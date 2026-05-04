@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import type { User } from 'firebase/auth';
-import type { Exam, ExamMaterialLink, FilePersistedState, StudyFlowStep } from '../types';
-import { listExams, listExamMaterialLinks } from '../services/firebase';
-import { ExamCenterPanel } from './ExamCenterPanel';
-import { ExamDailyMaintenancePanel } from './ExamDailyMaintenancePanel';
-import { StudyFlowPanel } from './StudyFlowPanel';
+import type { Exam, ExamMaterialLink, FilePersistedState, StudyFlowStep } from '@/types';
+import { listExams, listExamMaterialLinks } from '@/services/firebase';
+import { ExamCenterPanel } from '@/components/ExamCenterPanel';
+import { ExamDailyMaintenancePanel } from '@/components/ExamDailyMaintenancePanel';
+import { StudyFlowPanel } from '@/components/StudyFlowPanel';
 
 type Tab = 'exams' | 'daily' | 'flow';
 

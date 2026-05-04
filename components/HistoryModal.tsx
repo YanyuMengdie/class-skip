@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { X, Clock, FileText, Trash2, ExternalLink } from 'lucide-react';
-import { FileHistoryItem } from '../types';
+import { FileHistoryItem } from '@/types';
 
 interface HistoryModalProps {
   isOpen: boolean;

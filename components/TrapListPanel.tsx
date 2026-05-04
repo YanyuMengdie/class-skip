@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, AlertTriangle, Trash2 } from 'lucide-react';
-import { TrapItem } from '../types';
+import { TrapItem } from '@/types';
 
 interface TrapListPanelProps {
   onClose: () => void;

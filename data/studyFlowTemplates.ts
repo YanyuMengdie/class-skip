@@ -1,4 +1,4 @@
-import type { StudyFlowTemplate, StudyFlowStep } from '../types';
+import type { StudyFlowTemplate, StudyFlowStep } from '@/types';
 
 let _stepSeq = 0;
 const S = (

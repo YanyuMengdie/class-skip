@@ -4,8 +4,8 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { X, Loader2, Send, MessageCircle } from 'lucide-react';
-import { ChatMessage } from '../types';
-import { multiDocQAReply } from '../services/geminiService';
+import { ChatMessage } from '@/types';
+import { multiDocQAReply } from '@/services/geminiService';
 
 const MarkdownComponents: Components = {
   h1: ({ node, ...props }) => <h1 className="text-lg font-bold text-slate-900 mt-4 mb-2 pb-2 border-b border-stone-200 first:mt-0" {...props} />,

@@ -13,8 +13,8 @@
  *
  * **1-4 多材料**：同一 `workspaceKey` 下 IndexedDB 存 **本场全部已构建材料** 的 chunk；`chunk.materialLinkId` 区分 PDF；BM25 在 **合并后的 chunk 列表** 上检索，Top-K 可来自 **任意已索引材料**。可选 `materialLinkIdFilter` 将检索限制为单份材料（如「仅当前预览」）。
  */
-import type { ExamMaterialTextChunk, RetrievedChunk } from '../types';
-import { loadExamMaterialChunkIndex } from '../services/examChunkIndexStorage';
+import type { ExamMaterialTextChunk, RetrievedChunk } from '@/types';
+import { loadExamMaterialChunkIndex } from '@/services/examChunkIndexStorage';
 
 /** Top-K 默认值；可调用时覆盖 */
 export const DEFAULT_TOP_K = 8;

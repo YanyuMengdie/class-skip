@@ -1,4 +1,4 @@
-import type { LearnerMood, MaintenanceFeedbackVariant } from '../types';
+import type { LearnerMood, MaintenanceFeedbackVariant } from '@/types';
 
 export function buildFeedbackExitCopy(params: {
   examTitles: string[];

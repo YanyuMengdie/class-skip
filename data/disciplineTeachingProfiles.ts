@@ -1,5 +1,5 @@
-import type { DisciplineBand } from '../types';
-import { getCorePedagogySnippet } from './pedagogyCore';
+import type { DisciplineBand } from '@/types';
+import { getCorePedagogySnippet } from '@/data/pedagogyCore';
 
 /** P1：四类学科教学法要点（保温闪卡 / Quiz；对话层见 buildDialogueTeachingSystemPrompt） */
 export const DISCIPLINE_TEACHING_PROFILES: Record<

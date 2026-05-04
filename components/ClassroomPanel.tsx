@@ -1,6 +1,6 @@
 import React, { useRef, useEffect } from 'react';
 import { Mic, Square } from 'lucide-react';
-import { LectureRecord } from '../types';
+import { LectureRecord } from '@/types';
 
 interface ClassroomPanelProps {
   currentLecture: LectureRecord | null;

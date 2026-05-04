@@ -1,7 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { X, Loader2 } from 'lucide-react';
-import { TurtleSoupState } from '../types';
-import { generateTurtleSoupPuzzle, answerTurtleSoupQuestion, generateTurtleSoupHint } from '../services/geminiService';
+import { TurtleSoupState } from '@/types';
+import { generateTurtleSoupPuzzle, answerTurtleSoupQuestion, generateTurtleSoupHint } from '@/services/geminiService';
 
 interface TurtleSoupPanelProps {
   isOpen: boolean;

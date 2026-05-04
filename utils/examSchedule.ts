@@ -1,4 +1,4 @@
-import type { DailySegment, DailySegmentKind, DocType, Exam, ExamMaterialLink } from '../types';
+import type { DailySegment, DailySegmentKind, DocType, Exam, ExamMaterialLink } from '@/types';
 
 const DAY_MS = 86_400_000;
 

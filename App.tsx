@@ -1,51 +1,51 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { jsPDF } from 'jspdf';
-import { Header } from './components/Header';
-import { SlideViewer } from './components/SlideViewer';
-import { SlidePageComments } from './components/SlidePageComments';
-import { ExplanationPanel } from './components/ExplanationPanel';
-import { SkimPanel } from './components/SkimPanel';
-import { Sidebar } from './components/Sidebar';
-import { TaskHug } from './components/TaskHug';
-import { ChatHug } from './components/ChatHug';
-import { Notebook } from './components/Notebook'; 
-import { HistoryModal } from './components/HistoryModal';
-import { GalgameOverlay } from './components/GalgameOverlay';
-import { GalgameSettings } from './components/GalgameSettings'; 
-import { WelcomeScreen } from './components/WelcomeScreen'; 
-import { SideQuestPanel } from './components/SideQuestPanel';
-import { QuizReviewPanel } from './components/QuizReviewPanel';
-import { FlashCardReviewPanel } from './components/FlashCardReviewPanel';
-import { PageMarkPanel } from './components/PageMarkPanel';
-import { StudyGuidePanel } from './components/StudyGuidePanel';
-import { ExamSummaryPanel } from './components/ExamSummaryPanel';
-import { FeynmanPanel } from './components/FeynmanPanel';
-import { ExamTrapsPanel } from './components/ExamTrapsPanel';
-import { TerminologyPanel } from './components/TerminologyPanel';
-import { TrapListPanel } from './components/TrapListPanel';
-import { TrickyProfessorPanel } from './components/TrickyProfessorPanel';
-import { MindMapPanel } from './components/MindMapPanel';
-import { MultiDocQAPanel, getMultiDocQAConversationKey, loadMultiDocQAMessages, saveMultiDocQAMessages } from './components/MultiDocQAPanel';
-import { StudioPanel, ArtifactFullView } from './components/StudioPanel';
-import { MoodDialog } from './components/MoodDialog';
-import { LoginModal } from './components/LoginModal';
-import { FiveMinFlowPanel } from './components/FiveMinFlowPanel';
-import { ClassroomPanel } from './components/ClassroomPanel';
-import { LectureTranscriptPage } from './components/LectureTranscriptPage';
-import { ReviewPage, ReviewType } from './components/ReviewPage';
-import { TurtleSoupPanel } from './components/TurtleSoupPanel';
-import { ExamPredictionPanel } from './components/ExamPredictionPanel';
-import { ExamHubModal } from './components/ExamHubModal';
-import { ExamWorkspacePage } from './components/ExamWorkspacePage';
-import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from './utils/pdfUtils';
-import { buildArtifactSourceLabel } from './utils/artifactSourceLabel';
-import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap } from './services/geminiService';
-import { startRecording, stopRecording, isTranscriptionSupported } from './services/transcriptionService';
-import { storageService } from './services/storageService';
-import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks } from './services/firebase';
+import { Header } from '@/components/Header';
+import { SlideViewer } from '@/components/SlideViewer';
+import { SlidePageComments } from '@/components/SlidePageComments';
+import { ExplanationPanel } from '@/components/ExplanationPanel';
+import { SkimPanel } from '@/components/SkimPanel';
+import { Sidebar } from '@/components/Sidebar';
+import { TaskHug } from '@/components/TaskHug';
+import { ChatHug } from '@/components/ChatHug';
+import { Notebook } from '@/components/Notebook'; 
+import { HistoryModal } from '@/components/HistoryModal';
+import { GalgameOverlay } from '@/components/GalgameOverlay';
+import { GalgameSettings } from '@/components/GalgameSettings'; 
+import { WelcomeScreen } from '@/components/WelcomeScreen'; 
+import { SideQuestPanel } from '@/components/SideQuestPanel';
+import { QuizReviewPanel } from '@/components/QuizReviewPanel';
+import { FlashCardReviewPanel } from '@/components/FlashCardReviewPanel';
+import { PageMarkPanel } from '@/components/PageMarkPanel';
+import { StudyGuidePanel } from '@/components/StudyGuidePanel';
+import { ExamSummaryPanel } from '@/components/ExamSummaryPanel';
+import { FeynmanPanel } from '@/components/FeynmanPanel';
+import { ExamTrapsPanel } from '@/components/ExamTrapsPanel';
+import { TerminologyPanel } from '@/components/TerminologyPanel';
+import { TrapListPanel } from '@/components/TrapListPanel';
+import { TrickyProfessorPanel } from '@/components/TrickyProfessorPanel';
+import { MindMapPanel } from '@/components/MindMapPanel';
+import { MultiDocQAPanel, getMultiDocQAConversationKey, loadMultiDocQAMessages, saveMultiDocQAMessages } from '@/components/MultiDocQAPanel';
+import { StudioPanel, ArtifactFullView } from '@/components/StudioPanel';
+import { MoodDialog } from '@/components/MoodDialog';
+import { LoginModal } from '@/components/LoginModal';
+import { FiveMinFlowPanel } from '@/components/FiveMinFlowPanel';
+import { ClassroomPanel } from '@/components/ClassroomPanel';
+import { LectureTranscriptPage } from '@/components/LectureTranscriptPage';
+import { ReviewPage, ReviewType } from '@/components/ReviewPage';
+import { TurtleSoupPanel } from '@/components/TurtleSoupPanel';
+import { ExamPredictionPanel } from '@/components/ExamPredictionPanel';
+import { ExamHubModal } from '@/components/ExamHubModal';
+import { ExamWorkspacePage } from '@/components/ExamWorkspacePage';
+import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from '@/utils/pdfUtils';
+import { buildArtifactSourceLabel } from '@/utils/artifactSourceLabel';
+import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap } from '@/services/geminiService';
+import { startRecording, stopRecording, isTranscriptionSupported } from '@/services/transcriptionService';
+import { storageService } from '@/services/storageService';
+import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks } from '@/services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry } from './types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry } from '@/types';
 import {
   computeExamWorkspaceLsapKey,
   loadWorkspaceLsapBundle,
@@ -53,9 +53,9 @@ import {
   saveWorkspaceLsapBundle,
   truncateWorkspaceDialogue,
   type WorkspaceDialogueTurn,
-} from './utils/examWorkspaceLsapKey';
-import { computePredictedScore } from './utils/lsapScore';
-import { normalizeTermKey } from './utils/extractBoldTermsFromMarkdown';
+} from '@/utils/examWorkspaceLsapKey';
+import { computePredictedScore } from '@/utils/lsapScore';
+import { normalizeTermKey } from '@/utils/extractBoldTermsFromMarkdown';
 import { Sparkles, X, ChevronDown, Loader2, Wand2 } from 'lucide-react';
 
 /** P0 备考工作台：当前考试 ID 存 localStorage */

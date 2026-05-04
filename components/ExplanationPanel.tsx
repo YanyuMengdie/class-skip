@@ -5,9 +5,9 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { Sparkles, RefreshCw, Send, Image as ImageIcon, MessageSquare, X, Heart, HelpCircle, Highlighter, Plus, GripHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
-import { ChatMessage } from '../types';
-import { plainTextToHtmlWithSupSub, normalizeSelectionText, dedupeHtml } from '../utils/textUtils';
-import { LoadingInteractiveContent } from './LoadingInteractiveContent';
+import { ChatMessage } from '@/types';
+import { plainTextToHtmlWithSupSub, normalizeSelectionText, dedupeHtml } from '@/utils/textUtils';
+import { LoadingInteractiveContent } from '@/components/LoadingInteractiveContent';
 
 interface ExplanationPanelProps {
   explanation: string | undefined;

@@ -1,6 +1,6 @@
-import type { SavedArtifact } from '../types';
-import type { GlobalArtifactEntry } from './collectSavedArtifactsFromLocalHistory';
-import type { CloudArtifactEntry } from './collectSavedArtifactsFromCloud';
+import type { SavedArtifact } from '@/types';
+import type { GlobalArtifactEntry } from '@/utils/collectSavedArtifactsFromLocalHistory';
+import type { CloudArtifactEntry } from '@/utils/collectSavedArtifactsFromCloud';
 
 export type LocalArtifactLibraryEntry = GlobalArtifactEntry;
 

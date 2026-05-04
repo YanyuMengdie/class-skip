@@ -5,7 +5,7 @@
  * 纯函数、无副作用；坐标与 MindMapPanel 画布局部 / SVG user 空间一致（未缩放 CSS px，原点在内容区左上角）。
  */
 
-import type { MindMapNode } from '../types';
+import type { MindMapNode } from '@/types';
 
 /** 单节点占位框（与 NodeBox + 右侧工具按钮行总宽一致，用于层间距与不重叠） */
 export interface MindMapLayoutBox {

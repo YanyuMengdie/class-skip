@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { ChatMessage } from '../types';
+import { ChatMessage } from '@/types';
 
 interface SideQuestPanelProps {
   isActive: boolean;

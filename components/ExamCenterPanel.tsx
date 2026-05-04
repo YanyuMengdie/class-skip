@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X, Plus, Trash2, Calendar, ChevronDown, ChevronRight, Link2 } from 'lucide-react';
 import type { User } from 'firebase/auth';
-import type { DisciplineBand, Exam, ExamMaterialLink } from '../types';
-import { createExam, deleteExam, removeExamMaterialLink, updateExam, addCalendarEvent } from '../services/firebase';
-import { ExamLinkModal } from './ExamLinkModal';
+import type { DisciplineBand, Exam, ExamMaterialLink } from '@/types';
+import { createExam, deleteExam, removeExamMaterialLink, updateExam, addCalendarEvent } from '@/services/firebase';
+import { ExamLinkModal } from '@/components/ExamLinkModal';
 
 interface ExamCenterPanelProps {
   user: User;

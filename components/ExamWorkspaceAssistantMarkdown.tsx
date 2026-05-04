@@ -7,9 +7,9 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
-import type { ExamMaterialLink } from '../types';
-import type { ExamWorkspaceCitation } from '../utils/examWorkspaceCitations';
-import { ExamWorkspaceCitationBlock, type OpenMaterialPageOptions } from './ExamWorkspaceCitationBlock';
+import type { ExamMaterialLink } from '@/types';
+import type { ExamWorkspaceCitation } from '@/utils/examWorkspaceCitations';
+import { ExamWorkspaceCitationBlock, type OpenMaterialPageOptions } from '@/components/ExamWorkspaceCitationBlock';
 
 const SkipBlockIndexContext = createContext(false);
 

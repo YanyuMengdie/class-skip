@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Heart, Coffee, Cloud, Wand2, MessageCircle } from 'lucide-react';
-import { ChatMessage } from '../types';
-import { runChatHugAgent } from '../services/geminiService';
+import { ChatMessage } from '@/types';
+import { runChatHugAgent } from '@/services/geminiService';
 
 type HugMode = 'emotional' | 'casual' | 'mindfulness' | 'coax' | null;
 

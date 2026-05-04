@@ -13,10 +13,10 @@ import {
   type LSAPProbeDocScope,
   LSAPProbeResult,
   LSAPEvalResult
-} from '../services/geminiService';
-import { updateBKT } from '../utils/bkt';
-import type { LSAPContentMap, LSAPState, ProbeRecord, LSAPBKTState, LSAPKnowledgeComponent } from '../types';
-import { computePredictedScore } from '../utils/lsapScore';
+} from '@/services/geminiService';
+import { updateBKT } from '@/utils/bkt';
+import type { LSAPContentMap, LSAPState, ProbeRecord, LSAPBKTState, LSAPKnowledgeComponent } from '@/types';
+import { computePredictedScore } from '@/utils/lsapScore';
 
 interface ExamPredictionPanelProps {
   onClose: () => void;

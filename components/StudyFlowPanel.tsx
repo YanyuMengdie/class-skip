@@ -8,9 +8,9 @@ import type {
   Exam,
   ExamMaterialLink,
   FilePersistedState,
-} from '../types';
-import { buildExtendedScenarioKey, inferFamiliarity, inferUrgencyForFile } from '../utils/studyFlowInference';
-import { getTemplateForScenario } from '../data/studyFlowTemplates';
+} from '@/types';
+import { buildExtendedScenarioKey, inferFamiliarity, inferUrgencyForFile } from '@/utils/studyFlowInference';
+import { getTemplateForScenario } from '@/data/studyFlowTemplates';
 
 export interface StudyFlowPanelProps {
   onClose: () => void;

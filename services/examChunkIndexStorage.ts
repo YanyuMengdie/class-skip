@@ -1,7 +1,7 @@
 /**
  * 备考 chunk 索引持久化：独立 IndexedDB，键为 computeExamWorkspaceLsapKey 的 workspaceKey。
  */
-import type { ExamMaterialTextChunk } from '../types';
+import type { ExamMaterialTextChunk } from '@/types';
 
 const DB_NAME = 'ExamChunkIndexDB';
 const DB_VERSION = 1;

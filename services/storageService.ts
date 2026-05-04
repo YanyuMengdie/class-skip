@@ -1,5 +1,5 @@
 
-import { FileHistoryItem } from '../types';
+import { FileHistoryItem } from '@/types';
 
 const DB_NAME = 'ReadingAssistantDB';
 const DB_VERSION = 1;

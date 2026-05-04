@@ -1,8 +1,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { X, ChevronLeft, ChevronRight, MessageCircle, Play, Undo2, Sparkles, FileText, History } from 'lucide-react';
-import { ChatMessage, Slide, PersonaSettings } from '../types';
-import { generateRemStoryScript } from '../services/geminiService';
+import { ChatMessage, Slide, PersonaSettings } from '@/types';
+import { generateRemStoryScript } from '@/services/geminiService';
 
 interface GalgameOverlayProps {
   isVisible: boolean;

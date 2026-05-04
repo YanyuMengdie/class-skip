@@ -8,19 +8,19 @@ import type {
   LearnerMood,
   MaintenanceFlashCard,
   QuizData,
-} from '../types';
-import { getDailyPlanCache, setDailyPlanCache } from '../services/firebase';
-import { generateMaintenanceFlashCards, generateQuizSet } from '../services/geminiService';
-import { evaluateMaintenanceEligibility } from '../utils/examMaintenanceEligibility';
+} from '@/types';
+import { getDailyPlanCache, setDailyPlanCache } from '@/services/firebase';
+import { generateMaintenanceFlashCards, generateQuizSet } from '@/services/geminiService';
+import { evaluateMaintenanceEligibility } from '@/utils/examMaintenanceEligibility';
 import {
   aggregateUrgencyFromSelectedExams,
   computeMaintenanceStrategy,
   resolveDisciplineBandForMergedMaintenance,
-} from '../utils/maintenanceStrategy';
-import { MaintenanceFlashcardDeck } from './MaintenanceFlashcardDeck';
-import { MaintenanceFeedbackCelebration } from './MaintenanceFeedbackCelebration';
-import { buildFeedbackExitCopy, buildFeedbackStrongCopy } from '../data/maintenanceFeedbackCopy';
-import type { FilePlanMeta } from '../utils/examSchedule';
+} from '@/utils/maintenanceStrategy';
+import { MaintenanceFlashcardDeck } from '@/components/MaintenanceFlashcardDeck';
+import { MaintenanceFeedbackCelebration } from '@/components/MaintenanceFeedbackCelebration';
+import { buildFeedbackExitCopy, buildFeedbackStrongCopy } from '@/data/maintenanceFeedbackCopy';
+import type { FilePlanMeta } from '@/utils/examSchedule';
 
 type Phase =
   | 'idle'

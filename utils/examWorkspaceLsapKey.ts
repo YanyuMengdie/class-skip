@@ -5,7 +5,7 @@ import type {
   KcGlossaryEntry,
   LSAPContentMap,
   LSAPState,
-} from '../types';
+} from '@/types';
 
 /** localStorage：`lsap_workspace_bundle_${key}` → JSON */
 const STORAGE_PREFIX = 'lsap_workspace_bundle_';

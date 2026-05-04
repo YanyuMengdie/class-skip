@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { X, Loader2, FileText, RefreshCw, MessageSquare, Send } from 'lucide-react';
-import { generateExamSummary, updateExamSummary } from '../services/geminiService';
+import { generateExamSummary, updateExamSummary } from '@/services/geminiService';
 
 const MarkdownComponents: Components = {
   h1: ({ node, ...props }) => (

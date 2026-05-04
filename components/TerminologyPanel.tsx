@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2, BookMarked, ChevronDown, ChevronUp } from 'lucide-react';
-import { extractTerminology, TerminologyItem } from '../services/geminiService';
+import { extractTerminology, TerminologyItem } from '@/services/geminiService';
 
 interface TerminologyPanelProps {
   onClose: () => void;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { X, Mic, FileText, Trash2, Edit2, Check, X as XIcon } from 'lucide-react';
-import { LectureRecord } from '../types';
+import { LectureRecord } from '@/types';
 
 const formatLectureTime = (start: number, end?: number) => {
   const d = new Date(start);

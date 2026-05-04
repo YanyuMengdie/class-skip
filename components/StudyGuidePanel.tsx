@@ -4,8 +4,8 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { X, FileText, Loader2, RefreshCw, Layers, List } from 'lucide-react';
-import { StudyGuide, StudyGuideFormat, StudyGuideContent } from '../types';
-import { generateStudyGuide } from '../services/geminiService';
+import { StudyGuide, StudyGuideFormat, StudyGuideContent } from '@/types';
+import { generateStudyGuide } from '@/services/geminiService';
 
 interface StudyGuidePanelProps {
   onClose: () => void;

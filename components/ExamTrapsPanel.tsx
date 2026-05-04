@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { X, Loader2, AlertTriangle } from 'lucide-react';
-import { generateExamTraps } from '../services/geminiService';
+import { generateExamTraps } from '@/services/geminiService';
 
 const MarkdownComponents: Components = {
   h1: ({ node, ...props }) => (

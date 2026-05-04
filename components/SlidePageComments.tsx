@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GripVertical, Plus, Trash2, GripHorizontal, ChevronDown } from 'lucide-react';
-import { SlidePageComment } from '../types';
+import { SlidePageComment } from '@/types';
 
 const DEFAULT_BOX_HEIGHT = 80;
 const MIN_BOX_HEIGHT = 56;

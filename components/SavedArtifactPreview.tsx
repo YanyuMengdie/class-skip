@@ -4,8 +4,8 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { ZoomIn, ZoomOut, X } from 'lucide-react';
-import { SavedArtifact, MindMapNode, TerminologyItemForArtifact } from '../types';
-import { SAVED_ARTIFACT_TYPE_META as TYPE_META } from '../utils/savedArtifactMeta';
+import { SavedArtifact, MindMapNode, TerminologyItemForArtifact } from '@/types';
+import { SAVED_ARTIFACT_TYPE_META as TYPE_META } from '@/utils/savedArtifactMeta';
 
 const MarkdownComponents: Components = {
   h1: ({ node, ...props }) => <h1 className="text-lg font-bold text-slate-900 mt-4 mb-2 pb-2 border-b border-stone-200 first:mt-0" {...props} />,

@@ -1,4 +1,4 @@
-import type { LSAPBKTState, LSAPContentMap } from '../types';
+import type { LSAPBKTState, LSAPContentMap } from '@/types';
 
 /**
  * 与 `ExamPredictionPanel` 一致的加权 BKT 预测分（0–100）。

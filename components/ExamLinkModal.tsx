@@ -1,14 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import type { User } from 'firebase/auth';
-import type { CloudSession, Exam, ExamMaterialLink, FileHistoryItem } from '../types';
+import type { CloudSession, Exam, ExamMaterialLink, FileHistoryItem } from '@/types';
 import {
   createExam,
   addExamMaterialLink,
   addCalendarEvent,
   getUserSessions,
-} from '../services/firebase';
-import { storageService } from '../services/storageService';
+} from '@/services/firebase';
+import { storageService } from '@/services/storageService';
 
 export interface ExamLinkModalProps {
   user: User;

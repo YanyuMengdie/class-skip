@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { X, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Lightbulb, RotateCcw, PlusCircle, Loader2, BookOpen, ListPlus } from 'lucide-react';
-import { QuizData, QuizRound } from '../types';
-import { generateQuizSet } from '../services/geminiService';
+import { QuizData, QuizRound } from '@/types';
+import { generateQuizSet } from '@/services/geminiService';
 
 type Step = 'choose' | 'generating' | 'doing' | 'done' | 'review';
 

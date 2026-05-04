@@ -1,6 +1,6 @@
 import React from 'react';
 import { ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
-import type { MaintenanceFlashCard } from '../types';
+import type { MaintenanceFlashCard } from '@/types';
 
 interface Props {
   cards: MaintenanceFlashCard[];

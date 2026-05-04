@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { X, Mail, Loader2 } from 'lucide-react';
-import { loginWithGoogle, sendEmailLoginLink } from '../services/firebase';
+import { loginWithGoogle, sendEmailLoginLink } from '@/services/firebase';
 
 function authErrorMessage(code: string): string {
   const map: Record<string, string> = {

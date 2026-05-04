@@ -4,8 +4,8 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { Loader2, ArrowRight, CheckCircle2 } from 'lucide-react';
-import { QuizData } from '../types';
-import { generateFiveMinGuide, extractTerminology, TerminologyItem, generateQuizSet } from '../services/geminiService';
+import { QuizData } from '@/types';
+import { generateFiveMinGuide, extractTerminology, TerminologyItem, generateQuizSet } from '@/services/geminiService';
 
 type Step = 'guide' | 'terms' | 'quiz' | 'done';
 

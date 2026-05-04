@@ -1,7 +1,7 @@
 import type { Edge, Node } from '@xyflow/react';
 // elkjs 浏览器 bundle（Vite 可直出）
 import ELK from 'elkjs/lib/elk.bundled.js';
-import type { MindMapFlowNodeData } from './mindMapFlowAdapter';
+import type { MindMapFlowNodeData } from '@/utils/mindMapFlowAdapter';
 
 const elk = new ELK();
 

@@ -3,8 +3,8 @@
  */
 import React, { useMemo, useState } from 'react';
 import { X, Copy, Check } from 'lucide-react';
-import type { LSAPContentMap, LSAPState } from '../types';
-import type { WorkspaceDialogueTurn } from '../utils/examWorkspaceLsapKey';
+import type { LSAPContentMap, LSAPState } from '@/types';
+import type { WorkspaceDialogueTurn } from '@/utils/examWorkspaceLsapKey';
 
 export function conflictPageHintText(page: number): string {
   return `可能与讲义第 ${page} 页不一致，请核对（非像素级 OCR，以原 PDF 为准）。`;

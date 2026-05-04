@@ -11,7 +11,7 @@ import {
   evaluateFeynmanAnswer,
   FeynmanQuestionResult,
   FeynmanAnswerFeedback
-} from '../services/geminiService';
+} from '@/services/geminiService';
 
 const MarkdownComponents: Components = {
   h1: ({ node, ...props }) => (

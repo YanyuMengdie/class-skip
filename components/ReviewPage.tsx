@@ -1,14 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, BookOpen, FileText, Loader2, Cloud, Library, Trash2, ChevronRight, RefreshCw } from 'lucide-react';
 import { User } from 'firebase/auth';
-import { getUserSessions, fetchSessionDetails, updateCloudSessionState } from '../services/firebase';
-import { CloudSession } from '../types';
-import { storageService } from '../services/storageService';
-import { collectSavedArtifactsFromLocalHistory } from '../utils/collectSavedArtifactsFromLocalHistory';
-import { collectSavedArtifactsFromCloudSessions } from '../utils/collectSavedArtifactsFromCloud';
-import { mergeLocalAndCloudArtifacts, type MergedLibraryEntry } from '../utils/mergeArtifactLibraries';
-import { SAVED_ARTIFACT_TYPE_META as TYPE_META, formatSavedArtifactTime as formatTime } from '../utils/savedArtifactMeta';
-import { ArtifactFullView } from './SavedArtifactPreview';
+import { getUserSessions, fetchSessionDetails, updateCloudSessionState } from '@/services/firebase';
+import { CloudSession } from '@/types';
+import { storageService } from '@/services/storageService';
+import { collectSavedArtifactsFromLocalHistory } from '@/utils/collectSavedArtifactsFromLocalHistory';
+import { collectSavedArtifactsFromCloudSessions } from '@/utils/collectSavedArtifactsFromCloud';
+import { mergeLocalAndCloudArtifacts, type MergedLibraryEntry } from '@/utils/mergeArtifactLibraries';
+import { SAVED_ARTIFACT_TYPE_META as TYPE_META, formatSavedArtifactTime as formatTime } from '@/utils/savedArtifactMeta';
+import { ArtifactFullView } from '@/components/SavedArtifactPreview';
 
 export type ReviewType =
   | 'quiz'

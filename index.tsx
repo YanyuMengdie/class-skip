@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import App from '@/App';
 
 // 版本标记：若控制台看到此行，说明当前运行的是 9.13（含：只学5分钟、多文档问答、本页注释默认收起）
 if (typeof window !== 'undefined') console.log('[逃课神器] 9.13 已加载');

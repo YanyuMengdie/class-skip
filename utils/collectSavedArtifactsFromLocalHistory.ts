@@ -1,4 +1,4 @@
-import { FileHistoryItem, SavedArtifact } from '../types';
+import { FileHistoryItem, SavedArtifact } from '@/types';
 
 export interface GlobalArtifactEntry {
   provenance: 'local';

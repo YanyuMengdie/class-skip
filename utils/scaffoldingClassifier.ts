@@ -7,7 +7,7 @@
  * - `consecutiveWeakStreak`：在 **本轮用户发送后** 更新——若本轮为 strong 则 **归零**；若为 weak/empty/partial 则 **+1**。
  */
 
-import type { LearnerTurnQuality, ScaffoldingPhase } from '../types';
+import type { LearnerTurnQuality, ScaffoldingPhase } from '@/types';
 
 const CONNECTORS =
   /因为|所以|如果|定义|区别|因此|意味着|但是|然而|虽然|由于|从而|即|换言之|例如|综上|首先|其次/i;

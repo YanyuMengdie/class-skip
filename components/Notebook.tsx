@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Book, ChevronDown, ChevronRight, Download, Trash2, StickyNote, PenLine, Layers, Rocket } from 'lucide-react';
-import { PageNotes, Note } from '../types';
-import { normalizeSelectionText, noteDisplayWithSuperscript, stripHtml } from '../utils/textUtils';
+import { PageNotes, Note } from '@/types';
+import { normalizeSelectionText, noteDisplayWithSuperscript, stripHtml } from '@/utils/textUtils';
 
 interface NotebookProps {
   fileName: string | null;

@@ -1,4 +1,4 @@
-import type { ScaffoldingPhase, TutorScaffoldingContext } from '../types';
+import type { ScaffoldingPhase, TutorScaffoldingContext } from '@/types';
 
 /** A 档：固定写入 system，约束回合节奏与篇幅（与 P2 教学法叠加） */
 export function getScaffoldingSystemAddendum(): string {

@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { X, Loader2, GraduationCap } from 'lucide-react';
-import { generateTrickyQuestions } from '../services/geminiService';
+import { generateTrickyQuestions } from '@/services/geminiService';
 
 const MarkdownComponents: Components = {
   h1: ({ node, ...props }) => <h1 className="text-xl font-bold text-slate-900 mt-6 mb-4 pb-2 border-b border-orange-100" {...props} />,

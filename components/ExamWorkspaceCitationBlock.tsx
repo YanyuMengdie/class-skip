@@ -4,8 +4,8 @@
  */
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Link2, X } from 'lucide-react';
-import type { ExamMaterialLink } from '../types';
-import type { ExamWorkspaceCitation } from '../utils/examWorkspaceCitations';
+import type { ExamMaterialLink } from '@/types';
+import type { ExamWorkspaceCitation } from '@/utils/examWorkspaceCitations';
 
 function useMaxWidth1023(): boolean {
   const [m, setM] = useState(false);

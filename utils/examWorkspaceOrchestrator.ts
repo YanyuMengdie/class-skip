@@ -11,7 +11,7 @@
  * - stress 由调用方在回复后标记「本 KC 已完成 stress」，编排器不再重复触发。
  */
 
-import type { LearnerTurnQuality, ScaffoldingPhase, SocraticProbeMode } from '../types';
+import type { LearnerTurnQuality, ScaffoldingPhase, SocraticProbeMode } from '@/types';
 
 export interface OrchestratorInput {
   prevProbeMode: SocraticProbeMode;

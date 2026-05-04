@@ -3,7 +3,7 @@
  */
 import React from 'react';
 import { X } from 'lucide-react';
-import type { LSAPKnowledgeComponent } from '../types';
+import type { LSAPKnowledgeComponent } from '@/types';
 
 export interface KnowledgePointInspectPanelProps {
   kc: LSAPKnowledgeComponent | null;

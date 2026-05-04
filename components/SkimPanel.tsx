@@ -12,9 +12,9 @@ import ReactMarkdown, { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType } from '../types';
+import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType } from '@/types';
 import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2 } from 'lucide-react';
-import { chatWithSkimAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '../services/geminiService';
+import { chatWithSkimAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '@/services/geminiService';
 
 interface SkimPanelProps {
   studyMap: StudyMap | null;

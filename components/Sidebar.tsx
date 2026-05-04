@@ -2,8 +2,8 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LayoutGrid, Cloud, FileText, Loader2, LogIn, Trash2, Edit2, Check, X, FolderPlus, Folder, FolderOpen, MoreHorizontal, Plus, CornerDownRight, Calendar as CalendarIcon, PenTool, ChevronLeft, ChevronRight, Clock, MapPin, CheckCircle2, BookOpen, Layers, Star, Filter, Lightbulb, Target, AlertTriangle, Flame, Sparkles } from 'lucide-react';
 import { User } from 'firebase/auth';
-import { getUserSessions, renameCloudSession, moveSession, createCloudFolder, addCalendarEvent, getCalendarEvents, deleteCalendarEvent, addMemo, getMemos, deleteMemo } from '../services/firebase';
-import { CloudSession, CalendarEvent, Memo, PageMarks, PageMark, MarkType } from '../types';
+import { getUserSessions, renameCloudSession, moveSession, createCloudFolder, addCalendarEvent, getCalendarEvents, deleteCalendarEvent, addMemo, getMemos, deleteMemo } from '@/services/firebase';
+import { CloudSession, CalendarEvent, Memo, PageMarks, PageMark, MarkType } from '@/types';
 
 interface SidebarProps {
   isOpen: boolean;

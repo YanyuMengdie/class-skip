@@ -1,5 +1,5 @@
-import type { Exam, ExamMaterialLink } from '../types';
-import { assessExamPressure, type ExamPressureAssessment, type FilePlanMeta } from './examSchedule';
+import type { Exam, ExamMaterialLink } from '@/types';
+import { assessExamPressure, type ExamPressureAssessment, type FilePlanMeta } from '@/utils/examSchedule';
 
 export interface MaintenanceEligibilityResult {
   allowedExamIds: string[];

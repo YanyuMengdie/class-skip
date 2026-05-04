@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, ChevronLeft, ChevronRight, Loader2, Layers, RotateCcw, PlusCircle } from 'lucide-react';
-import { FlashCard } from '../types';
-import { estimateFlashCardCount, generateFlashCards } from '../services/geminiService';
+import { FlashCard } from '@/types';
+import { estimateFlashCardCount, generateFlashCards } from '@/services/geminiService';
 
 type Step = 'estimate' | 'estimating' | 'ready' | 'generating' | 'flipping' | 'empty';
 

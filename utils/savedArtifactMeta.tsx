@@ -10,7 +10,7 @@ import {
   HelpCircle,
   ListChecks
 } from 'lucide-react';
-import { SavedArtifactType } from '../types';
+import { SavedArtifactType } from '@/types';
 
 export const SAVED_ARTIFACT_TYPE_META: Record<
   SavedArtifactType,

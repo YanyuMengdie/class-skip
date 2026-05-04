@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BookMarked, ChevronDown, ChevronUp } from 'lucide-react';
-import type { KcGlossaryEntry, LSAPKnowledgeComponent } from '../types';
+import type { KcGlossaryEntry, LSAPKnowledgeComponent } from '@/types';
 
 export interface KcGlossarySidebarProps {
   activeKc: LSAPKnowledgeComponent | null;
