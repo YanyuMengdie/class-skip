@@ -1,0 +1,327 @@
+{
+  "filesScanned": 99,
+  "filesChanged": 80,
+  "importsRewritten": 232,
+  "perFile": [
+    {
+      "file": "App.tsx",
+      "count": 47
+    },
+    {
+      "file": "components/ExamWorkspacePage.tsx",
+      "count": 12
+    },
+    {
+      "file": "components/ExamWorkspaceSocraticChat.tsx",
+      "count": 12
+    },
+    {
+      "file": "components/ExamDailyMaintenancePanel.tsx",
+      "count": 9
+    },
+    {
+      "file": "components/ReviewPage.tsx",
+      "count": 8
+    },
+    {
+      "file": "components/ExamHubModal.tsx",
+      "count": 5
+    },
+    {
+      "file": "components/WorkspaceKcProbeModal.tsx",
+      "count": 5
+    },
+    {
+      "file": "services/geminiService.ts",
+      "count": 5
+    },
+    {
+      "file": "components/ExamPredictionPanel.tsx",
+      "count": 4
+    },
+    {
+      "file": "components/MindMapFlowCanvas.tsx",
+      "count": 4
+    },
+    {
+      "file": "components/MindMapFlowNode.tsx",
+      "count": 4
+    },
+    {
+      "file": "components/MindMapPanel.tsx",
+      "count": 4
+    },
+    {
+      "file": "components/StudioPanel.tsx",
+      "count": 4
+    },
+    {
+      "file": "components/ExamCenterPanel.tsx",
+      "count": 3
+    },
+    {
+      "file": "components/ExamLinkModal.tsx",
+      "count": 3
+    },
+    {
+      "file": "components/ExamWorkspaceAssistantMarkdown.tsx",
+      "count": 3
+    },
+    {
+      "file": "components/ExamWorkspaceMaterialPreview.tsx",
+      "count": 3
+    },
+    {
+      "file": "components/ExplanationPanel.tsx",
+      "count": 3
+    },
+    {
+      "file": "components/GalgameSettings.tsx",
+      "count": 3
+    },
+    {
+      "file": "components/StudyFlowPanel.tsx",
+      "count": 3
+    },
+    {
+      "file": "utils/mergeArtifactLibraries.ts",
+      "count": 3
+    },
+    {
+      "file": "utils/mindMapFlowAdapter.ts",
+      "count": 3
+    },
+    {
+      "file": "components/ChatHug.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/ExamWorkspaceCitationBlock.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/FiveMinFlowPanel.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/FlashCardReviewPanel.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/GalgameOverlay.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/Header.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/MultiDocQAPanel.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/Notebook.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/QuizReviewPanel.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/SavedArtifactPreview.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/Sidebar.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/SkimPanel.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/SlideViewer.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/StudyGuidePanel.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/TaskHug.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/TurtleSoupPanel.tsx",
+      "count": 2
+    },
+    {
+      "file": "components/WorkspaceEvidenceReportModal.tsx",
+      "count": 2
+    },
+    {
+      "file": "data/disciplineTeachingProfiles.ts",
+      "count": 2
+    },
+    {
+      "file": "utils/collectSavedArtifactsFromCloud.ts",
+      "count": 2
+    },
+    {
+      "file": "utils/examChunkIndex.ts",
+      "count": 2
+    },
+    {
+      "file": "utils/examChunkRetrieval.ts",
+      "count": 2
+    },
+    {
+      "file": "utils/examMaintenanceEligibility.ts",
+      "count": 2
+    },
+    {
+      "file": "utils/maintenanceStrategy.ts",
+      "count": 2
+    },
+    {
+      "file": "utils/studyFlowInference.ts",
+      "count": 2
+    },
+    {
+      "file": "components/ClassroomPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/ExamSummaryPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/ExamTrapsPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/FeynmanPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/HistoryModal.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/KcGlossarySidebar.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/KnowledgePointInspectPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/LectureTranscriptPage.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/LoginModal.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/MaintenanceFlashcardDeck.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/PageMarkPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/SideQuestPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/SlidePageComments.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/TerminologyPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/TrapListPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "components/TrickyProfessorPanel.tsx",
+      "count": 1
+    },
+    {
+      "file": "data/maintenanceFeedbackCopy.ts",
+      "count": 1
+    },
+    {
+      "file": "data/scaffoldingPrompt.ts",
+      "count": 1
+    },
+    {
+      "file": "data/studyFlowTemplates.ts",
+      "count": 1
+    },
+    {
+      "file": "index.tsx",
+      "count": 1
+    },
+    {
+      "file": "services/examChunkIndexStorage.ts",
+      "count": 1
+    },
+    {
+      "file": "services/firebase.ts",
+      "count": 1
+    },
+    {
+      "file": "services/storageService.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/collectSavedArtifactsFromLocalHistory.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/examSchedule.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/examWorkspaceCitations.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/examWorkspaceLsapKey.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/examWorkspaceOrchestrator.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/lsapScore.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/mindMapElkLayout.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/mindMapLabel.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/mindMapLayout.ts",
+      "count": 1
+    },
+    {
+      "file": "utils/savedArtifactMeta.tsx",
+      "count": 1
+    },
+    {
+      "file": "utils/scaffoldingClassifier.ts",
+      "count": 1
+    }
+  ]
+}
