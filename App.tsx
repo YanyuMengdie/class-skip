@@ -34,7 +34,7 @@ import { FiveMinFlowPanel } from '@/components/FiveMinFlowPanel';
 import { ClassroomPanel } from '@/components/ClassroomPanel';
 import { LectureTranscriptPage } from '@/components/LectureTranscriptPage';
 import { ReviewPage, ReviewType } from '@/components/ReviewPage';
-import { TurtleSoupPanel } from '@/components/TurtleSoupPanel';
+import { TurtleSoupPanel } from '@/features/turtleSoup/TurtleSoupPanel';
 import { ExamPredictionPanel } from '@/components/ExamPredictionPanel';
 import { ExamHubModal } from '@/components/ExamHubModal';
 import { ExamWorkspacePage } from '@/components/ExamWorkspacePage';
