@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen, Swords, X, Timer, MoreHorizontal, LayoutDashboard } from 'lucide-react';
-import { MusicPlayer } from '@/components/MusicPlayer';
+import { MusicPlayer } from '@/shared/layout/MusicPlayer';
 import { ViewMode } from '@/types';
 import { User } from 'firebase/auth'; 
 

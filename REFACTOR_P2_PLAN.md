@@ -231,25 +231,25 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 内部依赖 | 跨模块依赖 |
 |---|---|---|---|---|
-| [components/StudioPanel.tsx](components/StudioPanel.tsx) | 110 | 主（再导出 ArtifactFullView） | SavedArtifactPreview | utils/savedArtifactMeta |
-| [components/SavedArtifactPreview.tsx](components/SavedArtifactPreview.tsx) | 284 | 子（被两人 import） | — | utils/savedArtifactMeta |
+| [shared/studio/StudioPanel.tsx](shared/studio/StudioPanel.tsx) | 110 | 主（再导出 ArtifactFullView） | SavedArtifactPreview | utils/savedArtifactMeta |
+| [shared/studio/SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | 284 | 子（被两人 import） | — | utils/savedArtifactMeta |
 | [components/ReviewPage.tsx](components/ReviewPage.tsx) | 393 | 主 | SavedArtifactPreview | utils/collectSavedArtifactsFromCloud、utils/collectSavedArtifactsFromLocalHistory、utils/mergeArtifactLibraries、utils/savedArtifactMeta、services/firebase、services/storageService |
 
 ### 1.21 shared/layout/
 
 | 当前路径 | 行 | 定位 | 内部依赖 |
 |---|---|---|---|
-| [components/Header.tsx](components/Header.tsx) | 523 | 共享（顶栏） | MusicPlayer |
-| [components/Sidebar.tsx](components/Sidebar.tsx) | 972 | 共享（侧栏） | services/firebase |
-| [components/WelcomeScreen.tsx](components/WelcomeScreen.tsx) | 83 | 共享（欢迎页） | — |
+| [shared/layout/Header.tsx](shared/layout/Header.tsx) | 523 | 共享（顶栏） | MusicPlayer |
+| [shared/layout/Sidebar.tsx](shared/layout/Sidebar.tsx) | 972 | 共享（侧栏） | services/firebase |
+| [shared/layout/WelcomeScreen.tsx](shared/layout/WelcomeScreen.tsx) | 83 | 共享（欢迎页） | — |
 
 ### 1.22 shared/auth/ + shared/history/ + shared/audio/
 
 | 当前路径 | 行 | 定位 | 跨模块依赖 |
 |---|---|---|---|
-| [components/LoginModal.tsx](components/LoginModal.tsx) | 150 | 共享（登录弹窗） | services/firebase |
-| [components/HistoryModal.tsx](components/HistoryModal.tsx) | 104 | 共享（历史会话） | — |
-| [components/MusicPlayer.tsx](components/MusicPlayer.tsx) | 116 | 共享（仅被 Header import） | — |
+| [shared/auth/LoginModal.tsx](shared/auth/LoginModal.tsx) | 150 | 共享（登录弹窗） | services/firebase |
+| [shared/history/HistoryModal.tsx](shared/history/HistoryModal.tsx) | 104 | 共享（历史会话） | — |
+| [shared/layout/MusicPlayer.tsx](shared/layout/MusicPlayer.tsx) | 116 | 共享（仅被 Header import） | — |
 
 > 🤔 **MusicPlayer**：当前只有 Header 一处用它。严格讲不算"共享"，可以放 `shared/layout/` 与 Header 同居，或单独留在 `shared/audio/`。建议放 `shared/layout/MusicPlayer.tsx` 与 Header 紧邻。
 
@@ -371,13 +371,13 @@ class-skip/
 
 | 文件 | 被谁用 | 候选位置 | 推荐 |
 |------|--------|----------|------|
-| [components/SavedArtifactPreview.tsx](components/SavedArtifactPreview.tsx) | StudioPanel、ReviewPage | features/studio/ vs features/review/ vs shared/ | **features/studio/**，让 ReviewPage 反向 import |
+| [shared/studio/SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | StudioPanel、ReviewPage | features/studio/ vs features/review/ vs shared/ | **features/studio/**，让 ReviewPage 反向 import |
 | [utils/savedArtifactMeta.tsx](utils/savedArtifactMeta.tsx) | StudioPanel、ReviewPage、SavedArtifactPreview | 同上 | **features/studio/lib/** |
 | [utils/textUtils.ts](utils/textUtils.ts) | ExplanationPanel、Notebook、SlideViewer | shared 还是 lib | **lib/text/** |
 | [utils/extractBoldTermsFromMarkdown.ts](utils/extractBoldTermsFromMarkdown.ts) | App.tsx、ExamWorkspaceSocraticChat | lib/text/ vs features/exam/workspace/lib/ | **lib/text/**（通用 markdown 解析） |
 | [utils/glossaryTermFilter.ts](utils/glossaryTermFilter.ts) | ExamWorkspaceSocraticChat | lib/text/ vs features/exam/workspace/lib/ | **lib/text/**（通用术语过滤；当前虽然只工作台用，但语义通用） |
 | [utils/scaffoldingClassifier.ts](utils/scaffoldingClassifier.ts) | ExamWorkspaceSocraticChat、services/geminiService | lib/scaffolding/ vs features/exam/workspace/lib/ | **lib/scaffolding/**（被 geminiService 跨域用，不该绑 feature） |
-| [components/MusicPlayer.tsx](components/MusicPlayer.tsx) | 仅 Header 一家 | shared/audio/ vs shared/layout/ | **shared/layout/**（与 Header 同居，单一调用方） |
+| [shared/layout/MusicPlayer.tsx](shared/layout/MusicPlayer.tsx) | 仅 Header 一家 | shared/audio/ vs shared/layout/ | **shared/layout/**（与 Header 同居，单一调用方） |
 | [components/StudyFlowPanel.tsx](components/StudyFlowPanel.tsx) | 仅 ExamHubModal | features/exam/studyFlow/ vs 顶层独立 feature | **features/exam/studyFlow/**（实际是 ExamHub 第三个 tab） |
 | [services/storageService.ts](services/storageService.ts) | App、ExamLinkModal、ReviewPage | lib/storage/ vs features/studio/lib/ | **lib/storage/**（IndexedDB 通用层） |
 

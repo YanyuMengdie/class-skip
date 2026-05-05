@@ -22,7 +22,7 @@
 | `data/maintenanceFeedbackCopy.ts` | 反馈文案常量与模板函数 |
 | `components/StudyFlowPanel.tsx` | 情境选择与步骤执行 |
 | `components/ExamPredictionPanel.tsx` | `initialKCId` 深链 |
-| `components/Header.tsx` | 「考试」入口 |
+| `shared/layout/Header.tsx` | 「考试」入口 |
 | `App.tsx` | `navigateToSegment`、`navigateStudyFlowStep`、挂载 `ExamHubModal` |
 | `firestore.rules` | 示例规则（部署时需合并到现有项目规则） |
 

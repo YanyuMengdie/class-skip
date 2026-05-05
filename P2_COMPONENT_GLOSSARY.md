@@ -398,11 +398,11 @@
 
 | 组件 | 不确定的点 |
 |------|-----------|
-| [HistoryModal.tsx](components/HistoryModal.tsx) | 当前 Header 主菜单未发现明确入口；可能是早期版本残留入口或仅 Sidebar 内某按钮触发。请确认目前在产品哪里能见到它。 |
+| [HistoryModal.tsx](shared/history/HistoryModal.tsx) | 当前 Header 主菜单未发现明确入口；可能是早期版本残留入口或仅 Sidebar 内某按钮触发。请确认目前在产品哪里能见到它。 |
 | [SideQuestPanel.tsx](components/SideQuestPanel.tsx) | "支线任务"具体的产品定位不清——是用户主动触发还是某条件下系统弹出？什么场景？请说明。 |
 | [TaskHug.tsx](components/TaskHug.tsx) / [ChatHug.tsx](components/ChatHug.tsx) | 二者入口是不是同一个菜单？两者使用场景的产品定义差异在哪（任务规划 vs 单纯陪聊）？ |
 | [ExamPredictionPanel.tsx](components/ExamPredictionPanel.tsx) 的双入口 | 它既能从"学习工具九宫格"打开，也能从"备考工作台 → 进入考前预测"打开。两条路进去是同一份组件、同一份数据吗？ |
-| [WelcomeScreen.tsx](components/WelcomeScreen.tsx) | 是仅"未上传时"显示，还是登出后/无文件时也显示？需 Criss 确认行为边界。 |
+| [WelcomeScreen.tsx](shared/layout/WelcomeScreen.tsx) | 是仅"未上传时"显示，还是登出后/无文件时也显示？需 Criss 确认行为边界。 |
 
 ---
 

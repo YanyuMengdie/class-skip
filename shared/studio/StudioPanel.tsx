@@ -3,8 +3,8 @@ import { BookOpen, Trash2, ChevronRight } from 'lucide-react';
 import { SavedArtifact } from '@/types';
 import { SAVED_ARTIFACT_TYPE_META as TYPE_META, formatSavedArtifactTime as formatTime } from '@/utils/savedArtifactMeta';
 
-export { ArtifactFullView } from '@/components/SavedArtifactPreview';
-export type { ArtifactFullViewProps } from '@/components/SavedArtifactPreview';
+export { ArtifactFullView } from '@/shared/studio/SavedArtifactPreview';
+export type { ArtifactFullViewProps } from '@/shared/studio/SavedArtifactPreview';
 
 interface StudioPanelProps {
   artifacts: SavedArtifact[];

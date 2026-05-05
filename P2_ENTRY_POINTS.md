@@ -10,7 +10,7 @@
 
 | 项 | 答案 |
 |----|------|
-| **按钮所在文件 / 行** | [components/Header.tsx:308](components/Header.tsx) |
+| **按钮所在文件 / 行** | [shared/layout/Header.tsx:308](shared/layout/Header.tsx) |
 | **按钮 JSX** | `<button onClick={onOpenReview} ...>学习工具</button>`（line 308-311，蓝色 `bg-indigo-500`） |
 | **包裹条件** | line 307 `{onOpenReview && (...)}` —— 父组件不传 `onOpenReview` 则不渲染该按钮 |
 | **`onOpenReview` 在 App.tsx 怎么连接** | [App.tsx:2035](App.tsx) `onOpenReview={() => setReviewPageOpen(true)}` |
@@ -29,7 +29,7 @@
 
 | 项 | 答案 |
 |----|------|
-| **按钮所在文件 / 行** | [components/Header.tsx:313-323](components/Header.tsx)（青色 `bg-teal-600`） |
+| **按钮所在文件 / 行** | [shared/layout/Header.tsx:313-323](shared/layout/Header.tsx)（青色 `bg-teal-600`） |
 | **按钮 JSX** | `<button onClick={onOpenExamWorkspace} ...>考试复习</button>` |
 | **包裹条件** | line 313 `{onOpenExamWorkspace && (...)}` |
 | **`onOpenExamWorkspace` 在 App.tsx 怎么连接** | [App.tsx:2036-2042](App.tsx)：`onOpenExamWorkspace={() => { if (!user) { setLoginModalOpen(true); return; } setAppMode('examWorkspace'); }}` |
@@ -79,7 +79,7 @@ P2 重组时，**11 个按钮 ↔ 11 个面板组件 ↔ 11 个对应的 `*Panel
 | 状态 | 声明位置 | 类型 | 含义 |
 |------|----------|------|------|
 | `completedSegmentsCount` | [App.tsx:318](App.tsx) `const [completedSegmentsCount, setCompletedSegmentsCount] = useState<number>(0);` | App.tsx 全局 | 已完成番茄段数（每段 = 海龟汤一次使用券） |
-| `restCountdownSec` | [Header.tsx:186](components/Header.tsx) `const [restCountdownSec, setRestCountdownSec] = useState<number \| null>(null);` | **Header.tsx 内部** | 仅"休息一下"弹层用的倒计时秒数 |
+| `restCountdownSec` | [Header.tsx:186](shared/layout/Header.tsx) `const [restCountdownSec, setRestCountdownSec] = useState<number \| null>(null);` | **Header.tsx 内部** | 仅"休息一下"弹层用的倒计时秒数 |
 | `pomodoroPhase` / `pomodoroRemainingSeconds` / `pomodoroSegmentSeconds` / `pomodoroBreakSeconds` | App.tsx 持有，下传给 Header | App.tsx 全局 | 番茄钟阶段与计时 |
 
 ### 4.3 数据流图
@@ -115,10 +115,10 @@ P2 重组时，**11 个按钮 ↔ 11 个面板组件 ↔ 11 个对应的 `*Panel
 | App 持有 state | [App.tsx:318](App.tsx) | `const [completedSegmentsCount, setCompletedSegmentsCount] = useState<number>(0);` |
 | App → Header 下传 | [App.tsx:2051](App.tsx) | `completedSegmentsCount={completedSegmentsCount}` |
 | App → Header 下传相关番茄钟 props | [App.tsx:2045-2053](App.tsx) | `pomodoroSegmentSeconds`、`pomodoroBreakSeconds`、`pomodoroPhase`、`pomodoroRemainingSeconds`、`onPomodoroStart`、`onPomodoroStop`、`onPomodoroSegmentChange`、`onPomodoroBreakChange` |
-| Header 接收 prop | [Header.tsx:100, 168](components/Header.tsx) | 类型 `completedSegmentsCount?: number;`（默认 0） |
-| Header 仅消费、不修改 | [Header.tsx:473](components/Header.tsx) | `已完成 {completedSegmentsCount} 段 · 海龟汤可用 {completedSegmentsCount} 次` |
+| Header 接收 prop | [Header.tsx:100, 168](shared/layout/Header.tsx) | 类型 `completedSegmentsCount?: number;`（默认 0） |
+| Header 仅消费、不修改 | [Header.tsx:473](shared/layout/Header.tsx) | `已完成 {completedSegmentsCount} 段 · 海龟汤可用 {completedSegmentsCount} 次` |
 | App → Header 触发海龟汤入口 | [App.tsx:2044](App.tsx) | `onOpenTurtleSoup={() => setTurtleSoupOpen(true)}` |
-| Header 把海龟汤按钮挂到"学累了/休息"子菜单 | [Header.tsx:364-366](components/Header.tsx) | `<button onClick={onOpenTurtleSoup}>海龟汤</button>` |
+| Header 把海龟汤按钮挂到"学累了/休息"子菜单 | [Header.tsx:364-366](shared/layout/Header.tsx) | `<button onClick={onOpenTurtleSoup}>海龟汤</button>` |
 | App → TurtleSoupPanel 下传 + 上提回调 | [App.tsx:2616-2622](App.tsx) | `completedSegmentsCount={completedSegmentsCount}`<br>`onConsumeSegment={() => setCompletedSegmentsCount((c) => Math.max(0, c - 1))}` |
 | TurtleSoupPanel 接收 prop & 回调 | [TurtleSoupPanel.tsx:11-12](components/TurtleSoupPanel.tsx) | `completedSegmentsCount?: number;`<br>`onConsumeSegment?: () => void;` |
 
@@ -126,11 +126,11 @@ P2 重组时，**11 个按钮 ↔ 11 个面板组件 ↔ 11 个对应的 `*Panel
 
 | 你的问题 | 答案 |
 |----------|------|
-| TurtleSoupPanel 是否从 Header 读取计时器状态（如 `restCountdownSec`）？ | **❌ 否**。`restCountdownSec` 是 Header 私有的休息倒计时（[Header.tsx:186](components/Header.tsx)），不下传给任何子组件，也不上提到 App。 |
+| TurtleSoupPanel 是否从 Header 读取计时器状态（如 `restCountdownSec`）？ | **❌ 否**。`restCountdownSec` 是 Header 私有的休息倒计时（[Header.tsx:186](shared/layout/Header.tsx)），不下传给任何子组件，也不上提到 App。 |
 | TurtleSoupPanel 是否依赖 Header？ | **❌ 不依赖**。TurtleSoupPanel 与 Header 之间没有任何直接 import / props 关系。 |
 | 共享的状态机制？ | **App.tsx 充当中转**：App 持有 `completedSegmentsCount`，分别下传给 Header（仅显示）和 TurtleSoupPanel（显示+消费）。**不是 context、不是全局 store**。 |
 | 涉及的 state 名字 | App.tsx: `completedSegmentsCount` / `setCompletedSegmentsCount` / `turtleSoupOpen` / `setTurtleSoupOpen` / `turtleSoupState` / `setTurtleSoupState`<br>Header.tsx 私有: `restCountdownSec`、`restMinutes`、`restPopoverOpen` 等（**与 TurtleSoup 无关**）<br>TurtleSoupPanel.tsx 私有: `questionInput`、`loading`、`hintLoading` |
-| Header 里"已完成 N 段 · 海龟汤可用 N 次"那行字（[Header.tsx:473](components/Header.tsx)）和海龟汤是同一份计数吗？ | **是同一份**。两者读的都是 App.tsx 的 `completedSegmentsCount`，玩一局海龟汤会通过 `onConsumeSegment` 让计数 -1，Header 显示的"可用次数"会同步减少。 |
+| Header 里"已完成 N 段 · 海龟汤可用 N 次"那行字（[Header.tsx:473](shared/layout/Header.tsx)）和海龟汤是同一份计数吗？ | **是同一份**。两者读的都是 App.tsx 的 `completedSegmentsCount`，玩一局海龟汤会通过 `onConsumeSegment` 让计数 -1，Header 显示的"可用次数"会同步减少。 |
 
 ### 4.6 P2 搬迁时的影响
 

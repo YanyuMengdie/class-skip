@@ -27,8 +27,8 @@
 ### 修改文件
 - `types.ts` - 新增PageMark、QuizRound、FlashCard类型
 - `services/geminiService.ts` - 新增generateQuizSet、estimateFlashCardCount、generateFlashCards
-- `components/Header.tsx` - 添加"重点"按钮
-- `components/Sidebar.tsx` - 添加"复习"入口和标记页筛选
+- `shared/layout/Header.tsx` - 添加"重点"按钮
+- `shared/layout/Sidebar.tsx` - 添加"复习"入口和标记页筛选
 - `components/ExplanationPanel.tsx` - 优化文本选择，支持HTML格式拖拽
 - `components/SlideViewer.tsx` - 修复便签编辑问题
 - `App.tsx` - 添加状态管理和持久化逻辑

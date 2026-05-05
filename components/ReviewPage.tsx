@@ -8,7 +8,7 @@ import { collectSavedArtifactsFromLocalHistory } from '@/utils/collectSavedArtif
 import { collectSavedArtifactsFromCloudSessions } from '@/utils/collectSavedArtifactsFromCloud';
 import { mergeLocalAndCloudArtifacts, type MergedLibraryEntry } from '@/utils/mergeArtifactLibraries';
 import { SAVED_ARTIFACT_TYPE_META as TYPE_META, formatSavedArtifactTime as formatTime } from '@/utils/savedArtifactMeta';
-import { ArtifactFullView } from '@/components/SavedArtifactPreview';
+import { ArtifactFullView } from '@/shared/studio/SavedArtifactPreview';
 
 export type ReviewType =
   | 'quiz'

@@ -144,7 +144,7 @@
 
 ### 被外部引用情况
 - 仅被 [App.tsx:20](App.tsx) import
-- 但 `MarkType` / `PageMark` 类型还被 [Sidebar.tsx](components/Sidebar.tsx) 用（Sidebar 显示带星标的页面），所以**类型不要搬走**，留在 types.ts。
+- 但 `MarkType` / `PageMark` 类型还被 [Sidebar.tsx](shared/layout/Sidebar.tsx) 用（Sidebar 显示带星标的页面），所以**类型不要搬走**，留在 types.ts。
 
 ### 命名扫描
 - `components/PageMarkPanel.tsx` ✓
@@ -242,8 +242,8 @@
 | 9 | [ExamSummaryPanel.tsx](components/ExamSummaryPanel.tsx) | ✓ |
 | 10 | [ExamTrapsPanel.tsx](components/ExamTrapsPanel.tsx) | ✓ |
 | 11 | [MultiDocQAPanel.tsx](components/MultiDocQAPanel.tsx) | ✓ |
-| 12 | [StudioPanel.tsx](components/StudioPanel.tsx) | ✓ |
-| 13 | [SavedArtifactPreview.tsx](components/SavedArtifactPreview.tsx) | ✓ |
+| 12 | [StudioPanel.tsx](shared/studio/StudioPanel.tsx) | ✓ |
+| 13 | [SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | ✓ |
 
 ### ReviewPage.tsx 的依赖
 - `../services/firebase`：`getUserSessions`、`fetchSessionDetails`、`updateCloudSessionState`
@@ -275,7 +275,7 @@
 ### 工具之间是否互相引用？
 
 逐对核查结果：
-- StudioPanel **再导出** SavedArtifactPreview 中的 `ArtifactFullView`（[StudioPanel.tsx:6-7](components/StudioPanel.tsx)）
+- StudioPanel **再导出** SavedArtifactPreview 中的 `ArtifactFullView`（[StudioPanel.tsx:6-7](shared/studio/StudioPanel.tsx)）
 - ReviewPage 直接 import `ArtifactFullView` from SavedArtifactPreview
 - MindMapPanel → MindMapFlowCanvas → MindMapFlowNode（一条单向链）
 - 其他 11 个工具面板**两两之间无任何 import 关系**
@@ -510,15 +510,15 @@
 
 | 文件 | 状态 | 我的归类建议 |
 |---|---|---|
-| [Header.tsx](components/Header.tsx) | ✓ | shared/layout/ ✅ |
-| [Sidebar.tsx](components/Sidebar.tsx) | ✓ | shared/layout/ ✅ |
-| [WelcomeScreen.tsx](components/WelcomeScreen.tsx) | ✓ | shared/layout/ ✅ |
-| [LoginModal.tsx](components/LoginModal.tsx) | ✓ | shared/auth/ ✅ |
-| [HistoryModal.tsx](components/HistoryModal.tsx) | ✓ | shared/history/ ✅ |
-| [MusicPlayer.tsx](components/MusicPlayer.tsx) | ✓ | ⚠️ **仅 Header 一家用**——严格说不算"shared"。建议放 shared/layout/ 与 Header 同居 |
+| [Header.tsx](shared/layout/Header.tsx) | ✓ | shared/layout/ ✅ |
+| [Sidebar.tsx](shared/layout/Sidebar.tsx) | ✓ | shared/layout/ ✅ |
+| [WelcomeScreen.tsx](shared/layout/WelcomeScreen.tsx) | ✓ | shared/layout/ ✅ |
+| [LoginModal.tsx](shared/auth/LoginModal.tsx) | ✓ | shared/auth/ ✅ |
+| [HistoryModal.tsx](shared/history/HistoryModal.tsx) | ✓ | shared/history/ ✅ |
+| [MusicPlayer.tsx](shared/layout/MusicPlayer.tsx) | ✓ | ⚠️ **仅 Header 一家用**——严格说不算"shared"。建议放 shared/layout/ 与 Header 同居 |
 | [LoadingInteractiveContent.tsx](components/LoadingInteractiveContent.tsx) | ✓ | ❌ **不是 shared**——仅被 ExplanationPanel 用，应归 `features/reader/deep-read/` |
-| [StudioPanel.tsx](components/StudioPanel.tsx) | ✓ | ❌ **不是 shared**——仅被 ReviewPage（间接）用 + 通过 App.tsx 渲染。应归 `features/review/`（业务上是"已生成产物面板"） |
-| [SavedArtifactPreview.tsx](components/SavedArtifactPreview.tsx) | ✓ | ❌ **不是 shared**——被 ReviewPage、StudioPanel 共用，归 `features/review/`（同模块内部共享） |
+| [StudioPanel.tsx](shared/studio/StudioPanel.tsx) | ✓ | ❌ **不是 shared**——仅被 ReviewPage（间接）用 + 通过 App.tsx 渲染。应归 `features/review/`（业务上是"已生成产物面板"） |
+| [SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | ✓ | ❌ **不是 shared**——被 ReviewPage、StudioPanel 共用，归 `features/review/`（同模块内部共享） |
 
 ### 9 个文件各自的依赖
 - **Header**：仅 `./MusicPlayer` + `../types`（ViewMode）

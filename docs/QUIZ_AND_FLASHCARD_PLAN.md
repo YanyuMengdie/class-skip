@@ -174,7 +174,7 @@ export interface FlashCardDeck {
 | 新建 `components/QuizSetPanel.tsx`（或类似） | 多题测验 UI：题目列表、选项、提交、解析、上一题/下一题、总分。 |
 | 新建 `components/FlashCardPanel.tsx` | 牌组列表 + 单牌组复习（翻面、前后导航）。 |
 | `components/ExplanationPanel.tsx` | 增加「本页测验」按钮，触发生成 `QuizSet` 并打开 QuizSetPanel。 |
-| `components/Sidebar.tsx` 或 `Header.tsx` | 增加「全书测验」「闪卡」入口。 |
+| `shared/layout/Sidebar.tsx` 或 `Header.tsx` | 增加「全书测验」「闪卡」入口。 |
 | `App.tsx` | 状态：`quizSets`、`flashCardDecks`、当前测验/闪卡模式；持久化与恢复逻辑；渲染 QuizSetPanel/FlashCardPanel（弹层或内嵌）。 |
 | `services/storageService.ts` / `firebase.ts` | 若 state 结构已通过 `FilePersistedState` 传递，则只需保证序列化/反序列化包含新字段。 |
 
