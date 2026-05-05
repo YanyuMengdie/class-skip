@@ -21,11 +21,11 @@
 - **数据契约**：仍为 `MindMapNode` / `MindMapMultiResult`；`geminiService` 未改。
 - **映射**：`utils/mindMapFlowAdapter.ts` 中 `mindMapNodeToFlow` → `nodes` + `edges`；Flow id 与 `scopeMindMapNodeId` 一致（`utils/mindMapScope.ts`）。
 - **布局**：`utils/mindMapElkLayout.ts` — `layoutFlowForest` 对多棵文档树分别 ELK 后纵向堆叠。
-- **UI**：`components/MindMapFlowCanvas.tsx` + `components/MindMapFlowNode.tsx`；`MindMapPanel` 仅负责模式、生成、Studio 保存、AI 修改等，并通过 `flowParts` 为每棵树注入独立 `handlers`（多文档更新对应 `perDoc`）。
+- **UI**：`features/review/tools/mindMap/MindMapFlowCanvas.tsx` + `features/review/tools/mindMap/MindMapFlowNode.tsx`；`MindMapPanel` 仅负责模式、生成、Studio 保存、AI 修改等，并通过 `flowParts` 为每棵树注入独立 `handlers`（多文档更新对应 `perDoc`）。
 
 ### 被档 A 替代 / 删除的代码路径（PR 说明用）
 
-- `components/MindMapPanel.tsx` 内原 **自研 transform**、**SVG 贝塞尔**、**MindMapForest / MindMapNodeRow / NodeBox** 整段已移除。
+- `features/review/tools/mindMap/MindMapPanel.tsx` 内原 **自研 transform**、**SVG 贝塞尔**、**MindMapForest / MindMapNodeRow / NodeBox** 整段已移除。
 - `utils/mindMapFitView.ts`：**已删除**（由 `fitView` / `setViewport` / `zoomIn` / `zoomOut` 替代）。
 
 ### 编辑回写

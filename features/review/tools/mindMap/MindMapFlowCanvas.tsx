@@ -16,7 +16,7 @@ import '@xyflow/react/dist/style.css';
 import type { MindMapNode } from '@/types';
 import { MIND_MAP_FLOW_NODE_TYPE, mindMapNodeToFlow, type MindMapFlowNodeData, type MindMapFlowNodeHandlers } from '@/utils/mindMapFlowAdapter';
 import { layoutFlowForest } from '@/utils/mindMapElkLayout';
-import { MindMapFlowNode } from '@/components/MindMapFlowNode';
+import { MindMapFlowNode } from '@/features/review/tools/mindMap/MindMapFlowNode';
 
 export type MindMapFlowCanvasRef = {
   fitView: () => void;

@@ -18,8 +18,8 @@
 
 ### 新增文件
 - `components/PageMarkPanel.tsx` - 页面标记面板
-- `components/QuizReviewPanel.tsx` - Quiz复习面板
-- `components/FlashCardReviewPanel.tsx` - Flash Card复习面板
+- `features/review/tools/QuizReviewPanel.tsx` - Quiz复习面板
+- `features/review/tools/FlashCardReviewPanel.tsx` - Flash Card复习面板
 - `docs/QUIZ_AND_FLASHCARD_PLAN.md` - 功能规划文档
 - `CHANGELOG.md` - 更新日志
 - `VERSION.md` - 版本信息（本文件）

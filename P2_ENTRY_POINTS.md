@@ -15,10 +15,10 @@
 | **包裹条件** | line 307 `{onOpenReview && (...)}` —— 父组件不传 `onOpenReview` 则不渲染该按钮 |
 | **`onOpenReview` 在 App.tsx 怎么连接** | [App.tsx:2035](App.tsx) `onOpenReview={() => setReviewPageOpen(true)}` |
 | **触发的 state** | `setReviewPageOpen(true)`（开启的是**ReviewPage**而非"学习工具九宫格"，见下方"重要勘误"） |
-| **点击后渲染哪个组件** | [components/ReviewPage.tsx](components/ReviewPage.tsx)（393 行） |
+| **点击后渲染哪个组件** | [features/review/ReviewPage.tsx](features/review/ReviewPage.tsx)（393 行） |
 
 > 🟡 **重要勘误**：网页右上角"学习工具"按钮 → 触发 `setReviewPageOpen(true)` → 进入 **ReviewPage 整页**（不是 ReviewModeChooser 九宫格弹窗）。下面问题 3 列出的"九宫格"与 ReviewPage 内九宫格按钮**布局相同、功能等价**，但实际渲染逻辑分属两处：
-> - **ReviewPage 内的九宫格**：[components/ReviewPage.tsx:246-269](components/ReviewPage.tsx) —— 用 `handleStart('quiz' | 'flashcard' | ...)` 切换 `currentMode` 然后渲染对应面板
+> - **ReviewPage 内的九宫格**：[features/review/ReviewPage.tsx:246-269](features/review/ReviewPage.tsx) —— 用 `handleStart('quiz' | 'flashcard' | ...)` 切换 `currentMode` 然后渲染对应面板
 > - **App.tsx 内 `reviewModeChooserOpen` 弹窗的九宫格**：[App.tsx:2267-2316](App.tsx) —— 由别的入口触发（如 [App.tsx:851](App.tsx)、[App.tsx:2212](App.tsx)），不是 Header"学习工具"按钮触发
 >
 > 问题 3 你列出的按钮文字（闪卡 / 学习指南 / ... / 多文档问答）在两处都存在。下方表格按 **App.tsx 内 reviewModeChooserOpen 弹窗** 解析 onClick → state → 组件，因为这是项目主版本入口；ReviewPage 内的等价按钮另列一栏供你对照。
@@ -43,23 +43,23 @@
 ## 问题 3：九宫格里所有按钮 → 组件映射
 
 > 解析对象：[App.tsx:2267-2316](App.tsx) 的 `reviewModeChooserOpen` 弹窗。
-> ReviewPage 内对应位置：[components/ReviewPage.tsx:240-270](components/ReviewPage.tsx)（行号不同但行为一致，最右一栏标注）。
+> ReviewPage 内对应位置：[features/review/ReviewPage.tsx:240-270](features/review/ReviewPage.tsx)（行号不同但行为一致，最右一栏标注）。
 
 ### 3.1 主映射表（按 App.tsx 弹窗的顺序）
 
 | # | 按钮中文 | App.tsx 行 | onClick 触发的 state | 渲染面板组件 | ReviewPage 等价 onClick |
 |---|----------|-----------|----------------------|--------------|-------------------------|
-| 1 | **测验** | [App.tsx:2277](App.tsx)（小屏） / [App.tsx:2296](App.tsx)（大屏） | `setReviewModeChooserOpen(false); setReviewPanel('quiz');` | [components/QuizReviewPanel.tsx](components/QuizReviewPanel.tsx)（309 行） | `handleStart('quiz')` ([ReviewPage.tsx:241](components/ReviewPage.tsx)) |
-| 2 | **闪卡** | [App.tsx:2278](App.tsx)（小屏） / [App.tsx:2286](App.tsx)（大屏） | `setReviewModeChooserOpen(false); setReviewPanel('flashcard');` | [components/FlashCardReviewPanel.tsx](components/FlashCardReviewPanel.tsx)（213 行） | `handleStart('flashcard')` ([ReviewPage.tsx:240](components/ReviewPage.tsx)) |
-| 3 | **学习指南** | [App.tsx:2279](App.tsx) / [App.tsx:2287](App.tsx) | `setReviewModeChooserOpen(false); setStudyGuidePanel(true);` | [components/StudyGuidePanel.tsx](components/StudyGuidePanel.tsx)（205 行） | `handleStart('studyGuide')` ([ReviewPage.tsx:246](components/ReviewPage.tsx)) |
-| 4 | **术语精确定义** | [App.tsx:2288](App.tsx) | `setReviewModeChooserOpen(false); setTerminologyPanelOpen(true);` | [components/TerminologyPanel.tsx](components/TerminologyPanel.tsx)（120 行） | `handleStart('terminology')` ([ReviewPage.tsx:247](components/ReviewPage.tsx)) |
-| 5 | **思维导图** | [App.tsx:2289](App.tsx) | `setReviewModeChooserOpen(false); setMindMapPanelOpen(true);` | [components/MindMapPanel.tsx](components/MindMapPanel.tsx)（589 行） | `handleStart('mindMap')` ([ReviewPage.tsx:248](components/ReviewPage.tsx)) |
-| 6 | **费曼检验** | [App.tsx:2297](App.tsx) | `setReviewModeChooserOpen(false); setFeynmanPanelOpen(true);` | [components/FeynmanPanel.tsx](components/FeynmanPanel.tsx)（363 行） | `handleStart('feynman')` ([ReviewPage.tsx:255](components/ReviewPage.tsx)) |
-| 7 | **刁钻教授** | [App.tsx:2298](App.tsx) | `setReviewModeChooserOpen(false); setTrickyProfessorPanelOpen(true);` | [components/TrickyProfessorPanel.tsx](components/TrickyProfessorPanel.tsx)（114 行） | `handleStart('trickyProfessor')` ([ReviewPage.tsx:256](components/ReviewPage.tsx)) |
-| 8 | **我的陷阱清单** | [App.tsx:2299](App.tsx) | `setReviewModeChooserOpen(false); setTrapListPanelOpen(true);` | [components/TrapListPanel.tsx](components/TrapListPanel.tsx)（78 行） | `handleStart('trapList')` ([ReviewPage.tsx:257](components/ReviewPage.tsx)) |
-| 9 | **考前速览** | [App.tsx:2306](App.tsx) | `setReviewModeChooserOpen(false); setExamSummaryPanelOpen(true);` | [components/ExamSummaryPanel.tsx](components/ExamSummaryPanel.tsx)（192 行） | `handleStart('examSummary')` ([ReviewPage.tsx:263](components/ReviewPage.tsx)) |
-| 10 | **考点与陷阱** | [App.tsx:2307](App.tsx) | `setReviewModeChooserOpen(false); setExamTrapsPanelOpen(true);` | [components/ExamTrapsPanel.tsx](components/ExamTrapsPanel.tsx)（98 行） | `handleStart('examTraps')` ([ReviewPage.tsx:264](components/ReviewPage.tsx)) |
-| 11 | **多文档问答** | [App.tsx:2314](App.tsx) | `setReviewModeChooserOpen(false); setMultiDocQAConversationKey(getMultiDocQAConversationKey(...)); setMultiDocQAPanelOpen(true);` | [components/MultiDocQAPanel.tsx](components/MultiDocQAPanel.tsx)（208 行） | `handleStart('multiDocQA')` ([ReviewPage.tsx:269](components/ReviewPage.tsx)) |
+| 1 | **测验** | [App.tsx:2277](App.tsx)（小屏） / [App.tsx:2296](App.tsx)（大屏） | `setReviewModeChooserOpen(false); setReviewPanel('quiz');` | [features/review/tools/QuizReviewPanel.tsx](features/review/tools/QuizReviewPanel.tsx)（309 行） | `handleStart('quiz')` ([ReviewPage.tsx:241](features/review/ReviewPage.tsx)) |
+| 2 | **闪卡** | [App.tsx:2278](App.tsx)（小屏） / [App.tsx:2286](App.tsx)（大屏） | `setReviewModeChooserOpen(false); setReviewPanel('flashcard');` | [features/review/tools/FlashCardReviewPanel.tsx](features/review/tools/FlashCardReviewPanel.tsx)（213 行） | `handleStart('flashcard')` ([ReviewPage.tsx:240](features/review/ReviewPage.tsx)) |
+| 3 | **学习指南** | [App.tsx:2279](App.tsx) / [App.tsx:2287](App.tsx) | `setReviewModeChooserOpen(false); setStudyGuidePanel(true);` | [features/review/tools/StudyGuidePanel.tsx](features/review/tools/StudyGuidePanel.tsx)（205 行） | `handleStart('studyGuide')` ([ReviewPage.tsx:246](features/review/ReviewPage.tsx)) |
+| 4 | **术语精确定义** | [App.tsx:2288](App.tsx) | `setReviewModeChooserOpen(false); setTerminologyPanelOpen(true);` | [features/review/tools/TerminologyPanel.tsx](features/review/tools/TerminologyPanel.tsx)（120 行） | `handleStart('terminology')` ([ReviewPage.tsx:247](features/review/ReviewPage.tsx)) |
+| 5 | **思维导图** | [App.tsx:2289](App.tsx) | `setReviewModeChooserOpen(false); setMindMapPanelOpen(true);` | [features/review/tools/mindMap/MindMapPanel.tsx](features/review/tools/mindMap/MindMapPanel.tsx)（589 行） | `handleStart('mindMap')` ([ReviewPage.tsx:248](features/review/ReviewPage.tsx)) |
+| 6 | **费曼检验** | [App.tsx:2297](App.tsx) | `setReviewModeChooserOpen(false); setFeynmanPanelOpen(true);` | [features/review/tools/FeynmanPanel.tsx](features/review/tools/FeynmanPanel.tsx)（363 行） | `handleStart('feynman')` ([ReviewPage.tsx:255](features/review/ReviewPage.tsx)) |
+| 7 | **刁钻教授** | [App.tsx:2298](App.tsx) | `setReviewModeChooserOpen(false); setTrickyProfessorPanelOpen(true);` | [features/review/tools/TrickyProfessorPanel.tsx](features/review/tools/TrickyProfessorPanel.tsx)（114 行） | `handleStart('trickyProfessor')` ([ReviewPage.tsx:256](features/review/ReviewPage.tsx)) |
+| 8 | **我的陷阱清单** | [App.tsx:2299](App.tsx) | `setReviewModeChooserOpen(false); setTrapListPanelOpen(true);` | [features/review/tools/TrapListPanel.tsx](features/review/tools/TrapListPanel.tsx)（78 行） | `handleStart('trapList')` ([ReviewPage.tsx:257](features/review/ReviewPage.tsx)) |
+| 9 | **考前速览** | [App.tsx:2306](App.tsx) | `setReviewModeChooserOpen(false); setExamSummaryPanelOpen(true);` | [components/ExamSummaryPanel.tsx](components/ExamSummaryPanel.tsx)（192 行） | `handleStart('examSummary')` ([ReviewPage.tsx:263](features/review/ReviewPage.tsx)) |
+| 10 | **考点与陷阱** | [App.tsx:2307](App.tsx) | `setReviewModeChooserOpen(false); setExamTrapsPanelOpen(true);` | [components/ExamTrapsPanel.tsx](components/ExamTrapsPanel.tsx)（98 行） | `handleStart('examTraps')` ([ReviewPage.tsx:264](features/review/ReviewPage.tsx)) |
+| 11 | **多文档问答** | [App.tsx:2314](App.tsx) | `setReviewModeChooserOpen(false); setMultiDocQAConversationKey(getMultiDocQAConversationKey(...)); setMultiDocQAPanelOpen(true);` | [features/review/tools/MultiDocQAPanel.tsx](features/review/tools/MultiDocQAPanel.tsx)（208 行） | `handleStart('multiDocQA')` ([ReviewPage.tsx:269](features/review/ReviewPage.tsx)) |
 | ➕ | **考前预测**（仅 App.tsx 弹窗有） | [App.tsx:2308](App.tsx) | `setReviewModeChooserOpen(false); setExamPredictionInitialKCId(null); setExamPredictionPanelOpen(true);` | [components/ExamPredictionPanel.tsx](components/ExamPredictionPanel.tsx)（1035 行） | （ReviewPage 没有此按钮） |
 
 ### 3.2 一句话归纳

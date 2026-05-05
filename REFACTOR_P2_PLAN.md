@@ -119,10 +119,10 @@ class-skip/
 |---|---|---|---|
 | [components/ExamSummaryPanel.tsx](components/ExamSummaryPanel.tsx) | 192 | 主 | services/geminiService |
 | [components/ExamTrapsPanel.tsx](components/ExamTrapsPanel.tsx) | 98 | 主 | services/geminiService |
-| [components/TrapListPanel.tsx](components/TrapListPanel.tsx) | 78 | 子 | — |
-| [components/TerminologyPanel.tsx](components/TerminologyPanel.tsx) | 120 | 主 | services/geminiService |
-| [components/StudyGuidePanel.tsx](components/StudyGuidePanel.tsx) | 205 | 主 | services/geminiService |
-| [components/TrickyProfessorPanel.tsx](components/TrickyProfessorPanel.tsx) | 114 | 主 | services/geminiService |
+| [features/review/tools/TrapListPanel.tsx](features/review/tools/TrapListPanel.tsx) | 78 | 子 | — |
+| [features/review/tools/TerminologyPanel.tsx](features/review/tools/TerminologyPanel.tsx) | 120 | 主 | services/geminiService |
+| [features/review/tools/StudyGuidePanel.tsx](features/review/tools/StudyGuidePanel.tsx) | 205 | 主 | services/geminiService |
+| [features/review/tools/TrickyProfessorPanel.tsx](features/review/tools/TrickyProfessorPanel.tsx) | 114 | 主 | services/geminiService |
 
 ### 1.6 features/exam/studyFlow/
 
@@ -147,15 +147,15 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 内部依赖 | 跨模块依赖 |
 |---|---|---|---|---|
-| [components/MindMapPanel.tsx](components/MindMapPanel.tsx) | 589 | 主 | MindMapFlowCanvas | utils/mindMapFlowAdapter、services/geminiService |
-| [components/MindMapFlowCanvas.tsx](components/MindMapFlowCanvas.tsx) | 206 | 子 | MindMapFlowNode | utils/mindMapFlowAdapter、utils/mindMapElkLayout |
-| [components/MindMapFlowNode.tsx](components/MindMapFlowNode.tsx) | 155 | 子 | — | utils/mindMapFlowAdapter、utils/mindMapLabel |
+| [features/review/tools/mindMap/MindMapPanel.tsx](features/review/tools/mindMap/MindMapPanel.tsx) | 589 | 主 | MindMapFlowCanvas | utils/mindMapFlowAdapter、services/geminiService |
+| [features/review/tools/mindMap/MindMapFlowCanvas.tsx](features/review/tools/mindMap/MindMapFlowCanvas.tsx) | 206 | 子 | MindMapFlowNode | utils/mindMapFlowAdapter、utils/mindMapElkLayout |
+| [features/review/tools/mindMap/MindMapFlowNode.tsx](features/review/tools/mindMap/MindMapFlowNode.tsx) | 155 | 子 | — | utils/mindMapFlowAdapter、utils/mindMapLabel |
 
 ### 1.10 features/feynman/
 
 | 当前路径 | 行 | 定位 | 跨模块依赖 |
 |---|---|---|---|
-| [components/FeynmanPanel.tsx](components/FeynmanPanel.tsx) | 363 | 主 | services/geminiService |
+| [features/review/tools/FeynmanPanel.tsx](features/review/tools/FeynmanPanel.tsx) | 363 | 主 | services/geminiService |
 
 ### 1.11 features/flashcard/ 与 features/quiz/
 
@@ -163,8 +163,8 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 跨模块依赖 |
 |---|---|---|---|
-| [components/FlashCardReviewPanel.tsx](components/FlashCardReviewPanel.tsx) | 213 | 主（flashcard） | services/geminiService |
-| [components/QuizReviewPanel.tsx](components/QuizReviewPanel.tsx) | 309 | 主（quiz） | services/geminiService |
+| [features/review/tools/FlashCardReviewPanel.tsx](features/review/tools/FlashCardReviewPanel.tsx) | 213 | 主（flashcard） | services/geminiService |
+| [features/review/tools/QuizReviewPanel.tsx](features/review/tools/QuizReviewPanel.tsx) | 309 | 主（quiz） | services/geminiService |
 
 ### 1.12 features/fiveMinFlow/
 
@@ -176,7 +176,7 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 跨模块依赖 |
 |---|---|---|---|
-| [components/MultiDocQAPanel.tsx](components/MultiDocQAPanel.tsx) | 208 | 主（同时 export `getMultiDocQAConversationKey`、`loadMultiDocQAMessages`、`saveMultiDocQAMessages`） | services/geminiService |
+| [features/review/tools/MultiDocQAPanel.tsx](features/review/tools/MultiDocQAPanel.tsx) | 208 | 主（同时 export `getMultiDocQAConversationKey`、`loadMultiDocQAMessages`、`saveMultiDocQAMessages`） | services/geminiService |
 
 ### 1.14 features/mood/
 
@@ -233,7 +233,7 @@ class-skip/
 |---|---|---|---|---|
 | [shared/studio/StudioPanel.tsx](shared/studio/StudioPanel.tsx) | 110 | 主（再导出 ArtifactFullView） | SavedArtifactPreview | utils/savedArtifactMeta |
 | [shared/studio/SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | 284 | 子（被两人 import） | — | utils/savedArtifactMeta |
-| [components/ReviewPage.tsx](components/ReviewPage.tsx) | 393 | 主 | SavedArtifactPreview | utils/collectSavedArtifactsFromCloud、utils/collectSavedArtifactsFromLocalHistory、utils/mergeArtifactLibraries、utils/savedArtifactMeta、services/firebase、services/storageService |
+| [features/review/ReviewPage.tsx](features/review/ReviewPage.tsx) | 393 | 主 | SavedArtifactPreview | utils/collectSavedArtifactsFromCloud、utils/collectSavedArtifactsFromLocalHistory、utils/mergeArtifactLibraries、utils/savedArtifactMeta、services/firebase、services/storageService |
 
 ### 1.21 shared/layout/
 

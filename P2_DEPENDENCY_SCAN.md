@@ -224,24 +224,24 @@
 
 | 文件 | 状态 |
 |---|---|
-| [components/ReviewPage.tsx](components/ReviewPage.tsx) | ✓ |
+| [features/review/ReviewPage.tsx](features/review/ReviewPage.tsx) | ✓ |
 | 13 个工具组件 | 见下表 |
 
 > ⚠️ "13 个组件"未明指——根据 [P2_ENTRY_POINTS.md](P2_ENTRY_POINTS.md) 九宫格映射 + 一个保存产物面板，能凑出 11 个面板 + StudioPanel + SavedArtifactPreview = 13 个。下面以这 13 个枚举：
 
 | # | 组件 | 状态 |
 |---|------|------|
-| 1 | [QuizReviewPanel.tsx](components/QuizReviewPanel.tsx) | ✓ |
-| 2 | [FlashCardReviewPanel.tsx](components/FlashCardReviewPanel.tsx) | ✓ |
-| 3 | [StudyGuidePanel.tsx](components/StudyGuidePanel.tsx) | ✓ |
-| 4 | [TerminologyPanel.tsx](components/TerminologyPanel.tsx) | ✓ |
-| 5 | [MindMapPanel.tsx](components/MindMapPanel.tsx) | ✓（带子件 MindMapFlowCanvas + MindMapFlowNode） |
-| 6 | [FeynmanPanel.tsx](components/FeynmanPanel.tsx) | ✓ |
-| 7 | [TrickyProfessorPanel.tsx](components/TrickyProfessorPanel.tsx) | ✓ |
-| 8 | [TrapListPanel.tsx](components/TrapListPanel.tsx) | ✓ |
+| 1 | [QuizReviewPanel.tsx](features/review/tools/QuizReviewPanel.tsx) | ✓ |
+| 2 | [FlashCardReviewPanel.tsx](features/review/tools/FlashCardReviewPanel.tsx) | ✓ |
+| 3 | [StudyGuidePanel.tsx](features/review/tools/StudyGuidePanel.tsx) | ✓ |
+| 4 | [TerminologyPanel.tsx](features/review/tools/TerminologyPanel.tsx) | ✓ |
+| 5 | [MindMapPanel.tsx](features/review/tools/mindMap/MindMapPanel.tsx) | ✓（带子件 MindMapFlowCanvas + MindMapFlowNode） |
+| 6 | [FeynmanPanel.tsx](features/review/tools/FeynmanPanel.tsx) | ✓ |
+| 7 | [TrickyProfessorPanel.tsx](features/review/tools/TrickyProfessorPanel.tsx) | ✓ |
+| 8 | [TrapListPanel.tsx](features/review/tools/TrapListPanel.tsx) | ✓ |
 | 9 | [ExamSummaryPanel.tsx](components/ExamSummaryPanel.tsx) | ✓ |
 | 10 | [ExamTrapsPanel.tsx](components/ExamTrapsPanel.tsx) | ✓ |
-| 11 | [MultiDocQAPanel.tsx](components/MultiDocQAPanel.tsx) | ✓ |
+| 11 | [MultiDocQAPanel.tsx](features/review/tools/MultiDocQAPanel.tsx) | ✓ |
 | 12 | [StudioPanel.tsx](shared/studio/StudioPanel.tsx) | ✓ |
 | 13 | [SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | ✓ |
 
@@ -293,8 +293,8 @@
 
 | 应归入 features/review/ 但你 13 个里没明列 | 说明 |
 |---|---|
-| [components/MindMapFlowCanvas.tsx](components/MindMapFlowCanvas.tsx)（206 行） | MindMapPanel 内部子件，必须一起搬 |
-| [components/MindMapFlowNode.tsx](components/MindMapFlowNode.tsx)（155 行） | 同上 |
+| [features/review/tools/mindMap/MindMapFlowCanvas.tsx](features/review/tools/mindMap/MindMapFlowCanvas.tsx)（206 行） | MindMapPanel 内部子件，必须一起搬 |
+| [features/review/tools/mindMap/MindMapFlowNode.tsx](features/review/tools/mindMap/MindMapFlowNode.tsx)（155 行） | 同上 |
 | [utils/mindMapFlowAdapter.ts](utils/mindMapFlowAdapter.ts) + [mindMapElkLayout.ts](utils/mindMapElkLayout.ts) + [mindMapLabel.ts](utils/mindMapLabel.ts) + [mindMapLayout.ts](utils/mindMapLayout.ts) + [mindMapScope.ts](utils/mindMapScope.ts) | 思维导图私有算法（5 文件，均仅供 MindMapPanel 使用），归 `features/review/tools/mindmap/lib/` |
 | [utils/savedArtifactMeta.tsx](utils/savedArtifactMeta.tsx) | 被 ReviewPage、StudioPanel、SavedArtifactPreview 三家共用，应放 `features/review/lib/` 内部共享层 |
 | [utils/collectSavedArtifactsFromLocalHistory.ts](utils/collectSavedArtifactsFromLocalHistory.ts) + [collectSavedArtifactsFromCloud.ts](utils/collectSavedArtifactsFromCloud.ts) + [mergeArtifactLibraries.ts](utils/mergeArtifactLibraries.ts) | 仅被 ReviewPage 用，归 `features/review/lib/` |
