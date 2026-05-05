@@ -1211,3 +1211,226 @@ function mergeCoverageForKc(prev: AtomCoverageByKc, kcId: string, coveredIds: st
 ---
 
 *atom→kc 反查可行性侦察完。零代码改动。所有结论附文件:行号引用。*
+
+---
+
+## 第四次侦察：atom 分析输入语义
+
+### 问题 1：`analyzeKcUtteranceForAtoms` 函数的输入是什么？
+
+#### 函数签名
+
+[services/geminiService.ts:2579-2583](services/geminiService.ts#L2579)：
+
+```ts
+export async function analyzeKcUtteranceForAtoms(
+  mergedDocContent: string,
+  kc: LSAPKnowledgeComponent,
+  userText: string
+): Promise<{ coveredAtomIds: string[]; gapAtomIds: string[] }>
+```
+
+3 个入参：
+- `mergedDocContent`: 本场合并讲义全文（PDF 文本）
+- `kc`: 单个考点对象（含 atoms 列表）
+- `userText`: 用于 atom 命中判断的"文本"——**关键参数**
+
+#### `userText` 实参传递
+
+唯一的工作台调用点 [features/exam/workspace/ExamWorkspaceSocraticChat.tsx:649](features/exam/workspace/ExamWorkspaceSocraticChat.tsx#L649)：
+
+```tsx
+const { coveredAtomIds, gapAtomIds } = await analyzeKcUtteranceForAtoms(mergedContent, activeKc, text);
+```
+
+第 3 个实参是 `text`。`text` 的定义在同文件 [line 411](features/exam/workspace/ExamWorkspaceSocraticChat.tsx#L411)：
+
+```tsx
+const onSend = useCallback(async () => {
+  const text = input.trim();
+  if (!text || !canSend) return;
+```
+
+`text = input.trim()`——**就是用户在输入框里刚刚敲完、按下回车/点发送的那一句话**，去掉首尾空白。
+
+`text` 在后续构造 userMsg 时也只代表用户消息：
+[ExamWorkspaceSocraticChat.tsx:438](features/exam/workspace/ExamWorkspaceSocraticChat.tsx#L438)：
+```tsx
+const userMsg: ChatMessage = { role: 'user', text, timestamp: Date.now() };
+```
+
+#### 结论
+
+`analyzeKcUtteranceForAtoms` 的 `userText` 实参 = **只包含用户最新一句话**（`input.trim()`）。
+**不含**：
+- ❌ AI 上一轮的回复（assistant message）
+- ❌ 之前的对话历史
+- ❌ AI 当前轮的回复（也不可能——因为 atom 分析是在 `chatWithAdaptiveTutor` 拿到回复**之后**调用的，但代码层面**没有**把回复 text 拼进 userText）
+
+> 备注：还有两个间接调用点 [services/geminiService.ts:2728, 2738](services/geminiService.ts#L2728)（`markAtomsCoveredByUtterance` / `detectReasoningGaps` 的 wrapper），同样传 `userText`，但这两个 wrapper **在 ExamWorkspaceSocraticChat 中没被调用**——全仓 grep `markAtomsCoveredByUtterance|detectReasoningGaps` 在工作台代码 0 处使用。
+
+---
+
+### 问题 2：`analyzeMultiKcUtteranceForAtoms`（阶段 3 新增）输入跟原函数一致吗？
+
+#### 函数签名
+
+[services/geminiService.ts:2640-2644](services/geminiService.ts#L2640)：
+
+```ts
+export async function analyzeMultiKcUtteranceForAtoms(
+  mergedDocContent: string,
+  kcs: LSAPKnowledgeComponent[],
+  userText: string
+): Promise<{ coveredAtomIds: string[]; gapAtomIds: string[] }>
+```
+
+只是把 `kc: LSAPKnowledgeComponent` 改成 `kcs: LSAPKnowledgeComponent[]`，第三参 `userText` 语义**完全一致**。
+
+#### 实参传递
+
+[features/exam/workspace/ExamWorkspaceSocraticChat.tsx:671-675](features/exam/workspace/ExamWorkspaceSocraticChat.tsx#L671)：
+
+```tsx
+const { coveredAtomIds } = await analyzeMultiKcUtteranceForAtoms(
+  mergedContent,
+  selectedKcs,
+  text
+);
+```
+
+第三参也是 `text`——同一个 `const text = input.trim()`（[line 411](features/exam/workspace/ExamWorkspaceSocraticChat.tsx#L411)）。
+
+#### 结论
+
+两个函数的 atom 分析输入**语义完全一致**：都只看用户当前那一句话。多选路径在这一点上**继承了**单选路径的行为。
+
+---
+
+### 问题 3：传给 Gemini 的 prompt 里到底包含什么内容？
+
+#### 单选 prompt 模板
+
+[services/geminiService.ts:2592-2599](services/geminiService.ts#L2592)：
+
+```ts
+const prompt = `你是严谨评阅助手。DOCUMENT 为本场合并讲义；下列 id 为当前考点下的「逻辑原子」。
+
+任务：阅读学生的**本轮发言**（可能很短）。判断：
+1) coveredAtomIds：学生**明确、可核对地**体现了哪些原子（id 必须来自列表；无把握则不要列入；宁可少报）。
+2) gapAtomIds：结合讲义，哪些原子学生**尚未覆盖**或**表述可能不足**（同样必须来自列表；可空数组）。
+
+学生发言：
+${userText.slice(0, 8000)}`;
+```
+
+发送结构 [line 2603](services/geminiService.ts#L2603)：
+```ts
+contents: [{ role: 'user', parts: [contentPart, { text: prompt + '\n\n原子列表：\n' + atomList }] }]
+```
+
+`contentPart` 是 `getContentPart(mergedDocContent)`——讲义全文（PDF），**不是对话历史**。
+
+#### 多选 prompt 模板
+
+[services/geminiService.ts:2670-2684](services/geminiService.ts#L2670)：
+
+```ts
+const prompt = `你是严谨评阅助手。DOCUMENT 为本场合并讲义；本轮学生在多个考点（KC）的联合上下文中发言。
+
+任务：阅读学生的**本轮发言**（可能很短）。判断：
+1) coveredAtomIds：学生**明确、可核对地**体现了哪些原子（id 必须来自下方列表；无把握则不要列入；宁可少报）。可来自任意 KC，可跨 KC。
+2) gapAtomIds：结合讲义，哪些原子学生**尚未覆盖**或**表述可能不足**（同样必须来自下方列表；可空数组）。
+
+约束：
+- 只能输出 id 字符串；不要输出 kcId 字段（atomId 与 KC 的归属由前端用结构化反查确定，不要依赖你的描述）。
+- 若学生发言完全游离（既不靠近任意 KC，也无相关原子），返回两个空数组。
+
+本场锚定考点列表：
+${kcSummaryLines}
+
+学生发言：
+${userText.slice(0, 8000)}`;
+```
+
+#### prompt 内容拆解
+
+**单选 prompt 包含**：
+1. 系统说明（"你是严谨评阅助手"）
+2. 讲义全文（`contentPart`，承载在 `parts` 数组的第 0 项）
+3. 任务定义（"判断 coveredAtomIds 和 gapAtomIds"）
+4. **学生发言**（仅 `userText`，即用户最新一句）
+5. 候选原子列表（atom id + label + desc）
+
+**多选 prompt 包含**：
+1-2 同上
+3. 任务定义 + 跨 KC 约束
+4. 本场锚定考点列表（KC concept 摘要）
+5. **学生发言**（仅 `userText`）
+6. 所有候选原子列表（含 kcId 提示）
+
+**两个 prompt 都有的关键 prompt 文本**：
+- "阅读学生的**本轮发言**" ← 反复强调**学生发言**
+- "学生发言：${userText}" ← 显式只插入 userText
+- "判断学生**明确、可核对地**体现了哪些原子" ← 判断主语是"学生"
+
+**两个 prompt 都没有**：
+- ❌ AI 的回复内容（无 model role / assistant role 字符串）
+- ❌ 历史对话（无 history 注入）
+- ❌ "对话内容" / "本轮交互" / "整段问答" 等扩大解释的字眼
+
+#### `chatWithAdaptiveTutor` 是另一回事
+
+注意区分：
+- `chatWithAdaptiveTutor`（生成 AI 回复）的 prompt 里**有**对话历史 `history` 注入（[geminiService.ts:2057](services/geminiService.ts#L2057) `history.forEach(msg => { contents.push(...) })`），AI 看得到之前用户说啥 + AI 之前说啥
+- `analyzeKcUtteranceForAtoms` / `analyzeMultiKcUtteranceForAtoms`（atom 分析）的 prompt 里**没有**对话历史，只有当前用户那一句话 + 讲义全文 + atom 列表
+
+两者是**独立的两个 LLM 调用**，串行执行：先生成回复，再分析 atom。
+
+---
+
+### 问题 4：现状是"答对才更新"还是"提到了就更新"？
+
+#### 明确判断
+
+**现状是 A 类：只分析用户的话，用户必须自己说出 atom 内容才算 covered。**
+
+#### 证据链
+
+1. **代码层面**：两个 atom 分析函数的 `userText` 实参都是 `const text = input.trim()`，即用户输入框里那一句。AI 的回复 `reply`（[Socratic:601](features/exam/workspace/ExamWorkspaceSocraticChat.tsx#L601) `const reply = await chatWithAdaptiveTutor(...)`）**没有**被拼进 `userText`，**没有**被传给后续的 `analyzeKcUtteranceForAtoms` / `analyzeMultiKcUtteranceForAtoms` 调用。
+
+2. **prompt 语义**：两个 prompt 都明确把判断对象限定为"**学生**本轮发言"，`${userText}`占位只插入用户那一句。AI 在 prompt 里被指示去看"**学生**明确、可核对地体现了哪些原子"——主语是学生不是 AI。
+
+3. **白名单 + 二次过滤**：客户端代码层面也只接受 `userText` 这一个文本输入,无任何机制把 AI 回复拼进去再分析。
+
+#### 重要的"但是"——AI 是不是会"作弊"地把 AI 自己说的也算上？
+
+代码层无法保证 100%——AI（Gemini）作为黑盒,理论上**可能**做以下意外行为：
+- AI 看到"学生发言：你能解释一下 X 吗？"——这其实是个问题,学生没解释 X。AI 仍可能"宽松判定"为 X 的某个 atom 已覆盖（误报）
+- 但这是 AI 模型行为的不确定性,与代码层"传什么进去"无关
+
+代码层做的,是**在工程上**保证只把用户的话传进去 + prompt 反复强调"学生发言"。AI 的实际判定准确率需要运行时观察,代码看不出来。
+
+#### 边界情况
+
+| 场景 | 现状行为 |
+|------|---------|
+| 用户问 "什么是 X？" → AI 详细解释 X 含 X 的 atoms | atom 分析只看用户的话 "什么是 X？"——**不会**把 X 的 atoms 标 covered（用户没说出 atom 内容） |
+| 用户答 "X 是 Y 加 Z" 准确触及 atom | atom 分析看到这句精确表述,**正确触发** atom covered |
+| 用户答 "嗯" / "对" / "继续讲" 等填充语 | userText 含这些短词,prompt 让 AI 判定"学生明确、可核对地体现了哪些原子",AI 应当判定**无 atom 命中**（heuristicQuality 也会归 weak/empty）。但 AI 行为不能 100% 保证 |
+| AI 自言自语长篇讲解,用户什么都没说 | 不可能进 onSend——`if (!text || !canSend) return` 在 [Socratic:412](features/exam/workspace/ExamWorkspaceSocraticChat.tsx#L412) 已守卫,无 user input 时根本不发对话 |
+
+#### 与用户产品哲学的对照
+
+用户提出："角标上涨应该基于'用户的回答有没有命中 atom',而不是'整段对话（含 AI 输出）的内容'"
+
+**代码层的现状**与用户的产品哲学**一致**：
+- 代码只看用户输入,不看 AI 输出
+- prompt 明确告诉 AI "判断学生本轮发言"
+- 没有任何代码路径会把 AI 回复传给 atom 分析
+
+**唯一不在代码控制的**:AI（Gemini）作为黑盒判定时是否"宽松",这是模型行为不确定性,不是工程层能 100% 保证的。代码层做的是把"分析对象"严格限定到 userText,这是 INQUIRY §6 铁律 1（"对话归对话、测试归测试"）在 atom 分析层面的工程实现。
+
+---
+
+*atom 分析输入语义侦察完。零代码改动。所有结论附文件:行号引用。*
