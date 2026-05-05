@@ -170,7 +170,7 @@ export interface FlashCardDeck {
 |------|------|
 | `types.ts` | 新增 `QuizSet`、`FlashCard`、`FlashCardDeck`；`FilePersistedState`、`CloudSession` 增加 `quizSets?`、`flashCardDecks?`。 |
 | `services/geminiService.ts` | 新增 `generateQuizSet`、`generateFlashCardDeck`。 |
-| `components/SkimPanel.tsx` | 无改动（继续用现有 `quizData` 门控）。 |
+| `features/reader/skim/SkimPanel.tsx` | 无改动（继续用现有 `quizData` 门控）。 |
 | 新建 `components/QuizSetPanel.tsx`（或类似） | 多题测验 UI：题目列表、选项、提交、解析、上一题/下一题、总分。 |
 | 新建 `components/FlashCardPanel.tsx` | 牌组列表 + 单牌组复习（翻面、前后导航）。 |
 | `components/ExplanationPanel.tsx` | 增加「本页测验」按钮，触发生成 `QuizSet` 并打开 QuizSetPanel。 |

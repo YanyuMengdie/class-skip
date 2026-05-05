@@ -15,7 +15,7 @@
 - `data/pedagogyCore.ts`：核心四条（苏格拉底、支架、主动阐述、锚定课程）。
 - `buildDialogueTeachingSystemPrompt`：`pedagogyCore` + `getDisciplinePromptSnippet` + 输出约束。
 - **`chatWithAdaptiveTutor`（备考苏格拉底等）**：`systemInstruction` 为上述教学法拼接 + **docType 辅助** + **模式**（非 `utils/prompts.ts` 整段 STEM/HUMANITIES 长文）；可叠加 citations / chunk / KC / 支架等备考附录。
-- **略读 / 智能导读**：`components/SkimPanel.tsx` 使用 **`chatWithSkimAdaptiveTutor`**，`systemInstruction` 来自 **`utils/prompts.ts`** 的 **`STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT`**（按 `docType`），与备考路径分离。
+- **略读 / 智能导读**：`features/reader/skim/SkimPanel.tsx` 使用 **`chatWithSkimAdaptiveTutor`**，`systemInstruction` 来自 **`utils/prompts.ts`** 的 **`STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT`**（按 `docType`），与备考路径分离。
 - `chatWithSlide`：`standard` = 教学法 + 视觉协议；`galgame` = 角色 + 短锚定句。
 
 ## 保温闪卡

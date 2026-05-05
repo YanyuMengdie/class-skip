@@ -20,13 +20,13 @@
 
 | 你列出的文件 | 是否存在 |
 |---|---|
-| [components/SkimPanel.tsx](components/SkimPanel.tsx) | ✓ |
+| [features/reader/skim/SkimPanel.tsx](features/reader/skim/SkimPanel.tsx) | ✓ |
 | `components/skimMarkdownTheme.tsx` | ✗ **不存在** |
 | `utils/skimMarkdownToExportHtml.ts` | ✗ **不存在** |
 | `utils/extractNthGfmTable.ts` | ✗ **不存在** |
 | `utils/captureElementToPng.ts` | ✗ **不存在** |
 
-> ⚠️ **重要**：你列出的 4 个 skim 卫星文件**全部不存在于当前仓库**。我用 `Glob "**/*[Ss]kim*"` 全仓搜索，仅命中 `components/SkimPanel.tsx` 一个文件。可能性：(a) 这是你脑中"想做"的拆分目标而不是当前已有；(b) 是从某个早期分支记忆来的；(c) 在另一个 worktree 里。请确认。
+> ⚠️ **重要**：你列出的 4 个 skim 卫星文件**全部不存在于当前仓库**。我用 `Glob "**/*[Ss]kim*"` 全仓搜索，仅命中 `features/reader/skim/SkimPanel.tsx` 一个文件。可能性：(a) 这是你脑中"想做"的拆分目标而不是当前已有；(b) 是从某个早期分支记忆来的；(c) 在另一个 worktree 里。请确认。
 
 ### SkimPanel.tsx 的依赖
 
@@ -45,7 +45,7 @@
 
 ### 略读相关但你没列的依赖
 - 与"略读阶段流"（StudyMap、SkimStage、Prerequisite、QuizData、DocType、ChatMessage）相关的全部类型在 [types.ts](types.ts)（全局，不归 skim）。
-- `package.json` 里有一个**守护脚本** `check:skim-tutor`：搬迁时若改动 SkimPanel.tsx 路径，可能需要同步更新该脚本里的 `'components/SkimPanel.tsx'` 字面量。
+- `package.json` 里有一个**守护脚本** `check:skim-tutor`：搬迁时若改动 SkimPanel.tsx 路径，可能需要同步更新该脚本里的 `'features/reader/skim/SkimPanel.tsx'` 字面量。
 - `docs/SKIM_VS_EXAM_TUTOR_API.md` 是该模块的设计文档，可考虑随同搬迁。
 
 ### 风险标记

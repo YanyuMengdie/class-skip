@@ -5,7 +5,7 @@ import { Header } from '@/components/Header';
 import { SlideViewer } from '@/features/reader/slide-viewer/SlideViewer';
 import { SlidePageComments } from '@/features/reader/page-notes/SlidePageComments';
 import { ExplanationPanel } from '@/features/reader/deep-read/ExplanationPanel';
-import { SkimPanel } from '@/components/SkimPanel';
+import { SkimPanel } from '@/features/reader/skim/SkimPanel';
 import { Sidebar } from '@/components/Sidebar';
 import { TaskHug } from '@/features/energyRefuel/TaskHug';
 import { ChatHug } from '@/features/energyRefuel/ChatHug';

@@ -134,7 +134,7 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 跨模块依赖 |
 |---|---|---|---|
-| [components/SkimPanel.tsx](components/SkimPanel.tsx) | 1,309 | 主 | services/geminiService（chatWithSkimAdaptiveTutor 等 4 个） |
+| [features/reader/skim/SkimPanel.tsx](features/reader/skim/SkimPanel.tsx) | 1,309 | 主 | services/geminiService（chatWithSkimAdaptiveTutor 等 4 个） |
 
 ### 1.8 features/explanation/
 

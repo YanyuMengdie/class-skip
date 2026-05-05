@@ -4,7 +4,10 @@
       "Bash(mkdir -p d:/Projects/class-skip/features/lecture)",
       "Bash(git mv *)",
       "Bash(echo \"exit=$?\")",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(git ls-tree *)",
+      "Bash(npm run *)",
+      "Bash(echo \"skim-tutor exit=$?\")"
     ]
   }
 }

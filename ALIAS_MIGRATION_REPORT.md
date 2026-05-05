@@ -139,7 +139,7 @@ import { Sparkles, X, ChevronDown, Loader2, Wand2 } from 'lucide-react';
 
 ✅ 全部本仓库 import 已转 `@/`；`react`、`jspdf`、`firebase/auth`、`lucide-react` 这些 npm 包**未被触碰**；多行 import 块 `import { ... } from '@/utils/examWorkspaceLsapKey'` 排版完整保留。
 
-### 4.2 抽样：[components/SkimPanel.tsx](components/SkimPanel.tsx) 头部 import
+### 4.2 抽样：[features/reader/skim/SkimPanel.tsx](features/reader/skim/SkimPanel.tsx) 头部 import
 ```ts
 import React, { useState, useRef, useEffect, useDeferredValue, Component, type ErrorInfo, type ReactNode } from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
@@ -167,7 +167,7 @@ $ npx tsc --noEmit
 10 个错误全部是项目历史遗留：
 - `App.tsx:1132` `StudyGuideContent.trim` 不存在
 - `components/ExamWorkspacePage.tsx:257` 与 `services/geminiService.ts:1199` `import.meta.env` 类型缺失
-- `components/SkimPanel.tsx:955` "quiz" 与联合类型无交集
+- `features/reader/skim/SkimPanel.tsx:955` "quiz" 与联合类型无交集
 - `services/firebase.ts:632` 表达式不可调用
 - `services/geminiService.ts:2712` string vs boolean
 - `services/geminiService.ts:2790` inlineData / text 联合类型不匹配

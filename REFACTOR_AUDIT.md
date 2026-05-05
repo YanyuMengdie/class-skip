@@ -42,7 +42,7 @@
 | 1 | [services/geminiService.ts](services/geminiService.ts) | **2,945** | 屎山主峰 1：50+ 函数全塞一起 |
 | 2 | [App.tsx](App.tsx) | **2,856** | 屎山主峰 2：138 个 useState/useRef，39 个组件 import |
 | 3 | [components/ExamWorkspacePage.tsx](components/ExamWorkspacePage.tsx) | **1,492** | 备考工作台主容器 |
-| 4 | [components/SkimPanel.tsx](components/SkimPanel.tsx) | **1,309** | 略读模块，已有"chatWithAdaptiveTutor 禁用"守卫脚本（见 package.json） |
+| 4 | [features/reader/skim/SkimPanel.tsx](features/reader/skim/SkimPanel.tsx) | **1,309** | 略读模块，已有"chatWithAdaptiveTutor 禁用"守卫脚本（见 package.json） |
 | 5 | [components/ExamPredictionPanel.tsx](components/ExamPredictionPanel.tsx) | **1,035** | 考试预测面板 |
 | 6 | [components/ExamWorkspaceMaterialPreview.tsx](components/ExamWorkspaceMaterialPreview.tsx) | **996** | 工作台 PDF 预览（含高亮） |
 | 7 | [components/Sidebar.tsx](components/Sidebar.tsx) | **972** | 侧栏含日历/备忘录/会话/文件夹四套数据流 |
@@ -120,7 +120,7 @@
 
 ### 3.2 ReactMarkdown 渲染配置（**中度**）
 
-13 个组件（[SkimPanel](components/SkimPanel.tsx)、[ExamPredictionPanel](components/ExamPredictionPanel.tsx)、[ExamSummaryPanel](components/ExamSummaryPanel.tsx)、[ExamTrapsPanel](components/ExamTrapsPanel.tsx)、[ExamWorkspaceAssistantMarkdown](components/ExamWorkspaceAssistantMarkdown.tsx)、[ExplanationPanel](components/ExplanationPanel.tsx)、[FeynmanPanel](components/FeynmanPanel.tsx)、[FiveMinFlowPanel](components/FiveMinFlowPanel.tsx)、[MultiDocQAPanel](components/MultiDocQAPanel.tsx)、[SavedArtifactPreview](components/SavedArtifactPreview.tsx)、[SideQuestPanel](components/SideQuestPanel.tsx)、[StudyGuidePanel](components/StudyGuidePanel.tsx)、[TrickyProfessorPanel](components/TrickyProfessorPanel.tsx)）都直接 `import ReactMarkdown` 并各自配置 `remarkGfm + remarkMath + rehypeKatex` 与一套 `components` 覆盖。这是 13 份高度雷同的样板。
+13 个组件（[SkimPanel](features/reader/skim/SkimPanel.tsx)、[ExamPredictionPanel](components/ExamPredictionPanel.tsx)、[ExamSummaryPanel](components/ExamSummaryPanel.tsx)、[ExamTrapsPanel](components/ExamTrapsPanel.tsx)、[ExamWorkspaceAssistantMarkdown](components/ExamWorkspaceAssistantMarkdown.tsx)、[ExplanationPanel](components/ExplanationPanel.tsx)、[FeynmanPanel](components/FeynmanPanel.tsx)、[FiveMinFlowPanel](components/FiveMinFlowPanel.tsx)、[MultiDocQAPanel](components/MultiDocQAPanel.tsx)、[SavedArtifactPreview](components/SavedArtifactPreview.tsx)、[SideQuestPanel](components/SideQuestPanel.tsx)、[StudyGuidePanel](components/StudyGuidePanel.tsx)、[TrickyProfessorPanel](components/TrickyProfessorPanel.tsx)）都直接 `import ReactMarkdown` 并各自配置 `remarkGfm + remarkMath + rehypeKatex` 与一套 `components` 覆盖。这是 13 份高度雷同的样板。
 
 **重构动作**：抽 `components/shared/AppMarkdown.tsx`，统一 plugins、code 高亮、链接规则、citation hook。
 
@@ -181,7 +181,7 @@
 | **🔴 [App.tsx](App.tsx)** | **2,856** | **138** | 39 个组件 import + 138 个 hook + 业务流程编排 + 鉴权 + 导航 + 持久化全在这里 |
 | **🔴 [services/geminiService.ts](services/geminiService.ts)** | **2,945** | 0 | 50+ AI 函数 + 40 处内联 prompt 全在一起；不是组件但同等屎 |
 | 🔴 [components/ExamWorkspacePage.tsx](components/ExamWorkspacePage.tsx) | 1,492 | 35 | 工作台 5 区栏布局 + chunk 索引构建 + KC 玻璃柜 + 多个 modal 编排 |
-| 🔴 [components/SkimPanel.tsx](components/SkimPanel.tsx) | 1,309 | 34 | 略读 5 阶段（diagnosis/scenario/intake/...）状态机 + UI |
+| 🔴 [features/reader/skim/SkimPanel.tsx](features/reader/skim/SkimPanel.tsx) | 1,309 | 34 | 略读 5 阶段（diagnosis/scenario/intake/...）状态机 + UI |
 | 🔴 [components/ExamPredictionPanel.tsx](components/ExamPredictionPanel.tsx) | 1,035 | 37 | KC 网格 + BKT 更新 + Gemini 调用 + 题目编辑 |
 | 🟠 [components/ExamWorkspaceMaterialPreview.tsx](components/ExamWorkspaceMaterialPreview.tsx) | 996 | 38 | PDF 渲染 + 引文高亮 + 缩放 + 键盘快捷键 |
 | 🟠 [components/Sidebar.tsx](components/Sidebar.tsx) | 972 | 23 | 4 套数据流（会话/文件夹/日历/备忘录） |
@@ -289,7 +289,7 @@
 ### 5.5 略读（Skim）
 
 文件：
-- [components/SkimPanel.tsx](components/SkimPanel.tsx) 🔴 1,309 行
+- [features/reader/skim/SkimPanel.tsx](features/reader/skim/SkimPanel.tsx) 🔴 1,309 行
 - 在 geminiService 中：`chatWithSkimAdaptiveTutor`、`generateGatekeeperQuiz`（共享）、`generateModuleTakeaways`、`generateModuleQuiz`、`performPreFlightDiagnosis`（5+）
 - [docs/SKIM_VS_EXAM_TUTOR_API.md](docs/SKIM_VS_EXAM_TUTOR_API.md) - 与考试 tutor 的边界文档
 - package.json 有 `check:skim-tutor` 守护脚本
@@ -460,7 +460,7 @@
 | 项 | 文件 | 工作量 | 风险 |
 |----|------|--------|------|
 | P5.1 | [App.tsx](App.tsx) 2856 行 → 拆出 useAuthState、useFileLifecycle、useGalgameState、useExamWorkspaceActiveExam 等 hook，App.tsx 目标 < 600 行 | **大** | **中-高**（重构核心组件，需要 Criss 频繁测试） |
-| P5.2 | [components/SkimPanel.tsx](components/SkimPanel.tsx) 1309 行 → 按阶段拆 + useSkimStateMachine hook | 大 | 中 |
+| P5.2 | [features/reader/skim/SkimPanel.tsx](features/reader/skim/SkimPanel.tsx) 1309 行 → 按阶段拆 + useSkimStateMachine hook | 大 | 中 |
 | P5.3 | [components/ExamWorkspacePage.tsx](components/ExamWorkspacePage.tsx) 1492 行 → 按面板拆 + useExamWorkspaceContext provider | 大 | 中 |
 | P5.4 | [components/ExamPredictionPanel.tsx](components/ExamPredictionPanel.tsx) 1035 行 → 抽 useBKTState + usePredictionLoader | 中-大 | 中 |
 | P5.5 | [components/ExamWorkspaceMaterialPreview.tsx](components/ExamWorkspaceMaterialPreview.tsx) 996 行 → PDF 渲染 + 高亮 + 工具栏分离 | 中-大 | 中 |

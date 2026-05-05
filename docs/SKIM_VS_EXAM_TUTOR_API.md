@@ -5,7 +5,7 @@
 | 符号 | 期望出现位置 |
 |------|----------------|
 | `chatWithAdaptiveTutor` | `services/geminiService.ts`（定义与注释）、`components/ExamWorkspaceSocraticChat.tsx`（备考苏格拉底）、`types.ts`（类型注释）、本文档与 `docs/P2_EXAM_WORKSPACE.md` / `README.md` 等说明 |
-| `chatWithSkimAdaptiveTutor` | `services/geminiService.ts`（导出）、`components/SkimPanel.tsx`（略读对话） |
+| `chatWithSkimAdaptiveTutor` | `services/geminiService.ts`（导出）、`features/reader/skim/SkimPanel.tsx`（略读对话） |
 
 **不应**：`SkimPanel.tsx` 出现 `chatWithAdaptiveTutor`。
 
@@ -39,11 +39,11 @@
 - 直接回滚引入「SkimPanel 改接 `chatWithSkimAdaptiveTutor`」的提交：
   - `git revert <步骤A/B相关提交SHA>`
 - 若只需快速应急，可文件级回滚（不建议长期保留）：
-  - `git checkout <稳定版本SHA> -- components/SkimPanel.tsx services/geminiService.ts`
+  - `git checkout <稳定版本SHA> -- features/reader/skim/SkimPanel.tsx services/geminiService.ts`
 
 ### 临时降级策略（仅应急）
 
-- 将 `components/SkimPanel.tsx` 的调用临时改回 `chatWithAdaptiveTutor` 可快速止血，但会打破“略读/备考 API 分离”，应在后续修复后撤销。
+- 将 `features/reader/skim/SkimPanel.tsx` 的调用临时改回 `chatWithAdaptiveTutor` 可快速止血，但会打破“略读/备考 API 分离”，应在后续修复后撤销。
 
 ### 数据影响
 

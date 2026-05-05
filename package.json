@@ -8,7 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "vercel deploy --prod",
-    "check:skim-tutor": "node -e \"const fs=require('fs');const s=fs.readFileSync('components/SkimPanel.tsx','utf8');if(/chatWithAdaptiveTutor/.test(s)){console.error('SkimPanel must not reference chatWithAdaptiveTutor');process.exit(1)}console.log('check:skim-tutor ok')\""
+    "check:skim-tutor": "node -e \"const fs=require('fs');const s=fs.readFileSync('features/reader/skim/SkimPanel.tsx','utf8');if(/chatWithAdaptiveTutor/.test(s)){console.error('SkimPanel must not reference chatWithAdaptiveTutor');process.exit(1)}console.log('check:skim-tutor ok')\""
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
