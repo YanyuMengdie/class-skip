@@ -78,6 +78,11 @@ export interface ExamWorkspaceSocraticChatProps {
    * 1-4：仅在该材料的 chunk 上 BM25（需与「当前预览」等材料 id 对齐）；默认 null = 整场多材料检索。
    */
   chunkRetrievalMaterialLinkIdFilter?: string | null;
+  /**
+   * 阶段 2：父级 selectedKcIds.length === 0 时为 true，UI 应禁用输入框并显示「请先选择 KC」提示。
+   * 不影响对话路径本身（对话仍由 activeKc 驱动）。
+   */
+  noKcSelected?: boolean;
 }
 
 function atomProgressForKc(kc: LSAPKnowledgeComponent, cov: AtomCoverageByKc): { covered: number; total: number } {
@@ -160,6 +165,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
       workspaceLsapKey,
       onChunkRetrievalRound,
       chunkRetrievalMaterialLinkIdFilter,
+      noKcSelected = false,
     },
     ref
   ) {
@@ -337,7 +343,8 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
     !mergedLoading &&
     !mergedError &&
     mergedContent.trim().length > 0 &&
-    !sending;
+    !sending &&
+    !noKcSelected;
 
   const onSend = useCallback(async () => {
     const text = input.trim();
@@ -754,9 +761,11 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
               placeholder={
                 canSend
                   ? '输入你的想法或疑问…（Enter 发送，Shift+Enter 换行）'
-                  : contextBlocked
-                    ? '请先选择考试并关联材料'
-                    : '等待材料合并完成…'
+                  : noKcSelected
+                    ? '请先选择 KC'
+                    : contextBlocked
+                      ? '请先选择考试并关联材料'
+                      : '等待材料合并完成…'
               }
               rows={3}
               className="flex-1 min-h-[72px] max-h-40 border border-stone-200 rounded-xl px-3 py-2 text-sm text-slate-800 disabled:bg-stone-100 disabled:text-slate-400 resize-y"

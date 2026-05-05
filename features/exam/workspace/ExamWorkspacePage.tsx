@@ -206,10 +206,7 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
    * 详见 docs/plans/MULTISELECT_KC_PLAN.md §3 阶段 1。
    */
   const [selectedKcIds, setSelectedKcIds] = useState<string[]>([]);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const isMultiSelectMode = selectedKcIds.length >= 1;
-  /** M3：勾选后对话不锚定 KC，行为同 M3 前；默认不勾选（锚定考点，默认第一项 KC） */
-  const [wholeBookMode, setWholeBookMode] = useState(false);
+  const isMultiSelectMode = selectedKcIds.length >= 2;
   /** Tier3「满分细节」列表默认折叠；选中 Tier3 考点时自动展开以便看到选中态 */
   const [maxScoreDetailsOpen, setMaxScoreDetailsOpen] = useState(false);
   const [inspectKc, setInspectKc] = useState<LSAPKnowledgeComponent | null>(null);
@@ -478,33 +475,40 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
     }
   }, [selectedKcId, workspaceLsapContentMap]);
 
+  /**
+   * 多选 KC：默认 seed + 失效项过滤。
+   * - 当 kcsOrdered 为空时清空 selectedKcIds
+   * - 当 selectedKcIds 为空且 kcsOrdered 非空时，seed 为 [第一项]（与原"自动选第一个 KC"语义等价）
+   * - 当 selectedKcIds 含已不存在的 KC（图谱重生成等）时，过滤掉
+   */
   useEffect(() => {
     if (!kcsOrdered.length) {
-      setSelectedKcId(null);
+      setSelectedKcIds((prev) => (prev.length === 0 ? prev : []));
       return;
     }
-    if (!wholeBookMode) {
-      setSelectedKcId((prev) => {
-        if (prev && kcsOrdered.some((k) => k.id === prev)) return prev;
-        return kcsOrdered[0].id;
-      });
-    }
-  }, [kcsOrdered, wholeBookMode]);
+    setSelectedKcIds((prev) => {
+      const validIds = new Set(kcsOrdered.map((k) => k.id));
+      const filtered = prev.filter((id) => validIds.has(id));
+      if (filtered.length === 0) return [kcsOrdered[0].id];
+      if (filtered.length === prev.length) return prev;
+      return filtered;
+    });
+  }, [kcsOrdered]);
 
+  /**
+   * selectedKcIds → selectedKcId 兼容同步（PLAN §2.1 兼容策略）。
+   * length === 1 时同步等于该 id（让现有单 KC 路径继续工作）；
+   * length === 0 或 >= 2 时，selectedKcId = null。
+   */
   useEffect(() => {
-    if (wholeBookMode && mobileTab === 'glossary') setMobileTab('chat');
-  }, [wholeBookMode, mobileTab]);
-
-  useEffect(() => {
-    if (wholeBookMode) setGlossaryDesktopOpen(false);
-  }, [wholeBookMode]);
+    setSelectedKcId(selectedKcIds.length === 1 ? selectedKcIds[0] : null);
+  }, [selectedKcIds]);
 
   const activeKcForChat = useMemo(() => {
-    if (wholeBookMode || !workspaceLsapContentMap?.kcs?.length) return null;
-    const id = selectedKcId ?? kcsOrdered[0]?.id;
-    if (!id) return null;
-    return workspaceLsapContentMap.kcs.find((k) => k.id === id) ?? null;
-  }, [wholeBookMode, workspaceLsapContentMap, selectedKcId, kcsOrdered]);
+    if (!workspaceLsapContentMap?.kcs?.length) return null;
+    if (selectedKcIds.length !== 1) return null;
+    return workspaceLsapContentMap.kcs.find((k) => k.id === selectedKcIds[0]) ?? null;
+  }, [workspaceLsapContentMap, selectedKcIds]);
 
   useEffect(() => {
     if (!activeKcForChat) setGlossaryDesktopOpen(false);
@@ -516,9 +520,14 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
   }, [activeKcForChat, workspaceKcGlossary]);
 
   const chatSessionKey = useMemo(() => {
-    const kcPart = wholeBookMode ? 'whole' : (selectedKcId ?? kcsOrdered[0]?.id ?? 'none');
+    const kcPart =
+      selectedKcIds.length === 0
+        ? 'none'
+        : isMultiSelectMode
+          ? `multi_${selectedKcIds.slice().sort().join('+')}`
+          : selectedKcIds[0];
     return `${activeExamId ?? 'none'}_${disciplineBand}_${kcPart}`;
-  }, [activeExamId, disciplineBand, wholeBookMode, selectedKcId, kcsOrdered]);
+  }, [activeExamId, disciplineBand, selectedKcIds, isMultiSelectMode]);
 
   useEffect(() => {
     setLastSocraticChunkRetrieval(null);
@@ -694,7 +703,7 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
     : '本场尚未关联材料。请打开「考试中心」为该考试添加 PDF。';
 
   const renderWorkspaceKcCard = (kc: LSAPKnowledgeComponent) => {
-    const selected = selectedKcId === kc.id;
+    const selected = selectedKcIds.includes(kc.id);
     const { covered, total } = atomCoverageCounts(kc, workspaceAtomCoverage);
     const atomTotal = kc.atoms?.length ?? 0;
     return (
@@ -706,7 +715,11 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
         >
           <button
             type="button"
-            onClick={() => setSelectedKcId(selected ? null : kc.id)}
+            onClick={() =>
+              setSelectedKcIds((prev) =>
+                prev.includes(kc.id) ? prev.filter((id) => id !== kc.id) : [...prev, kc.id]
+              )
+            }
             className="w-full text-left"
           >
             <div className="flex items-start justify-between gap-2">
@@ -817,16 +830,16 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
             </p>
           ) : null}
           {kcsOrdered.length > 0 && (
-            <label className="mb-2 flex shrink-0 cursor-pointer select-none items-center gap-2 text-[10px] text-slate-600">
-              <input
-                type="checkbox"
-                className="rounded border-stone-300"
-                checked={wholeBookMode}
-                onChange={(e) => setWholeBookMode(e.target.checked)}
-                aria-label="全卷对话（不锚定 KC）"
-              />
-              全卷对话（不锚定 KC）
-            </label>
+            <div className="mb-2 flex shrink-0 items-center gap-2 text-[10px] text-slate-600">
+              <button
+                type="button"
+                onClick={() => setSelectedKcIds(kcsOrdered.map((k) => k.id))}
+                className="px-2 py-0.5 rounded-md border border-stone-300 bg-white text-slate-700 hover:bg-stone-50"
+                aria-label="全选所有考点"
+              >
+                全选
+              </button>
+            </div>
           )}
           {!workspaceLsapContentMap ? (
             <p className="shrink-0 py-2 text-xs text-slate-500">生成本场考点图谱后将在此列出考点。</p>
@@ -1066,6 +1079,7 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
             chunkRetrievalMaterialLinkIdFilter={
               chunkSearchOnlyPreviewMaterial && previewJumpRequest?.linkId ? previewJumpRequest.linkId : null
             }
+            noKcSelected={selectedKcIds.length === 0}
           />
         </div>
         {/* P0：讲义预览（大屏默认折叠；与对话、考点释义并排） */}
@@ -1143,14 +1157,8 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
           </button>
           <button
             type="button"
-            disabled={!activeKcForChat || wholeBookMode}
-            title={
-              wholeBookMode
-                ? '全卷模式下不收录考点释义'
-                : !activeKcForChat
-                  ? '请先锚定考点后再查看考点释义'
-                  : undefined
-            }
+            disabled={!activeKcForChat}
+            title={!activeKcForChat ? '请先锚定考点后再查看考点释义' : undefined}
             aria-expanded={glossaryDesktopOpen}
             aria-controls="exam-workspace-kc-glossary-panel"
             onClick={() => setGlossaryDesktopOpen((o) => !o)}
