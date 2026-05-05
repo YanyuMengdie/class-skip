@@ -4,7 +4,7 @@
 任何 AI 助手（外部 Claude / Claude Code / Cursor）打开此文档都能立即接续工作。
 每次重大进度后请更新本文档。
 
-最后更新：2026-05-05 · P2 阶段 3 第 3 批（exam/ + 修复 review 归类错误）搬迁后
+最后更新：2026-05-05 · P2 阶段 3 主体完工（galgame 推迟到阶段 4）
 
 ================================================================
 项目基本信息
@@ -105,8 +105,9 @@ P2（阶段 3）内部子阶段进度
                                 （归类修正——它们是九宫格复习工具，详见
                                  产品事实修正第 10 条）
 
-🔵 阶段 3：收尾
-   - galgame 2 文件归档/迁移（mini commit）
+✅ P2 阶段 3 主体完工（components/ 51 → 2，剩 galgame 2 文件
+   推迟到 REFACTOR_PLAN.md 阶段 4 拆 App.tsx 时一并处理；详见
+   产品事实修正第 11 条）
 
 ⏳ 阶段 4：utils → lib/ 重组（29 文件）
 
@@ -302,6 +303,30 @@ App.tsx 的实质性拆分属于 REFACTOR_PLAN.md 阶段 4 "拆巨型组件" 的
         （体量与 review 批的 TrickyProfessorPanel 114 / TrapListPanel 78 一致，
          不是 exam 工作台级的巨型组件）
 
+11. galgame 实际未归档，处于"半死"状态
+   ────────────────────────────────────────────────────────
+   App.tsx 仍 import + mount GalgameOverlay / GalgameSettings
+   （[App.tsx:14](App.tsx)、[App.tsx:15](App.tsx)、[App.tsx:2217](App.tsx)、
+    [App.tsx:2227](App.tsx)），但入口按钮已硬编码 false 锁死
+   （[App.tsx:2703-2713](App.tsx) 的 `{false && fileName && !isImmersive && (...)}`
+    包住了"AI 场景工坊"按钮，永不渲染）；
+   shared/layout/Header.tsx 里的 onEnterGalgameMode callback 也是
+   死接线——prop 声明 + 解构齐全，但**全仓 grep 无任何调用方**
+   （Gamepad2 图标也没有触发按钮）。
+
+   用户产品决策：功能停用但代码保留备将来更新（galgame 当时太难用且
+   未解决用户的真实问题）。早期文档（含 CONTEXT.md 旧版本和
+   _archived/prompts/galgame.ts 周边的"已归档"描述）说"galgame 已归档"
+   是错的——只归档了 prompts，组件仍然在主代码树里 mount。
+
+   推迟到 REFACTOR_PLAN.md 阶段 4 拆 App.tsx 时一并处理：
+   - 清掉 App.tsx 的 import + JSX mount + onEnterGalgameMode 死接线
+     （约 25 行）
+   - 把 components/GalgameOverlay.tsx + components/GalgameSettings.tsx
+     搬到 _archived/components/galgame/
+   - 不要在 P2 阶段 3 收尾 / 阶段 4（utils 重组）触碰这件事，避免
+     业务逻辑改动污染纯搬迁的 commit。
+
 ================================================================
 关键归类决策
 ================================================================
@@ -406,6 +431,7 @@ console 红字快速判断：
 Git 历史关键节点
 ================================================================
 
+(待 commit) docs: P2 阶段 3 主体完工归档 + 第 11 条 galgame 半死状态记录
 (待 commit) refactor(p2): 把 17 exam 组件搬到 features/exam/ + 修复 2 review 归类错误
 (待 commit) refactor(p2): 把 12 个 review 组件搬到 features/review/ + tools/ + tools/mindMap/
 (待 commit) refactor(p2): 把 LoadingInteractiveContent 搬到 features/reader/deep-read/
@@ -433,19 +459,18 @@ aff6f3e 迁移到 Windows，准备开始屎山重构
 当前下一步
 ================================================================
 
-P2 阶段 3 第 3 批（features/exam/ 17 文件 + 修复 2 review 归类）已搬完，等用户验证 + commit。
+P2 阶段 3 主体完工（components/ 51 → 2，剩 galgame 2 文件保留备将来；
+详见产品事实修正第 11 条）。本批仅文档记录，无代码改动。
 
 接下来按顺序：
 
-1. galgame 2 文件（GalgameOverlay, GalgameSettings）归档/迁移收尾（mini commit）
-   —— 此后 components/ 目录清空，P2 阶段 3 正式收官
+1. P2 阶段 4：utils → lib/ 重组（29 文件）
 
-2. P2 阶段 4：utils → lib/ 重组（28 文件）
-
-3. REFACTOR_PLAN.md 阶段 4：拆 App.tsx + SkimPanel.tsx + ExamWorkspacePage(1492)
+2. REFACTOR_PLAN.md 阶段 4：拆 App.tsx + SkimPanel.tsx + ExamWorkspacePage(1492)
    + ExamPredictionPanel(1035) + ExamWorkspaceMaterialPreview(996) 等巨型组件
+   —— 届时一并处理 galgame：清掉 App.tsx 死接线 + 搬到 _archived/components/galgame/
 
 ================================================================
 本文档应在每次重大进度后更新。
-当前阶段：P2 阶段 3 第 3 批（features/exam/ 17 文件 + 修复 2 review 归类错误，共 19 文件）已搬完，待用户验证 + commit。
+当前阶段：P2 阶段 3 主体完工（galgame 推迟到阶段 4 处理）；本次仅文档记录，无代码改动；待用户验证 + commit。
 ================================================================
