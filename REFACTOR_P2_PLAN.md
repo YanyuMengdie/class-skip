@@ -141,7 +141,7 @@ class-skip/
 | 当前路径 | 行 | 定位 | 内部依赖 | 跨模块依赖 |
 |---|---|---|---|---|
 | [components/ExplanationPanel.tsx](components/ExplanationPanel.tsx) | 674 | 主 | LoadingInteractiveContent | utils/textUtils |
-| [components/LoadingInteractiveContent.tsx](components/LoadingInteractiveContent.tsx) | 233 | 子 | — | — |
+| [features/reader/deep-read/LoadingInteractiveContent.tsx](features/reader/deep-read/LoadingInteractiveContent.tsx) | 233 | 子 | — | — |
 
 ### 1.9 features/mindmap/
 

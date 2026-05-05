@@ -4,7 +4,7 @@
 任何 AI 助手（外部 Claude / Claude Code / Cursor）打开此文档都能立即接续工作。
 每次重大进度后请更新本文档。
 
-最后更新：2026-05-04 · P2 阶段 3 第 1 批（shared/）搬迁后
+最后更新：2026-05-04 · P2 阶段 3 第 1 批（shared/）+ LoadingInteractiveContent mini 收尾后
 
 ================================================================
 项目基本信息
@@ -79,11 +79,12 @@ P2（阶段 3）内部子阶段进度
    - shared/auth/    LoginModal
    - shared/history/ HistoryModal
    - shared/studio/  StudioPanel, SavedArtifactPreview
-   - 剔除：LoadingInteractiveContent（属 features/reader/deep-read/ 私有，
-                                    将作为下一个 mini commit 单独搬）
+
+✅ 阶段 3 收尾 mini：LoadingInteractiveContent
+   - features/reader/deep-read/LoadingInteractiveContent.tsx
+   - 仅 ExplanationPanel.tsx 1 行 import 更新
 
 🔵 阶段 3：剩余大模块（待做）
-   - LoadingInteractiveContent → features/reader/deep-read/（mini commit）
    - features/review/ + tools/（13 文件）
    - features/exam/（17+ 文件）
 
@@ -109,7 +110,7 @@ shared/
     ├── StudioPanel.tsx
     └── SavedArtifactPreview.tsx
 
-features/ 已搬迁 14 个文件，分布在 7 个子目录：
+features/ 已搬迁 15 个文件，分布在 7 个子目录：
 
 features/
 ├── energyRefuel/
@@ -120,7 +121,8 @@ features/
 │   └── LectureTranscriptPage.tsx
 ├── reader/
 │   ├── deep-read/
-│   │   └── ExplanationPanel.tsx
+│   │   ├── ExplanationPanel.tsx
+│   │   └── LoadingInteractiveContent.tsx
 │   ├── marks/
 │   │   └── PageMarkPanel.tsx
 │   ├── notebook/
@@ -139,7 +141,7 @@ features/
 └── turtleSoup/
     └── TurtleSoupPanel.tsx
 
-components/ 仍剩 34 个文件，按归类候选分类：
+components/ 仍剩 33 个文件（exam 19 + review 12 + galgame 2），按归类候选分类：
 
 候选 features/exam/（17 文件）：
   ExamCenterPanel, ExamDailyMaintenancePanel, ExamHubModal, ExamLinkModal,
@@ -154,10 +156,6 @@ components/ 仍剩 34 个文件，按归类候选分类：
   FeynmanPanel, FlashCardReviewPanel, MultiDocQAPanel, QuizReviewPanel,
   ReviewPage, StudyGuidePanel, TerminologyPanel, TrapListPanel,
   TrickyProfessorPanel, MindMapPanel, MindMapFlowCanvas, MindMapFlowNode
-
-残留待单独处理（1 文件）：
-  LoadingInteractiveContent（仅 ExplanationPanel 使用，下一个 mini commit
-                             搬到 features/reader/deep-read/）
 
 待归档或单独处理（2 文件）：
   GalgameOverlay, GalgameSettings（之前规划为已归档，实际仍在 components/，
@@ -324,12 +322,14 @@ console 红字快速判断：
 | READER_BATCH3_NOTEBOOK_MIGRATION.md| 阶段 2 第 3 批                   |
 | SHARED_PRE_MIGRATION_SCAN.md       | 阶段 3 第 1 批的预扫描            |
 | SHARED_BATCH1_MIGRATION.md         | 阶段 3 第 1 批                   |
+| LOADING_INTERACTIVE_CONTENT_MIGRATION.md | 阶段 3 收尾 mini commit       |
 | docs/SKIM_VS_EXAM_TUTOR_API.md     | 略读 vs 备考 API 契约            |
 
 ================================================================
 Git 历史关键节点
 ================================================================
 
+(待 commit) refactor(p2): 把 LoadingInteractiveContent 搬到 features/reader/deep-read/
 (待 commit) refactor(p2): 把 8 个 shared 组件搬到 shared/{layout,auth,history,studio}/
 7234b14 refactor(p2): 把 Notebook 搬到 features/reader/notebook/
 038298e refactor(p2): 把 SkimPanel 搬到 features/reader/skim/
@@ -354,25 +354,22 @@ aff6f3e 迁移到 Windows，准备开始屎山重构
 当前下一步
 ================================================================
 
-P2 阶段 3 第 1 批（shared/）已搬完 8 个文件，等用户验证 + commit。
+P2 阶段 3 第 1 批（shared/）+ LoadingInteractiveContent mini 已搬完，等用户验证 + commit。
 
 接下来按顺序：
 
-1. mini commit：LoadingInteractiveContent → features/reader/deep-read/
-   （仅 1 文件 + ExplanationPanel.tsx 1 行 import 改动）
-
-2. P2 阶段 3 第 2 批：features/review/ + tools/（13 文件）
+1. P2 阶段 3 第 2 批：features/review/ + tools/（13 文件）
    - 候选：FeynmanPanel, FlashCardReviewPanel, MultiDocQAPanel, QuizReviewPanel,
            ReviewPage, StudyGuidePanel, TerminologyPanel, TrapListPanel,
            TrickyProfessorPanel, MindMapPanel, MindMapFlowCanvas, MindMapFlowNode
 
-3. P2 阶段 3 第 3 批：features/exam/（17+ 文件）
+2. P2 阶段 3 第 3 批：features/exam/（17+ 文件）
 
-4. P2 阶段 4：utils → lib/ 重组（28 文件）
+3. P2 阶段 4：utils → lib/ 重组（28 文件）
 
-5. REFACTOR_PLAN.md 阶段 4：拆 App.tsx + SkimPanel.tsx 巨型组件
+4. REFACTOR_PLAN.md 阶段 4：拆 App.tsx + SkimPanel.tsx 巨型组件
 
 ================================================================
 本文档应在每次重大进度后更新。
-当前阶段：P2 阶段 3 第 1 批（shared/）已搬完，待用户验证 + commit。
+当前阶段：P2 阶段 3 第 1 批（shared/ 8 文件）+ LoadingInteractiveContent mini 已搬完，待用户验证 + commit。
 ================================================================

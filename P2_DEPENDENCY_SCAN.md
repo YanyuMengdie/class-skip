@@ -74,7 +74,7 @@
 全仓库含 `explain` 字样的代码文件：**0 个**。无 deep/read 命名的卫星文件。
 
 ### 遗漏候选 ✅
-- **[components/LoadingInteractiveContent.tsx](components/LoadingInteractiveContent.tsx)（233 行）必须跟着搬到 deep-read**。它只服务于精读"AI 生成中"占位动画，没有别的调用方。你列在 `shared/` 里是错位——它不是共享件。
+- **[features/reader/deep-read/LoadingInteractiveContent.tsx](features/reader/deep-read/LoadingInteractiveContent.tsx)（233 行）必须跟着搬到 deep-read**。它只服务于精读"AI 生成中"占位动画，没有别的调用方。你列在 `shared/` 里是错位——它不是共享件。
 - ⚠️ **textUtils 是跨模块**：被 ExplanationPanel + Notebook + SlideViewer 三处使用。它应该归 `lib/text/`，不能塞 deep-read 内部。
 
 ### 风险标记
@@ -516,7 +516,7 @@
 | [LoginModal.tsx](shared/auth/LoginModal.tsx) | ✓ | shared/auth/ ✅ |
 | [HistoryModal.tsx](shared/history/HistoryModal.tsx) | ✓ | shared/history/ ✅ |
 | [MusicPlayer.tsx](shared/layout/MusicPlayer.tsx) | ✓ | ⚠️ **仅 Header 一家用**——严格说不算"shared"。建议放 shared/layout/ 与 Header 同居 |
-| [LoadingInteractiveContent.tsx](components/LoadingInteractiveContent.tsx) | ✓ | ❌ **不是 shared**——仅被 ExplanationPanel 用，应归 `features/reader/deep-read/` |
+| [LoadingInteractiveContent.tsx](features/reader/deep-read/LoadingInteractiveContent.tsx) | ✓ | ❌ **不是 shared**——仅被 ExplanationPanel 用，应归 `features/reader/deep-read/` |
 | [StudioPanel.tsx](shared/studio/StudioPanel.tsx) | ✓ | ❌ **不是 shared**——仅被 ReviewPage（间接）用 + 通过 App.tsx 渲染。应归 `features/review/`（业务上是"已生成产物面板"） |
 | [SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | ✓ | ❌ **不是 shared**——被 ReviewPage、StudioPanel 共用，归 `features/review/`（同模块内部共享） |
 
