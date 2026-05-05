@@ -34,12 +34,12 @@ import type {
   RetrievedChunk,
 } from '@/types';
 import { listExams, listExamMaterialLinks } from '@/services/firebase';
-import { ExamWorkspaceSocraticChat, type ExamWorkspaceSocraticChatHandle } from '@/components/ExamWorkspaceSocraticChat';
-import { KcGlossarySidebar } from '@/components/KcGlossarySidebar';
-import { KnowledgePointInspectPanel } from '@/components/KnowledgePointInspectPanel';
-import { WorkspaceKcProbeModal } from '@/components/WorkspaceKcProbeModal';
-import { WorkspaceEvidenceReportModal } from '@/components/WorkspaceEvidenceReportModal';
-import { ExamWorkspaceMaterialPreview } from '@/components/ExamWorkspaceMaterialPreview';
+import { ExamWorkspaceSocraticChat, type ExamWorkspaceSocraticChatHandle } from '@/features/exam/workspace/ExamWorkspaceSocraticChat';
+import { KcGlossarySidebar } from '@/features/exam/workspace/KcGlossarySidebar';
+import { KnowledgePointInspectPanel } from '@/features/exam/workspace/KnowledgePointInspectPanel';
+import { WorkspaceKcProbeModal } from '@/features/exam/workspace/WorkspaceKcProbeModal';
+import { WorkspaceEvidenceReportModal } from '@/features/exam/workspace/WorkspaceEvidenceReportModal';
+import { ExamWorkspaceMaterialPreview } from '@/features/exam/workspace/ExamWorkspaceMaterialPreview';
 import type { WorkspaceDialogueTurn } from '@/utils/examWorkspaceLsapKey';
 import { buildExamMaterialChunkIndexForLinks, findChunkById } from '@/utils/examChunkIndex';
 import { getExamChunkIndexStats, loadExamMaterialChunkIndex, saveExamMaterialChunkIndex } from '@/services/examChunkIndexStorage';

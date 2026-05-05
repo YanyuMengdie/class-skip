@@ -3,9 +3,9 @@ import { X } from 'lucide-react';
 import type { User } from 'firebase/auth';
 import type { Exam, ExamMaterialLink, FilePersistedState, StudyFlowStep } from '@/types';
 import { listExams, listExamMaterialLinks } from '@/services/firebase';
-import { ExamCenterPanel } from '@/components/ExamCenterPanel';
-import { ExamDailyMaintenancePanel } from '@/components/ExamDailyMaintenancePanel';
-import { StudyFlowPanel } from '@/components/StudyFlowPanel';
+import { ExamCenterPanel } from '@/features/exam/hub/ExamCenterPanel';
+import { ExamDailyMaintenancePanel } from '@/features/exam/hub/ExamDailyMaintenancePanel';
+import { StudyFlowPanel } from '@/features/exam/hub/StudyFlowPanel';
 
 type Tab = 'exams' | 'daily' | 'flow';
 

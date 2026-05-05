@@ -34,8 +34,8 @@
 | **包裹条件** | line 313 `{onOpenExamWorkspace && (...)}` |
 | **`onOpenExamWorkspace` 在 App.tsx 怎么连接** | [App.tsx:2036-2042](App.tsx)：`onOpenExamWorkspace={() => { if (!user) { setLoginModalOpen(true); return; } setAppMode('examWorkspace'); }}` |
 | **触发的 state** | 未登录：`setLoginModalOpen(true)`；已登录：`setAppMode('examWorkspace')` |
-| **点击后渲染哪个组件** | [components/ExamWorkspacePage.tsx](components/ExamWorkspacePage.tsx)（1492 行）—— 当 `appMode === 'examWorkspace' && user` 时由 [App.tsx:2660-2661](App.tsx) 渲染 |
-| **页面内显示的标题** | "考试复习 · 备考工作台"（[ExamWorkspacePage.tsx:1109](components/ExamWorkspacePage.tsx)） |
+| **点击后渲染哪个组件** | [features/exam/workspace/ExamWorkspacePage.tsx](features/exam/workspace/ExamWorkspacePage.tsx)（1492 行）—— 当 `appMode === 'examWorkspace' && user` 时由 [App.tsx:2660-2661](App.tsx) 渲染 |
+| **页面内显示的标题** | "考试复习 · 备考工作台"（[ExamWorkspacePage.tsx:1109](features/exam/workspace/ExamWorkspacePage.tsx)） |
 | **附属说明** | 它**不是 modal**，而是切换 `appMode` 的**整页路由**——和"学习工具"完全是不同的展开方式 |
 
 ---
@@ -57,10 +57,10 @@
 | 6 | **费曼检验** | [App.tsx:2297](App.tsx) | `setReviewModeChooserOpen(false); setFeynmanPanelOpen(true);` | [features/review/tools/FeynmanPanel.tsx](features/review/tools/FeynmanPanel.tsx)（363 行） | `handleStart('feynman')` ([ReviewPage.tsx:255](features/review/ReviewPage.tsx)) |
 | 7 | **刁钻教授** | [App.tsx:2298](App.tsx) | `setReviewModeChooserOpen(false); setTrickyProfessorPanelOpen(true);` | [features/review/tools/TrickyProfessorPanel.tsx](features/review/tools/TrickyProfessorPanel.tsx)（114 行） | `handleStart('trickyProfessor')` ([ReviewPage.tsx:256](features/review/ReviewPage.tsx)) |
 | 8 | **我的陷阱清单** | [App.tsx:2299](App.tsx) | `setReviewModeChooserOpen(false); setTrapListPanelOpen(true);` | [features/review/tools/TrapListPanel.tsx](features/review/tools/TrapListPanel.tsx)（78 行） | `handleStart('trapList')` ([ReviewPage.tsx:257](features/review/ReviewPage.tsx)) |
-| 9 | **考前速览** | [App.tsx:2306](App.tsx) | `setReviewModeChooserOpen(false); setExamSummaryPanelOpen(true);` | [components/ExamSummaryPanel.tsx](components/ExamSummaryPanel.tsx)（192 行） | `handleStart('examSummary')` ([ReviewPage.tsx:263](features/review/ReviewPage.tsx)) |
-| 10 | **考点与陷阱** | [App.tsx:2307](App.tsx) | `setReviewModeChooserOpen(false); setExamTrapsPanelOpen(true);` | [components/ExamTrapsPanel.tsx](components/ExamTrapsPanel.tsx)（98 行） | `handleStart('examTraps')` ([ReviewPage.tsx:264](features/review/ReviewPage.tsx)) |
+| 9 | **考前速览** | [App.tsx:2306](App.tsx) | `setReviewModeChooserOpen(false); setExamSummaryPanelOpen(true);` | [features/review/tools/ExamSummaryPanel.tsx](features/review/tools/ExamSummaryPanel.tsx)（192 行） | `handleStart('examSummary')` ([ReviewPage.tsx:263](features/review/ReviewPage.tsx)) |
+| 10 | **考点与陷阱** | [App.tsx:2307](App.tsx) | `setReviewModeChooserOpen(false); setExamTrapsPanelOpen(true);` | [features/review/tools/ExamTrapsPanel.tsx](features/review/tools/ExamTrapsPanel.tsx)（98 行） | `handleStart('examTraps')` ([ReviewPage.tsx:264](features/review/ReviewPage.tsx)) |
 | 11 | **多文档问答** | [App.tsx:2314](App.tsx) | `setReviewModeChooserOpen(false); setMultiDocQAConversationKey(getMultiDocQAConversationKey(...)); setMultiDocQAPanelOpen(true);` | [features/review/tools/MultiDocQAPanel.tsx](features/review/tools/MultiDocQAPanel.tsx)（208 行） | `handleStart('multiDocQA')` ([ReviewPage.tsx:269](features/review/ReviewPage.tsx)) |
-| ➕ | **考前预测**（仅 App.tsx 弹窗有） | [App.tsx:2308](App.tsx) | `setReviewModeChooserOpen(false); setExamPredictionInitialKCId(null); setExamPredictionPanelOpen(true);` | [components/ExamPredictionPanel.tsx](components/ExamPredictionPanel.tsx)（1035 行） | （ReviewPage 没有此按钮） |
+| ➕ | **考前预测**（仅 App.tsx 弹窗有） | [App.tsx:2308](App.tsx) | `setReviewModeChooserOpen(false); setExamPredictionInitialKCId(null); setExamPredictionPanelOpen(true);` | [features/exam/ExamPredictionPanel.tsx](features/exam/ExamPredictionPanel.tsx)（1035 行） | （ReviewPage 没有此按钮） |
 
 ### 3.2 一句话归纳
 

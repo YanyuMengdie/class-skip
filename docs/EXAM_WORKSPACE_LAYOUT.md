@@ -1,6 +1,6 @@
 # 备考工作台布局（宽屏优化）
 
-## 变更摘要（`components/ExamWorkspacePage.tsx`）
+## 变更摘要（`features/exam/workspace/ExamWorkspacePage.tsx`）
 
 | 区域 | 改前 | 改后 |
 |------|------|------|

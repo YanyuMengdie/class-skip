@@ -3,7 +3,7 @@ import { X, Plus, Trash2, Calendar, ChevronDown, ChevronRight, Link2 } from 'luc
 import type { User } from 'firebase/auth';
 import type { DisciplineBand, Exam, ExamMaterialLink } from '@/types';
 import { createExam, deleteExam, removeExamMaterialLink, updateExam, addCalendarEvent } from '@/services/firebase';
-import { ExamLinkModal } from '@/components/ExamLinkModal';
+import { ExamLinkModal } from '@/features/exam/hub/ExamLinkModal';
 
 interface ExamCenterPanelProps {
   user: User;

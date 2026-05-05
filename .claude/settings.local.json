@@ -7,7 +7,8 @@
       "Bash(npx tsc *)",
       "Bash(git ls-tree *)",
       "Bash(npm run *)",
-      "Bash(echo \"skim-tutor exit=$?\")"
+      "Bash(echo \"skim-tutor exit=$?\")",
+      "Bash(awk '{print $NF}')"
     ]
   }
 }

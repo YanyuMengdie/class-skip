@@ -35,8 +35,8 @@ import {
 } from '@/utils/examWorkspaceCitations';
 import { DEFAULT_TOP_K, EXAM_CHUNK_QUERY_ASSISTANT_TAIL_CHARS, retrieveCandidateChunks } from '@/utils/examChunkRetrieval';
 import { loadExamMaterialChunkIndex } from '@/services/examChunkIndexStorage';
-import type { OpenMaterialPageOptions } from '@/components/ExamWorkspaceCitationBlock';
-import { ExamWorkspaceAssistantMarkdown } from '@/components/ExamWorkspaceAssistantMarkdown';
+import type { OpenMaterialPageOptions } from '@/features/exam/workspace/ExamWorkspaceCitationBlock';
+import { ExamWorkspaceAssistantMarkdown } from '@/features/exam/workspace/ExamWorkspaceAssistantMarkdown';
 
 export interface ExamWorkspaceSocraticChatHandle {
   /** P3：滚动到指定 paragraphIndex 对应的块（data-exam-block-index） */

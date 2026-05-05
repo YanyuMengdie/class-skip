@@ -17,8 +17,8 @@ import {
   computeMaintenanceStrategy,
   resolveDisciplineBandForMergedMaintenance,
 } from '@/utils/maintenanceStrategy';
-import { MaintenanceFlashcardDeck } from '@/components/MaintenanceFlashcardDeck';
-import { MaintenanceFeedbackCelebration } from '@/components/MaintenanceFeedbackCelebration';
+import { MaintenanceFlashcardDeck } from '@/features/exam/hub/MaintenanceFlashcardDeck';
+import { MaintenanceFeedbackCelebration } from '@/features/exam/hub/MaintenanceFeedbackCelebration';
 import { buildFeedbackExitCopy, buildFeedbackStrongCopy } from '@/data/maintenanceFeedbackCopy';
 import type { FilePlanMeta } from '@/utils/examSchedule';
 

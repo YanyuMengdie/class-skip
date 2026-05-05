@@ -4,7 +4,7 @@
 任何 AI 助手（外部 Claude / Claude Code / Cursor）打开此文档都能立即接续工作。
 每次重大进度后请更新本文档。
 
-最后更新：2026-05-05 · P2 阶段 3 第 2 批（review/）搬迁后
+最后更新：2026-05-05 · P2 阶段 3 第 3 批（exam/ + 修复 review 归类错误）搬迁后
 
 ================================================================
 项目基本信息
@@ -90,11 +90,25 @@ P2（阶段 3）内部子阶段进度
                                   Feynman, TrickyProfessor, TrapList, MultiDocQA
    - features/review/tools/mindMap/ MindMapPanel, MindMapFlowCanvas, MindMapFlowNode
 
-🔵 阶段 3：剩余大模块（待做）
-   - features/exam/（19 文件）
-   - galgame 2 文件归档/迁移（可并入 exam 批次后续）
+✅ 阶段 3 第 3 批：features/exam/（17 文件）+ 修复 review 归类错误（2 文件）
+   - features/exam/             ExamHubModal, ExamPredictionPanel
+   - features/exam/hub/         ExamCenterPanel, ExamLinkModal,
+                                ExamDailyMaintenancePanel, MaintenanceFlashcardDeck,
+                                MaintenanceFeedbackCelebration, StudyFlowPanel
+   - features/exam/workspace/   ExamWorkspacePage, ExamWorkspaceSocraticChat,
+                                ExamWorkspaceAssistantMarkdown,
+                                ExamWorkspaceCitationBlock,
+                                ExamWorkspaceMaterialPreview, KcGlossarySidebar,
+                                KnowledgePointInspectPanel, WorkspaceKcProbeModal,
+                                WorkspaceEvidenceReportModal
+   - features/review/tools/     ExamSummaryPanel, ExamTrapsPanel
+                                （归类修正——它们是九宫格复习工具，详见
+                                 产品事实修正第 10 条）
 
-⏳ 阶段 4：utils → lib/ 重组（28 文件）
+🔵 阶段 3：收尾
+   - galgame 2 文件归档/迁移（mini commit）
+
+⏳ 阶段 4：utils → lib/ 重组（29 文件）
 
 ================================================================
 当前真实目录结构（基于 git ls-tree 实测）
@@ -116,7 +130,7 @@ shared/
     ├── StudioPanel.tsx
     └── SavedArtifactPreview.tsx
 
-features/ 已搬迁 27 个文件，分布在 8 个 feature + 多个子目录：
+features/ 已搬迁 46 个文件，分布在 9 个 feature + 多个子目录：
 
 features/
 ├── energyRefuel/
@@ -141,9 +155,31 @@ features/
 │   │   └── SkimPanel.tsx          (1309 行内联实现，无独立卫星文件)
 │   └── slide-viewer/
 │       └── SlideViewer.tsx
+├── exam/
+│   ├── ExamHubModal.tsx           (考试中心入口 modal，hub 集群顶点)
+│   ├── ExamPredictionPanel.tsx    (1035 行；3 模式 + 教学子流程，阶段 4 拆候选)
+│   ├── hub/
+│   │   ├── ExamCenterPanel.tsx
+│   │   ├── ExamDailyMaintenancePanel.tsx
+│   │   ├── ExamLinkModal.tsx
+│   │   ├── MaintenanceFeedbackCelebration.tsx
+│   │   ├── MaintenanceFlashcardDeck.tsx
+│   │   └── StudyFlowPanel.tsx
+│   └── workspace/
+│       ├── ExamWorkspaceAssistantMarkdown.tsx
+│       ├── ExamWorkspaceCitationBlock.tsx
+│       ├── ExamWorkspaceMaterialPreview.tsx  (996 行，阶段 4 拆候选)
+│       ├── ExamWorkspacePage.tsx             (1492 行，阶段 4 拆候选)
+│       ├── ExamWorkspaceSocraticChat.tsx     (780 行)
+│       ├── KcGlossarySidebar.tsx
+│       ├── KnowledgePointInspectPanel.tsx
+│       ├── WorkspaceEvidenceReportModal.tsx  (含 ConflictPageHint 子组件供 KcProbe 用)
+│       └── WorkspaceKcProbeModal.tsx
 ├── review/
 │   ├── ReviewPage.tsx           (独立学习产物库页面，不挂载 tools；详见产品事实修正第 9 条)
 │   └── tools/
+│       ├── ExamSummaryPanel.tsx       (考前速览；归类修正，详见产品事实修正第 10 条)
+│       ├── ExamTrapsPanel.tsx         (考点与陷阱；归类修正，详见产品事实修正第 10 条)
 │       ├── FeynmanPanel.tsx
 │       ├── FlashCardReviewPanel.tsx
 │       ├── MultiDocQAPanel.tsx  (兼任 storage helper：getMultiDocQAConversationKey 等)
@@ -162,16 +198,7 @@ features/
 └── turtleSoup/
     └── TurtleSoupPanel.tsx
 
-components/ 仍剩 21 个文件（exam 19 + galgame 2），按归类候选分类：
-
-候选 features/exam/（19 文件）：
-  ExamCenterPanel, ExamDailyMaintenancePanel, ExamHubModal, ExamLinkModal,
-  ExamPredictionPanel, ExamSummaryPanel, ExamTrapsPanel,
-  ExamWorkspaceAssistantMarkdown, ExamWorkspaceCitationBlock,
-  ExamWorkspaceMaterialPreview, ExamWorkspacePage, ExamWorkspaceSocraticChat,
-  KcGlossarySidebar, KnowledgePointInspectPanel, MaintenanceFeedbackCelebration,
-  MaintenanceFlashcardDeck, StudyFlowPanel, WorkspaceEvidenceReportModal,
-  WorkspaceKcProbeModal
+components/ 仍剩 2 个文件（galgame 2），按归类候选分类：
 
 待归档或单独处理（2 文件）：
   GalgameOverlay, GalgameSettings（之前规划为已归档，实际仍在 components/，
@@ -258,6 +285,22 @@ App.tsx 的实质性拆分属于 REFACTOR_PLAN.md 阶段 4 "拆巨型组件" 的
    搬迁后的目录结构 features/review/ + features/review/tools/
    虽然看起来像容器+子目录，但实际是平行关系。后续在 ReviewPage
    里加新工具按钮的话不会自动接入 tools/——它们是独立模块。
+
+10. ExamSummaryPanel + ExamTrapsPanel 是 review 工具，不是 exam
+   ────────────────────────────────────────────────────────
+   旧描述：早期 P2 文档把这两个文件归到 exam 类（因为名字带 "Exam" 前缀）
+   实际：它们是九宫格里第 9、10 号复习工具，与 FeynmanPanel /
+        TrickyProfessorPanel / TrapListPanel / MultiDocQAPanel 是
+        完全平级的兄弟。触发位置：[App.tsx:2306-2307](App.tsx) 的
+        "复习模式选择器"弹窗里"考前冲刺"小节的两个按钮（绿色"考前速览"
+        + 玫红"考点与陷阱"）。
+   证据：features/review/ReviewPage.tsx 的 ReviewType 枚举包含
+        'examSummary' 和 'examTraps' 两个值。
+   搬迁后位置：features/review/tools/ExamSummaryPanel.tsx +
+              features/review/tools/ExamTrapsPanel.tsx
+   行数：ExamSummaryPanel 192 行 / ExamTrapsPanel 98 行
+        （体量与 review 批的 TrickyProfessorPanel 114 / TrapListPanel 78 一致，
+         不是 exam 工作台级的巨型组件）
 
 ================================================================
 关键归类决策
@@ -355,12 +398,15 @@ console 红字快速判断：
 | LOADING_INTERACTIVE_CONTENT_MIGRATION.md | 阶段 3 收尾 mini commit       |
 | REVIEW_PRE_MIGRATION_SCAN.md       | 阶段 3 第 2 批的预扫描            |
 | REVIEW_BATCH1_MIGRATION.md         | 阶段 3 第 2 批                   |
+| EXAM_PRE_MIGRATION_SCAN.md         | 阶段 3 第 3 批的预扫描            |
+| EXAM_BATCH1_MIGRATION.md           | 阶段 3 第 3 批 + 修复 review 归类 |
 | docs/SKIM_VS_EXAM_TUTOR_API.md     | 略读 vs 备考 API 契约            |
 
 ================================================================
 Git 历史关键节点
 ================================================================
 
+(待 commit) refactor(p2): 把 17 exam 组件搬到 features/exam/ + 修复 2 review 归类错误
 (待 commit) refactor(p2): 把 12 个 review 组件搬到 features/review/ + tools/ + tools/mindMap/
 (待 commit) refactor(p2): 把 LoadingInteractiveContent 搬到 features/reader/deep-read/
 (待 commit) refactor(p2): 把 8 个 shared 组件搬到 shared/{layout,auth,history,studio}/
@@ -387,26 +433,19 @@ aff6f3e 迁移到 Windows，准备开始屎山重构
 当前下一步
 ================================================================
 
-P2 阶段 3 第 2 批（features/review/，12 文件）已搬完，等用户验证 + commit。
+P2 阶段 3 第 3 批（features/exam/ 17 文件 + 修复 2 review 归类）已搬完，等用户验证 + commit。
 
 接下来按顺序：
 
-1. P2 阶段 3 第 3 批：features/exam/（19 文件，最后一个大模块）
-   - 候选：ExamCenterPanel, ExamDailyMaintenancePanel, ExamHubModal,
-           ExamLinkModal, ExamPredictionPanel, ExamSummaryPanel, ExamTrapsPanel,
-           ExamWorkspaceAssistantMarkdown, ExamWorkspaceCitationBlock,
-           ExamWorkspaceMaterialPreview, ExamWorkspacePage, ExamWorkspaceSocraticChat,
-           KcGlossarySidebar, KnowledgePointInspectPanel, MaintenanceFeedbackCelebration,
-           MaintenanceFlashcardDeck, StudyFlowPanel, WorkspaceEvidenceReportModal,
-           WorkspaceKcProbeModal
+1. galgame 2 文件（GalgameOverlay, GalgameSettings）归档/迁移收尾（mini commit）
+   —— 此后 components/ 目录清空，P2 阶段 3 正式收官
 
-2. galgame 2 文件（GalgameOverlay, GalgameSettings）归档/迁移收尾，可并入 exam 批次后续
+2. P2 阶段 4：utils → lib/ 重组（28 文件）
 
-3. P2 阶段 4：utils → lib/ 重组（28 文件）
-
-4. REFACTOR_PLAN.md 阶段 4：拆 App.tsx + SkimPanel.tsx 巨型组件
+3. REFACTOR_PLAN.md 阶段 4：拆 App.tsx + SkimPanel.tsx + ExamWorkspacePage(1492)
+   + ExamPredictionPanel(1035) + ExamWorkspaceMaterialPreview(996) 等巨型组件
 
 ================================================================
 本文档应在每次重大进度后更新。
-当前阶段：P2 阶段 3 第 2 批（features/review/ 12 文件）已搬完，待用户验证 + commit。
+当前阶段：P2 阶段 3 第 3 批（features/exam/ 17 文件 + 修复 2 review 归类错误，共 19 文件）已搬完，待用户验证 + commit。
 ================================================================

@@ -4,7 +4,7 @@
 
 | 符号 | 期望出现位置 |
 |------|----------------|
-| `chatWithAdaptiveTutor` | `services/geminiService.ts`（定义与注释）、`components/ExamWorkspaceSocraticChat.tsx`（备考苏格拉底）、`types.ts`（类型注释）、本文档与 `docs/P2_EXAM_WORKSPACE.md` / `README.md` 等说明 |
+| `chatWithAdaptiveTutor` | `services/geminiService.ts`（定义与注释）、`features/exam/workspace/ExamWorkspaceSocraticChat.tsx`（备考苏格拉底）、`types.ts`（类型注释）、本文档与 `docs/P2_EXAM_WORKSPACE.md` / `README.md` 等说明 |
 | `chatWithSkimAdaptiveTutor` | `services/geminiService.ts`（导出）、`features/reader/skim/SkimPanel.tsx`（略读对话） |
 
 **不应**：`SkimPanel.tsx` 出现 `chatWithAdaptiveTutor`。

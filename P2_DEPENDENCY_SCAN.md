@@ -148,7 +148,7 @@
 
 ### 命名扫描
 - `components/PageMarkPanel.tsx` ✓
-- `components/ExamWorkspaceAssistantMarkdown.tsx`（与 marks 无关，只是 markdown）
+- `features/exam/workspace/ExamWorkspaceAssistantMarkdown.tsx`（与 marks 无关，只是 markdown）
 - `utils/extractBoldTermsFromMarkdown.ts`（与 marks 无关）
 
 ### 风险标记
@@ -239,8 +239,8 @@
 | 6 | [FeynmanPanel.tsx](features/review/tools/FeynmanPanel.tsx) | ✓ |
 | 7 | [TrickyProfessorPanel.tsx](features/review/tools/TrickyProfessorPanel.tsx) | ✓ |
 | 8 | [TrapListPanel.tsx](features/review/tools/TrapListPanel.tsx) | ✓ |
-| 9 | [ExamSummaryPanel.tsx](components/ExamSummaryPanel.tsx) | ✓ |
-| 10 | [ExamTrapsPanel.tsx](components/ExamTrapsPanel.tsx) | ✓ |
+| 9 | [ExamSummaryPanel.tsx](features/review/tools/ExamSummaryPanel.tsx) | ✓ |
+| 10 | [ExamTrapsPanel.tsx](features/review/tools/ExamTrapsPanel.tsx) | ✓ |
 | 11 | [MultiDocQAPanel.tsx](features/review/tools/MultiDocQAPanel.tsx) | ✓ |
 | 12 | [StudioPanel.tsx](shared/studio/StudioPanel.tsx) | ✓ |
 | 13 | [SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | ✓ |
@@ -315,36 +315,36 @@
 
 | # | 文件 | 状态 |
 |---|------|------|
-| 1 | [ExamHubModal.tsx](components/ExamHubModal.tsx) | ✓ |
-| 2 | [ExamCenterPanel.tsx](components/ExamCenterPanel.tsx) | ✓ |
-| 3 | [ExamLinkModal.tsx](components/ExamLinkModal.tsx) | ✓ |
-| 4 | [ExamDailyMaintenancePanel.tsx](components/ExamDailyMaintenancePanel.tsx) | ✓ |
-| 5 | [MaintenanceFlashcardDeck.tsx](components/MaintenanceFlashcardDeck.tsx) | ✓ |
-| 6 | [MaintenanceFeedbackCelebration.tsx](components/MaintenanceFeedbackCelebration.tsx) | ✓ |
-| 7 | [StudyFlowPanel.tsx](components/StudyFlowPanel.tsx) | ✓（在 ExamHubModal 第 3 个 tab） |
-| 8 | [ExamPredictionPanel.tsx](components/ExamPredictionPanel.tsx) | ✓ |
-| 9 | [ExamWorkspacePage.tsx](components/ExamWorkspacePage.tsx) | ✓ |
-| 10 | [ExamWorkspaceSocraticChat.tsx](components/ExamWorkspaceSocraticChat.tsx) | ✓ |
-| 11 | [ExamWorkspaceAssistantMarkdown.tsx](components/ExamWorkspaceAssistantMarkdown.tsx) | ✓ |
-| 12 | [ExamWorkspaceCitationBlock.tsx](components/ExamWorkspaceCitationBlock.tsx) | ✓ |
-| 13 | [ExamWorkspaceMaterialPreview.tsx](components/ExamWorkspaceMaterialPreview.tsx) | ✓ |
-| 14 | [KcGlossarySidebar.tsx](components/KcGlossarySidebar.tsx) | ✓ |
-| 15 | [KnowledgePointInspectPanel.tsx](components/KnowledgePointInspectPanel.tsx) | ✓ |
-| 16 | [WorkspaceKcProbeModal.tsx](components/WorkspaceKcProbeModal.tsx) | ✓ |
-| 17 | [WorkspaceEvidenceReportModal.tsx](components/WorkspaceEvidenceReportModal.tsx) | ✓ |
-| ➕ | [ExamSummaryPanel.tsx](components/ExamSummaryPanel.tsx)、[ExamTrapsPanel.tsx](components/ExamTrapsPanel.tsx) | 名字带 Exam 但**实际从九宫格触发**，归 `features/review/`。本模块**不应**包含。 |
+| 1 | [ExamHubModal.tsx](features/exam/ExamHubModal.tsx) | ✓ |
+| 2 | [ExamCenterPanel.tsx](features/exam/hub/ExamCenterPanel.tsx) | ✓ |
+| 3 | [ExamLinkModal.tsx](features/exam/hub/ExamLinkModal.tsx) | ✓ |
+| 4 | [ExamDailyMaintenancePanel.tsx](features/exam/hub/ExamDailyMaintenancePanel.tsx) | ✓ |
+| 5 | [MaintenanceFlashcardDeck.tsx](features/exam/hub/MaintenanceFlashcardDeck.tsx) | ✓ |
+| 6 | [MaintenanceFeedbackCelebration.tsx](features/exam/hub/MaintenanceFeedbackCelebration.tsx) | ✓ |
+| 7 | [StudyFlowPanel.tsx](features/exam/hub/StudyFlowPanel.tsx) | ✓（在 ExamHubModal 第 3 个 tab） |
+| 8 | [ExamPredictionPanel.tsx](features/exam/ExamPredictionPanel.tsx) | ✓ |
+| 9 | [ExamWorkspacePage.tsx](features/exam/workspace/ExamWorkspacePage.tsx) | ✓ |
+| 10 | [ExamWorkspaceSocraticChat.tsx](features/exam/workspace/ExamWorkspaceSocraticChat.tsx) | ✓ |
+| 11 | [ExamWorkspaceAssistantMarkdown.tsx](features/exam/workspace/ExamWorkspaceAssistantMarkdown.tsx) | ✓ |
+| 12 | [ExamWorkspaceCitationBlock.tsx](features/exam/workspace/ExamWorkspaceCitationBlock.tsx) | ✓ |
+| 13 | [ExamWorkspaceMaterialPreview.tsx](features/exam/workspace/ExamWorkspaceMaterialPreview.tsx) | ✓ |
+| 14 | [KcGlossarySidebar.tsx](features/exam/workspace/KcGlossarySidebar.tsx) | ✓ |
+| 15 | [KnowledgePointInspectPanel.tsx](features/exam/workspace/KnowledgePointInspectPanel.tsx) | ✓ |
+| 16 | [WorkspaceKcProbeModal.tsx](features/exam/workspace/WorkspaceKcProbeModal.tsx) | ✓ |
+| 17 | [WorkspaceEvidenceReportModal.tsx](features/exam/workspace/WorkspaceEvidenceReportModal.tsx) | ✓ |
+| ➕ | [ExamSummaryPanel.tsx](features/review/tools/ExamSummaryPanel.tsx)、[ExamTrapsPanel.tsx](features/review/tools/ExamTrapsPanel.tsx) | 名字带 Exam 但**实际从九宫格触发**，归 `features/review/`。本模块**不应**包含。 |
 
 ### 17 个组件之间的依赖关系
 
 | 关系 | 来源文件 |
 |---|---|
-| ExamHubModal → ExamCenterPanel + ExamDailyMaintenancePanel + StudyFlowPanel | [ExamHubModal.tsx:6-8](components/ExamHubModal.tsx) |
-| ExamCenterPanel → ExamLinkModal | [ExamCenterPanel.tsx:6](components/ExamCenterPanel.tsx) |
-| ExamDailyMaintenancePanel → MaintenanceFlashcardDeck + MaintenanceFeedbackCelebration | [ExamDailyMaintenancePanel.tsx:20-21](components/ExamDailyMaintenancePanel.tsx) |
-| ExamWorkspacePage → ExamWorkspaceSocraticChat + KcGlossarySidebar + KnowledgePointInspectPanel + WorkspaceKcProbeModal + WorkspaceEvidenceReportModal + ExamWorkspaceMaterialPreview | [ExamWorkspacePage.tsx:37-42](components/ExamWorkspacePage.tsx) |
-| ExamWorkspaceSocraticChat → ExamWorkspaceAssistantMarkdown + ExamWorkspaceCitationBlock | [ExamWorkspaceSocraticChat.tsx:38-39](components/ExamWorkspaceSocraticChat.tsx) |
-| ExamWorkspaceAssistantMarkdown → ExamWorkspaceCitationBlock | [ExamWorkspaceAssistantMarkdown.tsx:12](components/ExamWorkspaceAssistantMarkdown.tsx) |
-| WorkspaceKcProbeModal → 内部 import `ConflictPageHint` from WorkspaceEvidenceReportModal | [WorkspaceKcProbeModal.tsx:18](components/WorkspaceKcProbeModal.tsx) |
+| ExamHubModal → ExamCenterPanel + ExamDailyMaintenancePanel + StudyFlowPanel | [ExamHubModal.tsx:6-8](features/exam/ExamHubModal.tsx) |
+| ExamCenterPanel → ExamLinkModal | [ExamCenterPanel.tsx:6](features/exam/hub/ExamCenterPanel.tsx) |
+| ExamDailyMaintenancePanel → MaintenanceFlashcardDeck + MaintenanceFeedbackCelebration | [ExamDailyMaintenancePanel.tsx:20-21](features/exam/hub/ExamDailyMaintenancePanel.tsx) |
+| ExamWorkspacePage → ExamWorkspaceSocraticChat + KcGlossarySidebar + KnowledgePointInspectPanel + WorkspaceKcProbeModal + WorkspaceEvidenceReportModal + ExamWorkspaceMaterialPreview | [ExamWorkspacePage.tsx:37-42](features/exam/workspace/ExamWorkspacePage.tsx) |
+| ExamWorkspaceSocraticChat → ExamWorkspaceAssistantMarkdown + ExamWorkspaceCitationBlock | [ExamWorkspaceSocraticChat.tsx:38-39](features/exam/workspace/ExamWorkspaceSocraticChat.tsx) |
+| ExamWorkspaceAssistantMarkdown → ExamWorkspaceCitationBlock | [ExamWorkspaceAssistantMarkdown.tsx:12](features/exam/workspace/ExamWorkspaceAssistantMarkdown.tsx) |
+| WorkspaceKcProbeModal → 内部 import `ConflictPageHint` from WorkspaceEvidenceReportModal | [WorkspaceKcProbeModal.tsx:18](features/exam/workspace/WorkspaceKcProbeModal.tsx) |
 | ExamPredictionPanel | 与上述 17 个组件**无横向 import 关系**——它独立于 workspace + maintenance + center 子树 |
 
 ✅ **无循环依赖**。

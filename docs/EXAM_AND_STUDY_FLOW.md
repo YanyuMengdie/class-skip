@@ -11,17 +11,17 @@
 | `utils/examSchedule.ts` | `buildDailyPlan` |
 | `utils/studyFlowInference.ts` | `inferFamiliarity`、`inferUrgencyForFile`、`buildScenarioKey` |
 | `data/studyFlowTemplates.ts` | 预置 ≥8 套情境模板 |
-| `components/ExamHubModal.tsx` | 考试 / 今日学习 / 情境流程 三标签壳 |
-| `components/ExamCenterPanel.tsx` | 考试 CRUD、材料列表、关联入口 |
-| `components/ExamLinkModal.tsx` | 当前文件挂到多场考试 |
-| `components/ExamDailyMaintenancePanel.tsx` | 今日学习低压保温主流程（gate + 闪卡 + 分支 + Quiz + 正反馈） |
+| `features/exam/ExamHubModal.tsx` | 考试 / 今日学习 / 情境流程 三标签壳 |
+| `features/exam/hub/ExamCenterPanel.tsx` | 考试 CRUD、材料列表、关联入口 |
+| `features/exam/hub/ExamLinkModal.tsx` | 当前文件挂到多场考试 |
+| `features/exam/hub/ExamDailyMaintenancePanel.tsx` | 今日学习低压保温主流程（gate + 闪卡 + 分支 + Quiz + 正反馈） |
 | `docs/P1_EXAM_MAINTENANCE.md` | P1：Firestore `disciplineBand`、缓存 key、`LearnerMood` 与 Study Flow 映射说明 |
-| `components/MaintenanceFlashcardDeck.tsx` | 轻量闪卡浏览器（不跳全屏） |
-| `components/MaintenanceFeedbackCelebration.tsx` | 分层正反馈面板 |
+| `features/exam/hub/MaintenanceFlashcardDeck.tsx` | 轻量闪卡浏览器（不跳全屏） |
+| `features/exam/hub/MaintenanceFeedbackCelebration.tsx` | 分层正反馈面板 |
 | `utils/examMaintenanceEligibility.ts` | sprint / warning / daily gate 资格判定 |
 | `data/maintenanceFeedbackCopy.ts` | 反馈文案常量与模板函数 |
-| `components/StudyFlowPanel.tsx` | 情境选择与步骤执行 |
-| `components/ExamPredictionPanel.tsx` | `initialKCId` 深链 |
+| `features/exam/hub/StudyFlowPanel.tsx` | 情境选择与步骤执行 |
+| `features/exam/ExamPredictionPanel.tsx` | `initialKCId` 深链 |
 | `shared/layout/Header.tsx` | 「考试」入口 |
 | `App.tsx` | `navigateToSegment`、`navigateStudyFlowStep`、挂载 `ExamHubModal` |
 | `firestore.rules` | 示例规则（部署时需合并到现有项目规则） |

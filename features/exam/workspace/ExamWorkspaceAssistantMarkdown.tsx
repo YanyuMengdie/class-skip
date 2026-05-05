@@ -9,7 +9,7 @@ import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import type { ExamMaterialLink } from '@/types';
 import type { ExamWorkspaceCitation } from '@/utils/examWorkspaceCitations';
-import { ExamWorkspaceCitationBlock, type OpenMaterialPageOptions } from '@/components/ExamWorkspaceCitationBlock';
+import { ExamWorkspaceCitationBlock, type OpenMaterialPageOptions } from '@/features/exam/workspace/ExamWorkspaceCitationBlock';
 
 const SkipBlockIndexContext = createContext(false);
 

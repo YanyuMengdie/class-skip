@@ -75,9 +75,9 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 内部依赖（同模块） | 跨模块依赖 |
 |---|---|---|---|---|
-| [components/ExamHubModal.tsx](components/ExamHubModal.tsx) | 130 | 模态（带 tab 路由） | ExamCenterPanel、ExamDailyMaintenancePanel、StudyFlowPanel | services/firebase |
-| [components/ExamCenterPanel.tsx](components/ExamCenterPanel.tsx) | 321 | 主 | ExamLinkModal | services/firebase |
-| [components/ExamLinkModal.tsx](components/ExamLinkModal.tsx) | 565 | 模态 | — | services/firebase、services/storageService |
+| [features/exam/ExamHubModal.tsx](features/exam/ExamHubModal.tsx) | 130 | 模态（带 tab 路由） | ExamCenterPanel、ExamDailyMaintenancePanel、StudyFlowPanel | services/firebase |
+| [features/exam/hub/ExamCenterPanel.tsx](features/exam/hub/ExamCenterPanel.tsx) | 321 | 主 | ExamLinkModal | services/firebase |
+| [features/exam/hub/ExamLinkModal.tsx](features/exam/hub/ExamLinkModal.tsx) | 565 | 模态 | — | services/firebase、services/storageService |
 
 ### 1.2 features/exam/workspace/
 
@@ -85,15 +85,15 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 内部依赖 | 跨模块依赖 |
 |---|---|---|---|---|
-| [components/ExamWorkspacePage.tsx](components/ExamWorkspacePage.tsx) | 1,492 | 主 | ExamWorkspaceSocraticChat、KcGlossarySidebar、KnowledgePointInspectPanel、WorkspaceKcProbeModal、WorkspaceEvidenceReportModal、ExamWorkspaceMaterialPreview | utils/examWorkspaceLsapKey、utils/examChunkIndex、utils/examChunkRetrieval、services/firebase、services/examChunkIndexStorage |
-| [components/ExamWorkspaceSocraticChat.tsx](components/ExamWorkspaceSocraticChat.tsx) | 780 | 主（子页面级） | ExamWorkspaceCitationBlock、ExamWorkspaceAssistantMarkdown | utils/extractBoldTermsFromMarkdown、utils/glossaryTermFilter、utils/scaffoldingClassifier、utils/examWorkspaceOrchestrator、utils/examWorkspaceLsapKey、utils/examWorkspaceCitations、utils/examChunkRetrieval、services/examChunkIndexStorage、services/geminiService |
-| [components/ExamWorkspaceAssistantMarkdown.tsx](components/ExamWorkspaceAssistantMarkdown.tsx) | 261 | 子 | ExamWorkspaceCitationBlock | utils/examWorkspaceCitations |
-| [components/ExamWorkspaceCitationBlock.tsx](components/ExamWorkspaceCitationBlock.tsx) | 273 | 子 | — | utils/examWorkspaceCitations |
-| [components/ExamWorkspaceMaterialPreview.tsx](components/ExamWorkspaceMaterialPreview.tsx) | 996 | 子（PDF 预览专用） | — | utils/pdfUtils、utils/pdfQuoteHighlight |
-| [components/KcGlossarySidebar.tsx](components/KcGlossarySidebar.tsx) | 92 | 子 | — | — |
-| [components/KnowledgePointInspectPanel.tsx](components/KnowledgePointInspectPanel.tsx) | 95 | 子（modal） | — | — |
-| [components/WorkspaceKcProbeModal.tsx](components/WorkspaceKcProbeModal.tsx) | 362 | 模态 | WorkspaceEvidenceReportModal（其中的 ConflictPageHint） | utils/bkt、utils/lsapScore、services/geminiService |
-| [components/WorkspaceEvidenceReportModal.tsx](components/WorkspaceEvidenceReportModal.tsx) | 321 | 模态 | — | utils/examWorkspaceLsapKey |
+| [features/exam/workspace/ExamWorkspacePage.tsx](features/exam/workspace/ExamWorkspacePage.tsx) | 1,492 | 主 | ExamWorkspaceSocraticChat、KcGlossarySidebar、KnowledgePointInspectPanel、WorkspaceKcProbeModal、WorkspaceEvidenceReportModal、ExamWorkspaceMaterialPreview | utils/examWorkspaceLsapKey、utils/examChunkIndex、utils/examChunkRetrieval、services/firebase、services/examChunkIndexStorage |
+| [features/exam/workspace/ExamWorkspaceSocraticChat.tsx](features/exam/workspace/ExamWorkspaceSocraticChat.tsx) | 780 | 主（子页面级） | ExamWorkspaceCitationBlock、ExamWorkspaceAssistantMarkdown | utils/extractBoldTermsFromMarkdown、utils/glossaryTermFilter、utils/scaffoldingClassifier、utils/examWorkspaceOrchestrator、utils/examWorkspaceLsapKey、utils/examWorkspaceCitations、utils/examChunkRetrieval、services/examChunkIndexStorage、services/geminiService |
+| [features/exam/workspace/ExamWorkspaceAssistantMarkdown.tsx](features/exam/workspace/ExamWorkspaceAssistantMarkdown.tsx) | 261 | 子 | ExamWorkspaceCitationBlock | utils/examWorkspaceCitations |
+| [features/exam/workspace/ExamWorkspaceCitationBlock.tsx](features/exam/workspace/ExamWorkspaceCitationBlock.tsx) | 273 | 子 | — | utils/examWorkspaceCitations |
+| [features/exam/workspace/ExamWorkspaceMaterialPreview.tsx](features/exam/workspace/ExamWorkspaceMaterialPreview.tsx) | 996 | 子（PDF 预览专用） | — | utils/pdfUtils、utils/pdfQuoteHighlight |
+| [features/exam/workspace/KcGlossarySidebar.tsx](features/exam/workspace/KcGlossarySidebar.tsx) | 92 | 子 | — | — |
+| [features/exam/workspace/KnowledgePointInspectPanel.tsx](features/exam/workspace/KnowledgePointInspectPanel.tsx) | 95 | 子（modal） | — | — |
+| [features/exam/workspace/WorkspaceKcProbeModal.tsx](features/exam/workspace/WorkspaceKcProbeModal.tsx) | 362 | 模态 | WorkspaceEvidenceReportModal（其中的 ConflictPageHint） | utils/bkt、utils/lsapScore、services/geminiService |
+| [features/exam/workspace/WorkspaceEvidenceReportModal.tsx](features/exam/workspace/WorkspaceEvidenceReportModal.tsx) | 321 | 模态 | — | utils/examWorkspaceLsapKey |
 
 🔀 **同名相似**：`ExamWorkspaceMaterialPreview` 与 `features/pdfReader/SlideViewer` 都是 PDF 渲染，但前者带"引文高亮 + 跨材料切换"，是工作台特有；不合并，留在 workspace。
 
@@ -101,15 +101,15 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 内部依赖 | 跨模块依赖 |
 |---|---|---|---|---|
-| [components/ExamDailyMaintenancePanel.tsx](components/ExamDailyMaintenancePanel.tsx) | 641 | 主 | MaintenanceFlashcardDeck、MaintenanceFeedbackCelebration | utils/examMaintenanceEligibility、utils/maintenanceStrategy、utils/examSchedule、data/maintenanceFeedbackCopy、services/firebase、services/geminiService |
-| [components/MaintenanceFlashcardDeck.tsx](components/MaintenanceFlashcardDeck.tsx) | 67 | 子 | — | — |
-| [components/MaintenanceFeedbackCelebration.tsx](components/MaintenanceFeedbackCelebration.tsx) | 44 | 子 | — | — |
+| [features/exam/hub/ExamDailyMaintenancePanel.tsx](features/exam/hub/ExamDailyMaintenancePanel.tsx) | 641 | 主 | MaintenanceFlashcardDeck、MaintenanceFeedbackCelebration | utils/examMaintenanceEligibility、utils/maintenanceStrategy、utils/examSchedule、data/maintenanceFeedbackCopy、services/firebase、services/geminiService |
+| [features/exam/hub/MaintenanceFlashcardDeck.tsx](features/exam/hub/MaintenanceFlashcardDeck.tsx) | 67 | 子 | — | — |
+| [features/exam/hub/MaintenanceFeedbackCelebration.tsx](features/exam/hub/MaintenanceFeedbackCelebration.tsx) | 44 | 子 | — | — |
 
 ### 1.4 features/exam/prediction/
 
 | 当前路径 | 行 | 定位 | 跨模块依赖 |
 |---|---|---|---|
-| [components/ExamPredictionPanel.tsx](components/ExamPredictionPanel.tsx) | 1,035 | 主 | utils/bkt、utils/lsapScore、services/geminiService |
+| [features/exam/ExamPredictionPanel.tsx](features/exam/ExamPredictionPanel.tsx) | 1,035 | 主 | utils/bkt、utils/lsapScore、services/geminiService |
 
 ### 1.5 features/exam/tools/（"备考小工具"集合）
 
@@ -117,8 +117,8 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 跨模块依赖 |
 |---|---|---|---|
-| [components/ExamSummaryPanel.tsx](components/ExamSummaryPanel.tsx) | 192 | 主 | services/geminiService |
-| [components/ExamTrapsPanel.tsx](components/ExamTrapsPanel.tsx) | 98 | 主 | services/geminiService |
+| [features/review/tools/ExamSummaryPanel.tsx](features/review/tools/ExamSummaryPanel.tsx) | 192 | 主 | services/geminiService |
+| [features/review/tools/ExamTrapsPanel.tsx](features/review/tools/ExamTrapsPanel.tsx) | 98 | 主 | services/geminiService |
 | [features/review/tools/TrapListPanel.tsx](features/review/tools/TrapListPanel.tsx) | 78 | 子 | — |
 | [features/review/tools/TerminologyPanel.tsx](features/review/tools/TerminologyPanel.tsx) | 120 | 主 | services/geminiService |
 | [features/review/tools/StudyGuidePanel.tsx](features/review/tools/StudyGuidePanel.tsx) | 205 | 主 | services/geminiService |
@@ -128,7 +128,7 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 跨模块依赖 |
 |---|---|---|---|
-| [components/StudyFlowPanel.tsx](components/StudyFlowPanel.tsx) | 260 | 主 | utils/studyFlowInference、data/studyFlowTemplates |
+| [features/exam/hub/StudyFlowPanel.tsx](features/exam/hub/StudyFlowPanel.tsx) | 260 | 主 | utils/studyFlowInference、data/studyFlowTemplates |
 
 ### 1.7 features/skim/
 
@@ -378,7 +378,7 @@ class-skip/
 | [utils/glossaryTermFilter.ts](utils/glossaryTermFilter.ts) | ExamWorkspaceSocraticChat | lib/text/ vs features/exam/workspace/lib/ | **lib/text/**（通用术语过滤；当前虽然只工作台用，但语义通用） |
 | [utils/scaffoldingClassifier.ts](utils/scaffoldingClassifier.ts) | ExamWorkspaceSocraticChat、services/geminiService | lib/scaffolding/ vs features/exam/workspace/lib/ | **lib/scaffolding/**（被 geminiService 跨域用，不该绑 feature） |
 | [shared/layout/MusicPlayer.tsx](shared/layout/MusicPlayer.tsx) | 仅 Header 一家 | shared/audio/ vs shared/layout/ | **shared/layout/**（与 Header 同居，单一调用方） |
-| [components/StudyFlowPanel.tsx](components/StudyFlowPanel.tsx) | 仅 ExamHubModal | features/exam/studyFlow/ vs 顶层独立 feature | **features/exam/studyFlow/**（实际是 ExamHub 第三个 tab） |
+| [features/exam/hub/StudyFlowPanel.tsx](features/exam/hub/StudyFlowPanel.tsx) | 仅 ExamHubModal | features/exam/studyFlow/ vs 顶层独立 feature | **features/exam/studyFlow/**（实际是 ExamHub 第三个 tab） |
 | [services/storageService.ts](services/storageService.ts) | App、ExamLinkModal、ReviewPage | lib/storage/ vs features/studio/lib/ | **lib/storage/**（IndexedDB 通用层） |
 
 ### ⚠️ 难以归类（需要你说明产品意图）

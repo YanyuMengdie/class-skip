@@ -15,7 +15,7 @@ import {
 } from '@/services/geminiService';
 import { updateBKT } from '@/utils/bkt';
 import { computePredictedScore } from '@/utils/lsapScore';
-import { ConflictPageHint } from '@/components/WorkspaceEvidenceReportModal';
+import { ConflictPageHint } from '@/features/exam/workspace/WorkspaceEvidenceReportModal';
 
 export function bloomLevelForWorkspaceProbe(kc: LSAPKnowledgeComponent): number {
   return Math.min(3, Math.max(1, kc.bloomTargetLevel ?? 1));

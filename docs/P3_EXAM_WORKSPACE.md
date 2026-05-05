@@ -21,8 +21,8 @@
 
 - `utils/examWorkspaceCitations.ts` — 解析可选字段
 - `services/geminiService.ts` — `buildExamWorkspaceCitationInstruction`
-- `components/ExamWorkspaceAssistantMarkdown.tsx` — 分块 + 底部未索引回退
-- `components/ExamWorkspaceSocraticChat.tsx` — `forwardRef` + `scrollToParagraphBlock`
-- `components/ExamWorkspaceMaterialPreview.tsx` — 高亮层 + 回到段落
-- `components/ExamWorkspacePage.tsx` — 跳转 state 与回调
+- `features/exam/workspace/ExamWorkspaceAssistantMarkdown.tsx` — 分块 + 底部未索引回退
+- `features/exam/workspace/ExamWorkspaceSocraticChat.tsx` — `forwardRef` + `scrollToParagraphBlock`
+- `features/exam/workspace/ExamWorkspaceMaterialPreview.tsx` — 高亮层 + 回到段落
+- `features/exam/workspace/ExamWorkspacePage.tsx` — 跳转 state 与回调
 - `utils/pdfQuoteHighlight.ts` — 文本匹配与矩形
