@@ -71,6 +71,38 @@ export function mergeAtomCoverageForMap(
 }
 
 /**
+ * 从 atomId 反查所属 kcId。
+ *
+ * 实现约定：仅基于 LogicAtom 在 KC 内的物理归属（即遍历 `kc.atoms` 查 `atom.id === atomId`），
+ * **禁止**通过 atomId 字符串解析（如 split/正则/前缀切分）推断 kcId——atomId 格式
+ * `atom-${kc.id}-${index}` 是生成约定，不可作为反查依据，未来格式调整不应破坏调用方。
+ *
+ * 命中即返回 KC.id；遍历完所有 KC 仍未命中返回 null（让调用方决定如何处理"野生 atom"）。
+ *
+ * 用途（阶段 1 仅声明，阶段 3 才被多选 coverage 分发逻辑消费）：
+ * 多选 KC 对话路径下，AI 一次返回的 coveredAtomIds 可能横跨多个 KC，
+ * 客户端需按本函数把每个 atomId 归到正确的 KC 行（再交给原 mergeCoverageForKc 写入）。
+ *
+ * 时间复杂度 O(K × A)，K=KC 数，A=平均 atom 数；
+ * 30 KC × 5 atom 量级下 microsecond 级，无需引入派生反向索引（YAGNI）。
+ *
+ * @param atomId 待反查的 atom id
+ * @param contentMap workspaceLsapContentMap（KC 列表数据源）
+ * @returns 所属 kc.id；若 atom 不存在于任何 KC 则返回 null
+ */
+export function lookupKcIdByAtomId(
+  atomId: string,
+  contentMap: LSAPContentMap
+): string | null {
+  for (const kc of contentMap.kcs) {
+    if (kc.atoms?.some((a) => a.id === atomId)) {
+      return kc.id;
+    }
+  }
+  return null;
+}
+
+/**
  * 本场备考工作台 LSAP 稳定键（与合并材料顺序一致；材料 link 集合变化则键变）。
  * 格式：`workspace-lsap-<hash>`
  */

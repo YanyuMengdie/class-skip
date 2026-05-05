@@ -199,6 +199,15 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
   const [mergedError, setMergedError] = useState<string | null>(null);
 
   const [selectedKcId, setSelectedKcId] = useState<string | null>(null);
+  /**
+   * 多选 KC 对话（阶段 1：仅声明，本阶段不被任何 effect/UI/handler 消费；
+   * 阶段 2 接入 toggle 交互；阶段 3 接通对话与 atom coverage 分发）。
+   * 与 selectedKcId 并存——单 KC 路径仍以 selectedKcId 为唯一驱动源。
+   * 详见 docs/plans/MULTISELECT_KC_PLAN.md §3 阶段 1。
+   */
+  const [selectedKcIds, setSelectedKcIds] = useState<string[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const isMultiSelectMode = selectedKcIds.length >= 1;
   /** M3：勾选后对话不锚定 KC，行为同 M3 前；默认不勾选（锚定考点，默认第一项 KC） */
   const [wholeBookMode, setWholeBookMode] = useState(false);
   /** Tier3「满分细节」列表默认折叠；选中 Tier3 考点时自动展开以便看到选中态 */
