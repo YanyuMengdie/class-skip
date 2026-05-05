@@ -4,7 +4,7 @@ import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings
 import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProfiles";
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/utils/scaffoldingClassifier";
-import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "@/utils/prompts";
+import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "@/lib/prompts/systemPrompts";
 
 // Ensure API Key exists or fail gracefully in logs (though process.env check is assumed handled elsewhere)
 const apiKey = process.env.API_KEY || "";

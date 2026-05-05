@@ -39,7 +39,7 @@ import { ExamPredictionPanel } from '@/features/exam/ExamPredictionPanel';
 import { ExamHubModal } from '@/features/exam/ExamHubModal';
 import { ExamWorkspacePage } from '@/features/exam/workspace/ExamWorkspacePage';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from '@/utils/pdfUtils';
-import { buildArtifactSourceLabel } from '@/utils/artifactSourceLabel';
+import { buildArtifactSourceLabel } from '@/shared/lib/artifactSourceLabel';
 import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap } from '@/services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from '@/services/transcriptionService';
 import { storageService } from '@/services/storageService';

@@ -14,8 +14,8 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import type { MindMapNode } from '@/types';
-import { MIND_MAP_FLOW_NODE_TYPE, mindMapNodeToFlow, type MindMapFlowNodeData, type MindMapFlowNodeHandlers } from '@/utils/mindMapFlowAdapter';
-import { layoutFlowForest } from '@/utils/mindMapElkLayout';
+import { MIND_MAP_FLOW_NODE_TYPE, mindMapNodeToFlow, type MindMapFlowNodeData, type MindMapFlowNodeHandlers } from '@/features/review/lib/mindMap/mindMapFlowAdapter';
+import { layoutFlowForest } from '@/features/review/lib/mindMap/mindMapElkLayout';
 import { MindMapFlowNode } from '@/features/review/tools/mindMap/MindMapFlowNode';
 
 export type MindMapFlowCanvasRef = {

@@ -14,7 +14,7 @@
 | API | 用途 | system / 附录 |
 |-----|------|----------------|
 | `chatWithAdaptiveTutor` | 备考工作台苏格拉底等 | 教学法 `buildDialogueTeachingSystemPrompt` + 可选 citations、chunk、KC、支架 |
-| `chatWithSkimAdaptiveTutor` | 仅略读 / 智能导读（`SkimPanel`） | `STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT`（`utils/prompts.ts`），无备考附录 |
+| `chatWithSkimAdaptiveTutor` | 仅略读 / 智能导读（`SkimPanel`） | `STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT`（`lib/prompts/systemPrompts.ts`），无备考附录 |
 
 共享逻辑：`appendReadingModeUserMessageSuffix` 用于 reading 模式对用户句的追加（`chatWithAdaptiveTutor` 与 `chatWithSkimAdaptiveTutor` 的 reading 分支一致）。
 

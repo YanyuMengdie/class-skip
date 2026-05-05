@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Image as ImageIcon, Coffee, X, Download, StickyNote, GripHorizontal, Minus, Plus, Scaling, Move, Bold, ZoomIn, ZoomOut, Maximize2, ChevronDown } from 'lucide-react';
 import { Slide, SlideAnnotation } from '@/types';
-import { plainTextToHtmlWithSupSub } from '@/utils/textUtils';
+import { plainTextToHtmlWithSupSub } from '@/features/reader/lib/textUtils';
 
 interface SlideViewerProps {
   slide: Slide | undefined;

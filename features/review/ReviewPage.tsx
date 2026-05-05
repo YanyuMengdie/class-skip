@@ -4,10 +4,10 @@ import { User } from 'firebase/auth';
 import { getUserSessions, fetchSessionDetails, updateCloudSessionState } from '@/services/firebase';
 import { CloudSession } from '@/types';
 import { storageService } from '@/services/storageService';
-import { collectSavedArtifactsFromLocalHistory } from '@/utils/collectSavedArtifactsFromLocalHistory';
-import { collectSavedArtifactsFromCloudSessions } from '@/utils/collectSavedArtifactsFromCloud';
-import { mergeLocalAndCloudArtifacts, type MergedLibraryEntry } from '@/utils/mergeArtifactLibraries';
-import { SAVED_ARTIFACT_TYPE_META as TYPE_META, formatSavedArtifactTime as formatTime } from '@/utils/savedArtifactMeta';
+import { collectSavedArtifactsFromLocalHistory } from '@/features/review/lib/artifacts/collectSavedArtifactsFromLocalHistory';
+import { collectSavedArtifactsFromCloudSessions } from '@/features/review/lib/artifacts/collectSavedArtifactsFromCloud';
+import { mergeLocalAndCloudArtifacts, type MergedLibraryEntry } from '@/features/review/lib/artifacts/mergeArtifactLibraries';
+import { SAVED_ARTIFACT_TYPE_META as TYPE_META, formatSavedArtifactTime as formatTime } from '@/shared/lib/savedArtifactMeta';
 import { ArtifactFullView } from '@/shared/studio/SavedArtifactPreview';
 
 export type ReviewType =

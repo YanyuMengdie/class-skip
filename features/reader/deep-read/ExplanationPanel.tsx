@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { Sparkles, RefreshCw, Send, Image as ImageIcon, MessageSquare, X, Heart, HelpCircle, Highlighter, Plus, GripHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ChatMessage } from '@/types';
-import { plainTextToHtmlWithSupSub, normalizeSelectionText, dedupeHtml } from '@/utils/textUtils';
+import { plainTextToHtmlWithSupSub, normalizeSelectionText, dedupeHtml } from '@/features/reader/lib/textUtils';
 import { LoadingInteractiveContent } from '@/features/reader/deep-read/LoadingInteractiveContent';
 
 interface ExplanationPanelProps {

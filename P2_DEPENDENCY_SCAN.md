@@ -295,10 +295,10 @@
 |---|---|
 | [features/review/tools/mindMap/MindMapFlowCanvas.tsx](features/review/tools/mindMap/MindMapFlowCanvas.tsx)（206 行） | MindMapPanel 内部子件，必须一起搬 |
 | [features/review/tools/mindMap/MindMapFlowNode.tsx](features/review/tools/mindMap/MindMapFlowNode.tsx)（155 行） | 同上 |
-| [utils/mindMapFlowAdapter.ts](utils/mindMapFlowAdapter.ts) + [mindMapElkLayout.ts](utils/mindMapElkLayout.ts) + [mindMapLabel.ts](utils/mindMapLabel.ts) + [mindMapLayout.ts](utils/mindMapLayout.ts) + [mindMapScope.ts](utils/mindMapScope.ts) | 思维导图私有算法（5 文件，均仅供 MindMapPanel 使用），归 `features/review/tools/mindmap/lib/` |
-| [utils/savedArtifactMeta.tsx](utils/savedArtifactMeta.tsx) | 被 ReviewPage、StudioPanel、SavedArtifactPreview 三家共用，应放 `features/review/lib/` 内部共享层 |
-| [utils/collectSavedArtifactsFromLocalHistory.ts](utils/collectSavedArtifactsFromLocalHistory.ts) + [collectSavedArtifactsFromCloud.ts](utils/collectSavedArtifactsFromCloud.ts) + [mergeArtifactLibraries.ts](utils/mergeArtifactLibraries.ts) | 仅被 ReviewPage 用，归 `features/review/lib/` |
-| [utils/artifactSourceLabel.ts](utils/artifactSourceLabel.ts) | 被 App.tsx 用，**不归 review**，留 `lib/` 或 App 共享层 |
+| [features/review/lib/mindMap/mindMapFlowAdapter.ts](features/review/lib/mindMap/mindMapFlowAdapter.ts) + [mindMapElkLayout.ts](features/review/lib/mindMap/mindMapElkLayout.ts) + [mindMapLabel.ts](features/review/lib/mindMap/mindMapLabel.ts) + [mindMapLayout.ts](features/review/lib/mindMap/mindMapLayout.ts) + [mindMapScope.ts](features/review/lib/mindMap/mindMapScope.ts) | 思维导图私有算法（5 文件，均仅供 MindMapPanel 使用），归 `features/review/tools/mindmap/lib/` |
+| [shared/lib/savedArtifactMeta.tsx](shared/lib/savedArtifactMeta.tsx) | 被 ReviewPage、StudioPanel、SavedArtifactPreview 三家共用，应放 `features/review/lib/` 内部共享层 |
+| [features/review/lib/artifacts/collectSavedArtifactsFromLocalHistory.ts](features/review/lib/artifacts/collectSavedArtifactsFromLocalHistory.ts) + [collectSavedArtifactsFromCloud.ts](features/review/lib/artifacts/collectSavedArtifactsFromCloud.ts) + [mergeArtifactLibraries.ts](features/review/lib/artifacts/mergeArtifactLibraries.ts) | 仅被 ReviewPage 用，归 `features/review/lib/` |
+| [shared/lib/artifactSourceLabel.ts](shared/lib/artifactSourceLabel.ts) | 被 App.tsx 用，**不归 review**，留 `lib/` 或 App 共享层 |
 
 ### 风险标记
 - ⚠️ **review 是聚合超大模块**——总计 13 主件 + 2 mindmap 子件 + 5 mindmap utils + 4 saved-artifact utils = **24 个文件**。

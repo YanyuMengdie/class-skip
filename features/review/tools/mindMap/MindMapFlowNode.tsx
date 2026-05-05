@@ -2,9 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { Node } from '@xyflow/react';
 import { Plus, PenLine, Trash2, Check } from 'lucide-react';
-import type { MindMapFlowNodeData } from '@/utils/mindMapFlowAdapter';
-import { mindMapFlowNodeId } from '@/utils/mindMapFlowAdapter';
-import { getMindMapNodeLabel } from '@/utils/mindMapLabel';
+import type { MindMapFlowNodeData } from '@/features/review/lib/mindMap/mindMapFlowAdapter';
+import { mindMapFlowNodeId } from '@/features/review/lib/mindMap/mindMapFlowAdapter';
+import { getMindMapNodeLabel } from '@/features/review/lib/mindMap/mindMapLabel';
 import type { MindMapNode } from '@/types';
 
 const BRANCH_COLORS = [

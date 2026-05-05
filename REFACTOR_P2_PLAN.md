@@ -227,7 +227,7 @@ class-skip/
 
 ### 1.20 features/studio/ + features/review/
 
-> 🤔 **跨模块**：`SavedArtifactPreview` 同时被 StudioPanel 和 ReviewPage import；`utils/savedArtifactMeta.tsx` 三处使用。两个 feature 共用，但都属于"保存产物"领域，可以放在 `features/studio/`，让 review 反向 import；或者抽 `features/artifacts/` 共享层。**决策点**：见 §3.
+> 🤔 **跨模块**：`SavedArtifactPreview` 同时被 StudioPanel 和 ReviewPage import；`shared/lib/savedArtifactMeta.tsx` 三处使用。两个 feature 共用，但都属于"保存产物"领域，可以放在 `features/studio/`，让 review 反向 import；或者抽 `features/artifacts/` 共享层。**决策点**：见 §3.
 
 | 当前路径 | 行 | 定位 | 内部依赖 | 跨模块依赖 |
 |---|---|---|---|---|
@@ -280,7 +280,7 @@ class-skip/
 
 | 当前路径 | 行 | 备注 |
 |---|---|---|
-| [utils/textUtils.ts](utils/textUtils.ts) | 121 | 通用 HTML/文本处理（plainTextToHtmlWithSupSub 等） |
+| [features/reader/lib/textUtils.ts](features/reader/lib/textUtils.ts) | 121 | 通用 HTML/文本处理（plainTextToHtmlWithSupSub 等） |
 | [utils/extractBoldTermsFromMarkdown.ts](utils/extractBoldTermsFromMarkdown.ts) | 46 | 🤔 **决策**：与 KC 黑板术语高度耦合（被 ExamWorkspaceSocraticChat、App.tsx 用）。可放 `lib/text/`（通用）也可放 `features/exam/workspace/lib/`（专用）。建议放 `lib/text/`，因为它本质是 markdown 解析。 |
 | [utils/glossaryTermFilter.ts](utils/glossaryTermFilter.ts) | 205 | 🤔 同上，决策点同 §3 |
 
@@ -329,21 +329,21 @@ class-skip/
 
 | 当前路径 | 行 | 备注 |
 |---|---|---|
-| [utils/mindMapFlowAdapter.ts](utils/mindMapFlowAdapter.ts) | 112 | React Flow 适配器 |
-| [utils/mindMapElkLayout.ts](utils/mindMapElkLayout.ts) | 97 | ELK 布局 |
-| [utils/mindMapLayout.ts](utils/mindMapLayout.ts) | 223 | 老布局工具（部分函数已死，见审计报告 §2.3） |
-| [utils/mindMapLabel.ts](utils/mindMapLabel.ts) | 6 | 节点标签 |
-| [utils/mindMapScope.ts](utils/mindMapScope.ts) | 6 | 多文档 id 加前缀 |
+| [features/review/lib/mindMap/mindMapFlowAdapter.ts](features/review/lib/mindMap/mindMapFlowAdapter.ts) | 112 | React Flow 适配器 |
+| [features/review/lib/mindMap/mindMapElkLayout.ts](features/review/lib/mindMap/mindMapElkLayout.ts) | 97 | ELK 布局 |
+| [features/review/lib/mindMap/mindMapLayout.ts](features/review/lib/mindMap/mindMapLayout.ts) | 223 | 老布局工具（部分函数已死，见审计报告 §2.3） |
+| [features/review/lib/mindMap/mindMapLabel.ts](features/review/lib/mindMap/mindMapLabel.ts) | 6 | 节点标签 |
+| [features/review/lib/mindMap/mindMapScope.ts](features/review/lib/mindMap/mindMapScope.ts) | 6 | 多文档 id 加前缀 |
 
 ### 2.11 features/studio/lib/（保存产物聚合）
 
 | 当前路径 | 行 | 备注 |
 |---|---|---|
-| [utils/savedArtifactMeta.tsx](utils/savedArtifactMeta.tsx) | 39 | ⚠️ 含 JSX，应改为 `.tsx` 已是；放 features/studio 即可 |
-| [utils/collectSavedArtifactsFromCloud.ts](utils/collectSavedArtifactsFromCloud.ts) | 64 | — |
-| [utils/collectSavedArtifactsFromLocalHistory.ts](utils/collectSavedArtifactsFromLocalHistory.ts) | 33 | — |
-| [utils/mergeArtifactLibraries.ts](utils/mergeArtifactLibraries.ts) | 66 | — |
-| [utils/artifactSourceLabel.ts](utils/artifactSourceLabel.ts) | 40 | — |
+| [shared/lib/savedArtifactMeta.tsx](shared/lib/savedArtifactMeta.tsx) | 39 | ⚠️ 含 JSX，应改为 `.tsx` 已是；放 features/studio 即可 |
+| [features/review/lib/artifacts/collectSavedArtifactsFromCloud.ts](features/review/lib/artifacts/collectSavedArtifactsFromCloud.ts) | 64 | — |
+| [features/review/lib/artifacts/collectSavedArtifactsFromLocalHistory.ts](features/review/lib/artifacts/collectSavedArtifactsFromLocalHistory.ts) | 33 | — |
+| [features/review/lib/artifacts/mergeArtifactLibraries.ts](features/review/lib/artifacts/mergeArtifactLibraries.ts) | 66 | — |
+| [shared/lib/artifactSourceLabel.ts](shared/lib/artifactSourceLabel.ts) | 40 | — |
 
 ### 2.12 services/（保留少量薄壳）
 
@@ -352,11 +352,11 @@ class-skip/
 | [services/imageGen.ts](services/imageGen.ts) | 111 | 仅被 GalgameSettings 用，建议**搬到 features/galgame/imageGen.ts**，services/ 下不再保留。 |
 | [services/transcriptionService.ts](services/transcriptionService.ts) | 66 | Web Speech API 包装；被 App、ClassroomPanel 用，建议放 `lib/transcription/`。 |
 
-### 2.13 utils/prompts.ts 和 data/
+### 2.13 lib/prompts/systemPrompts.ts 和 data/
 
 | 当前路径 | 行 | 处理建议 |
 |---|---|---|
-| [utils/prompts.ts](utils/prompts.ts)（galgame 已归档后） | ~160 | 含 `CLASSIFIER_PROMPT`、`STEM_SYSTEM_PROMPT`、`HUMANITIES_SYSTEM_PROMPT`，仅被 geminiService 用。**P2 阶段先搬到 `lib/gemini/prompts/sharedSystemPrompts.ts`**；P3 再继续散到各 feature。 |
+| [lib/prompts/systemPrompts.ts](lib/prompts/systemPrompts.ts)（galgame 已归档后） | ~160 | 含 `CLASSIFIER_PROMPT`、`STEM_SYSTEM_PROMPT`、`HUMANITIES_SYSTEM_PROMPT`，仅被 geminiService 用。**P2 阶段先搬到 `lib/gemini/prompts/sharedSystemPrompts.ts`**；P3 再继续散到各 feature。 |
 | [data/disciplineTeachingProfiles.ts](data/disciplineTeachingProfiles.ts) | 49 | 仅 geminiService 用，搬 `lib/gemini/prompts/`。 |
 | [data/scaffoldingPrompt.ts](data/scaffoldingPrompt.ts) | 53 | 仅 geminiService 用，搬 `lib/gemini/prompts/`。 |
 | [data/pedagogyCore.ts](data/pedagogyCore.ts) | 10 | ⚠️ 当前未发现 import，需查证是否还在用——见 §3 决策点。 |
@@ -372,8 +372,8 @@ class-skip/
 | 文件 | 被谁用 | 候选位置 | 推荐 |
 |------|--------|----------|------|
 | [shared/studio/SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | StudioPanel、ReviewPage | features/studio/ vs features/review/ vs shared/ | **features/studio/**，让 ReviewPage 反向 import |
-| [utils/savedArtifactMeta.tsx](utils/savedArtifactMeta.tsx) | StudioPanel、ReviewPage、SavedArtifactPreview | 同上 | **features/studio/lib/** |
-| [utils/textUtils.ts](utils/textUtils.ts) | ExplanationPanel、Notebook、SlideViewer | shared 还是 lib | **lib/text/** |
+| [shared/lib/savedArtifactMeta.tsx](shared/lib/savedArtifactMeta.tsx) | StudioPanel、ReviewPage、SavedArtifactPreview | 同上 | **features/studio/lib/** |
+| [features/reader/lib/textUtils.ts](features/reader/lib/textUtils.ts) | ExplanationPanel、Notebook、SlideViewer | shared 还是 lib | **lib/text/** |
 | [utils/extractBoldTermsFromMarkdown.ts](utils/extractBoldTermsFromMarkdown.ts) | App.tsx、ExamWorkspaceSocraticChat | lib/text/ vs features/exam/workspace/lib/ | **lib/text/**（通用 markdown 解析） |
 | [utils/glossaryTermFilter.ts](utils/glossaryTermFilter.ts) | ExamWorkspaceSocraticChat | lib/text/ vs features/exam/workspace/lib/ | **lib/text/**（通用术语过滤；当前虽然只工作台用，但语义通用） |
 | [utils/scaffoldingClassifier.ts](utils/scaffoldingClassifier.ts) | ExamWorkspaceSocraticChat、services/geminiService | lib/scaffolding/ vs features/exam/workspace/lib/ | **lib/scaffolding/**（被 geminiService 跨域用，不该绑 feature） |
@@ -411,7 +411,7 @@ class-skip/
 |------|------|----------|--------|
 | 1.1 | `lib/bkt/` ← `utils/bkt.ts` + `utils/lsapScore.ts` | 改 3 个调用方（ExamPredictionPanel、WorkspaceKcProbeModal、App.tsx） | 小 |
 | 1.2 | `lib/pdf/` ← `utils/pdfUtils.ts` + `utils/pdfQuoteHighlight.ts` | 改 3 个调用方 | 小 |
-| 1.3 | `lib/text/` ← `utils/textUtils.ts` + `utils/extractBoldTermsFromMarkdown.ts` + `utils/glossaryTermFilter.ts` | 改 5+ 调用方 | 中 |
+| 1.3 | `lib/text/` ← `features/reader/lib/textUtils.ts` + `utils/extractBoldTermsFromMarkdown.ts` + `utils/glossaryTermFilter.ts` | 改 5+ 调用方 | 中 |
 | 1.4 | `lib/storage/` ← `services/storageService.ts` | 改 3 调用方 | 小 |
 | 1.5 | `lib/transcription/` ← `services/transcriptionService.ts` | 改 1 调用方（App） | 极小 |
 | 1.6 | `lib/scaffolding/` ← `utils/scaffoldingClassifier.ts` | 改 2 调用方 | 极小 |
@@ -472,7 +472,7 @@ class-skip/
 |------|------|----------|--------|
 | 6.1 | `lib/firebase/firebase.ts` ← services/firebase.ts（**整体搬，不拆**） | ~9 个组件 + 2 个 utils | 中（IDE 自动改 import） |
 | 6.2 | `lib/gemini/geminiService.ts` ← services/geminiService.ts（**整体搬，不拆**） | ~24 个文件 | 中 |
-| 6.3 | `lib/gemini/prompts/` ← utils/prompts.ts + data/disciplineTeachingProfiles + data/scaffoldingPrompt | geminiService 内部 | 小 |
+| 6.3 | `lib/gemini/prompts/` ← lib/prompts/systemPrompts.ts + data/disciplineTeachingProfiles + data/scaffoldingPrompt | geminiService 内部 | 小 |
 
 > P4 阶段才会真正把 firebase/gemini 这两个胖文件拆开。P2 只搬位置、不动结构。
 

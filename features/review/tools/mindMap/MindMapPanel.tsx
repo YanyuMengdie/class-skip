@@ -3,7 +3,7 @@ import { X, Loader2, GitBranch, ZoomIn, ZoomOut, RotateCcw, Sparkles, Maximize2,
 import { MindMapNode, MindMapMultiResult } from '@/types';
 import { generateMindMap, generateMindMapMulti, evaluateAndSupplementMindMap, modifyMindMap } from '@/services/geminiService';
 import { MindMapFlowCanvas, type MindMapFlowCanvasRef, type TreePart } from '@/features/review/tools/mindMap/MindMapFlowCanvas';
-import type { MindMapFlowNodeHandlers } from '@/utils/mindMapFlowAdapter';
+import type { MindMapFlowNodeHandlers } from '@/features/review/lib/mindMap/mindMapFlowAdapter';
 
 interface MindMapPanelProps {
   onClose: () => void;

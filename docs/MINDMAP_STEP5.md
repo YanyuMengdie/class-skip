@@ -19,8 +19,8 @@
 ### 架构
 
 - **数据契约**：仍为 `MindMapNode` / `MindMapMultiResult`；`geminiService` 未改。
-- **映射**：`utils/mindMapFlowAdapter.ts` 中 `mindMapNodeToFlow` → `nodes` + `edges`；Flow id 与 `scopeMindMapNodeId` 一致（`utils/mindMapScope.ts`）。
-- **布局**：`utils/mindMapElkLayout.ts` — `layoutFlowForest` 对多棵文档树分别 ELK 后纵向堆叠。
+- **映射**：`features/review/lib/mindMap/mindMapFlowAdapter.ts` 中 `mindMapNodeToFlow` → `nodes` + `edges`；Flow id 与 `scopeMindMapNodeId` 一致（`features/review/lib/mindMap/mindMapScope.ts`）。
+- **布局**：`features/review/lib/mindMap/mindMapElkLayout.ts` — `layoutFlowForest` 对多棵文档树分别 ELK 后纵向堆叠。
 - **UI**：`features/review/tools/mindMap/MindMapFlowCanvas.tsx` + `features/review/tools/mindMap/MindMapFlowNode.tsx`；`MindMapPanel` 仅负责模式、生成、Studio 保存、AI 修改等，并通过 `flowParts` 为每棵树注入独立 `handlers`（多文档更新对应 `perDoc`）。
 
 ### 被档 A 替代 / 删除的代码路径（PR 说明用）

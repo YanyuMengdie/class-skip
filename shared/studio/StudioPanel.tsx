@@ -1,7 +1,7 @@
 import React from 'react';
 import { BookOpen, Trash2, ChevronRight } from 'lucide-react';
 import { SavedArtifact } from '@/types';
-import { SAVED_ARTIFACT_TYPE_META as TYPE_META, formatSavedArtifactTime as formatTime } from '@/utils/savedArtifactMeta';
+import { SAVED_ARTIFACT_TYPE_META as TYPE_META, formatSavedArtifactTime as formatTime } from '@/shared/lib/savedArtifactMeta';
 
 export { ArtifactFullView } from '@/shared/studio/SavedArtifactPreview';
 export type { ArtifactFullViewProps } from '@/shared/studio/SavedArtifactPreview';

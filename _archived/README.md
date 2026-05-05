@@ -22,6 +22,6 @@
 - **包含内容**：
   - `GALGAME_SYSTEM_PROMPT`（Atri 角色，将 PDF 转为线性 galgame 剧本）
   - `REM_STORYTELLER_PROMPT`（Rem 角色，将文档转为蕾姆口吻的独白）
-- **从哪里搬来**：原位置在 [utils/prompts.ts](../utils/prompts.ts) 文件末尾。同文件中的 `CLASSIFIER_PROMPT`、`STEM_SYSTEM_PROMPT`、`HUMANITIES_SYSTEM_PROMPT` 仍在使用，**未归档**。
+- **从哪里搬来**：原位置在 [lib/prompts/systemPrompts.ts](../lib/prompts/systemPrompts.ts) 文件末尾。同文件中的 `CLASSIFIER_PROMPT`、`STEM_SYSTEM_PROMPT`、`HUMANITIES_SYSTEM_PROMPT` 仍在使用，**未归档**。
 - **运行行为影响**：当前 galgame 模式（如果重启）实际走的是 [services/geminiService.ts](../services/geminiService.ts) 中内联的 `getPersonaSystemPrompt` + `generatePersonaStoryScript`。这两个常量在归档前就已经没人 import，归档**不改变任何运行时行为**。
-- **恢复指引**：把 `_archived/prompts/galgame.ts` 中的两个常量搬回 [utils/prompts.ts](../utils/prompts.ts)，并按需在 geminiService 或 galgame 相关组件中 import 使用。
+- **恢复指引**：把 `_archived/prompts/galgame.ts` 中的两个常量搬回 [lib/prompts/systemPrompts.ts](../lib/prompts/systemPrompts.ts)，并按需在 geminiService 或 galgame 相关组件中 import 使用。

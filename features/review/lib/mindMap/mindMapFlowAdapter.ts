@@ -3,8 +3,8 @@
  */
 import type { Edge, Node } from '@xyflow/react';
 import type { MindMapNode } from '@/types';
-import { buildMindMapNodeMeta, estimateNodeBox, DEFAULT_MIND_MAP_LAYOUT } from '@/utils/mindMapLayout';
-import { scopeMindMapNodeId } from '@/utils/mindMapScope';
+import { buildMindMapNodeMeta, estimateNodeBox, DEFAULT_MIND_MAP_LAYOUT } from '@/features/review/lib/mindMap/mindMapLayout';
+import { scopeMindMapNodeId } from '@/features/review/lib/mindMap/mindMapScope';
 
 export const MIND_MAP_FLOW_NODE_TYPE = 'mindMap';
 
