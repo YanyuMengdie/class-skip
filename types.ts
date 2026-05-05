@@ -524,6 +524,22 @@ export interface KCScopedTutorContext extends TutorScaffoldingContext {
   gapAtomIds?: string[];
 }
 
+/**
+ * 阶段 3：备考台「多选 KC（>=2）锚定」时使用的上下文。
+ * 与 KCScopedTutorContext 平级且互斥：单选走 KCScopedTutorContext，
+ * 多选走 MultiKCScopedTutorContext。chatWithAdaptiveTutor 内部按 type guard
+ * 决定追加哪一种 prompt appendix。
+ *
+ * 多选模式简化策略：不携带 probeMode / bloomTarget（这些是单 KC 内部探测节奏的
+ * 概念，多 KC 横跨不适用）；可选 gapAtomIdsByKcId 记录上一轮各 KC 的 gap。
+ */
+export interface MultiKCScopedTutorContext extends TutorScaffoldingContext {
+  /** 选中的 KC 列表（≥2 项） */
+  kcs: LSAPKnowledgeComponent[];
+  /** 可选：上一轮模型推断的各 KC 缺失原子 id（按 kcId 分组） */
+  gapAtomIdsByKcId?: Record<string, string[]>;
+}
+
 // --- 考试中心（Exam Hub）---
 export interface Exam {
   id: string;

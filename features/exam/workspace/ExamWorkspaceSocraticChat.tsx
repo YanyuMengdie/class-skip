@@ -10,19 +10,23 @@ import type {
   KcGlossaryEntry,
   KCScopedTutorContext,
   LearnerTurnQuality,
+  LSAPContentMap,
   LSAPKnowledgeComponent,
+  MultiKCScopedTutorContext,
   RetrievedChunk,
   ScaffoldingPhase,
   SocraticProbeMode,
 } from '@/types';
 import {
   analyzeKcUtteranceForAtoms,
+  analyzeMultiKcUtteranceForAtoms,
   buildExamChunkCitationAppendix,
   chatWithAdaptiveTutor,
   classifyDocument,
   classifyLearnerTurn,
   defineTermInLectureContext,
 } from '@/services/geminiService';
+import { lookupKcIdByAtomId } from '@/features/exam/lib/examWorkspaceLsapKey';
 import { buildKcGlossaryEntryId, extractBoldTermsFromMarkdown, normalizeTermKey } from '@/lib/text/extractBoldTermsFromMarkdown';
 import { filterGlossaryTermCandidates } from '@/features/exam/lib/glossaryTermFilter';
 import { computeScaffoldingPhase, heuristicQuality } from '@/lib/exam/scaffoldingClassifier';
@@ -83,6 +87,17 @@ export interface ExamWorkspaceSocraticChatProps {
    * 不影响对话路径本身（对话仍由 activeKc 驱动）。
    */
   noKcSelected?: boolean;
+  /**
+   * 阶段 3：选中的 KC 列表（来自父级 selectedKcIds + workspaceLsapContentMap 解析）。
+   * length === 1 时，selectedKcs[0] 与 activeKc 是同一对象，单 KC 路径仍由 activeKc 驱动；
+   * length >= 2 时，activeKc 为 null，对话和 atom 分发走多选路径，使用本字段。
+   */
+  selectedKcs?: LSAPKnowledgeComponent[];
+  /**
+   * 阶段 3：完整的 LSAPContentMap，用于 mergeCoverageForKcs 内部 lookupKcIdByAtomId 反查。
+   * 仅多选路径使用；为 null 时多选路径会跳过 atom 分发更新。
+   */
+  workspaceLsapContentMap?: LSAPContentMap | null;
 }
 
 function atomProgressForKc(kc: LSAPKnowledgeComponent, cov: AtomCoverageByKc): { covered: number; total: number } {
@@ -102,6 +117,50 @@ function mergeCoverageForKc(prev: AtomCoverageByKc, kcId: string, coveredIds: st
     if (id) row[id] = true;
   }
   return { ...prev, [kcId]: row };
+}
+
+/**
+ * 阶段 3：多选 KC（>=2）模式下，把 AI 返回的 coveredAtomIds 按各 atom 的所属 kc 分发更新。
+ *
+ * 与 mergeCoverageForKc 平级——单选走原函数（不动），多选走本函数。
+ * 内部通过链式调用原 mergeCoverageForKc 完成多 KC 分发，**不修改原函数**。
+ *
+ * 三道防线（防 AI 幻觉 + 防归属错误，参照 PLAN.md §2 约束 C）：
+ * 1. 白名单 = 选中 KC 的 atom id union；任何不在白名单的 atomId 直接丢弃。
+ * 2. lookupKcIdByAtomId 反查（基于 LogicAtom 物理归属，禁止字符串解析）；找不到则跳过。
+ * 3. 每组归属由 contentMap 中的 KC.atoms 物理位置决定，不靠 atomId 字符串前缀。
+ */
+function mergeCoverageForKcs(
+  prev: AtomCoverageByKc,
+  coveredAtomIds: string[],
+  selectedKcs: LSAPKnowledgeComponent[],
+  contentMap: LSAPContentMap
+): AtomCoverageByKc {
+  // 1. 白名单：所有选中 KC 的 atom id 合集
+  const allowed = new Set<string>();
+  for (const kc of selectedKcs) {
+    for (const atom of kc.atoms ?? []) allowed.add(atom.id);
+  }
+
+  // 2. 白名单过滤（丢弃 AI 幻觉 + 选中 KC 之外的 atom）
+  const valid = coveredAtomIds.filter((id) => allowed.has(id));
+  if (valid.length === 0) return prev;
+
+  // 3. 按 kcId 分组（用阶段 1 的 lookupKcIdByAtomId，禁止字符串解析）
+  const byKc: Record<string, string[]> = {};
+  for (const atomId of valid) {
+    const kcId = lookupKcIdByAtomId(atomId, contentMap);
+    if (!kcId) continue; // 防御性：理论上白名单已过滤
+    if (!byKc[kcId]) byKc[kcId] = [];
+    byKc[kcId].push(atomId);
+  }
+
+  // 4. 对每个 kcId 调用原 mergeCoverageForKc（链式不变性，不修改原函数）
+  let result = prev;
+  for (const [kcId, atomIds] of Object.entries(byKc)) {
+    result = mergeCoverageForKc(result, kcId, atomIds);
+  }
+  return result;
 }
 
 /**
@@ -166,6 +225,8 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
       onChunkRetrievalRound,
       chunkRetrievalMaterialLinkIdFilter,
       noKcSelected = false,
+      selectedKcs = [],
+      workspaceLsapContentMap = null,
     },
     ref
   ) {
@@ -389,8 +450,10 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
 
     let orch: ReturnType<typeof computeNextProbeState> | null = null;
     let kcCtx: KCScopedTutorContext | undefined;
+    let multiKcCtx: MultiKCScopedTutorContext | undefined;
 
     if (activeKc) {
+      // 单选路径（length === 1）：完全保留原行为
       const cov = atomProgressForKc(activeKc, workspaceAtomCoverage);
       orch = computeNextProbeState({
         prevProbeMode: probeModeRef.current,
@@ -413,7 +476,15 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
         gapAtomIds: gapAtomIdsRef.current.length ? [...gapAtomIdsRef.current] : undefined,
       };
       setLastScaffoldInfo({ phase, quality, streak: newStreak, probeMode: orch.probeMode });
+    } else if (selectedKcs.length >= 2) {
+      // 多选路径（length >= 2，阶段 3 新增）
+      multiKcCtx = {
+        ...baseScaffold,
+        kcs: selectedKcs,
+      };
+      setLastScaffoldInfo({ phase, quality, streak: newStreak });
     } else {
+      // length === 0：理论上 canSend 已 disable 输入框，不应到达
       setLastScaffoldInfo({ phase, quality, streak: newStreak });
     }
 
@@ -488,7 +559,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
         docType,
         undefined,
         disciplineBand,
-        kcCtx ?? baseScaffold,
+        kcCtx ?? multiKcCtx ?? baseScaffold,
         materials,
         examChunkCitationAppendix
       );
@@ -570,6 +641,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
       }
 
       if (activeKc?.atoms?.length) {
+        // 单选路径（length === 1）：完全保留原行为
         const dedupeKey = `${activeKc.id}:${userMsg.timestamp}:${text}`;
         if (lastAtomAnalyzeKeyRef.current !== dedupeKey) {
           lastAtomAnalyzeKeyRef.current = dedupeKey;
@@ -583,6 +655,37 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
             }
           } catch (e) {
             console.warn('analyzeKcUtteranceForAtoms', e);
+          }
+        }
+      } else if (
+        selectedKcs.length >= 2 &&
+        workspaceLsapContentMap &&
+        selectedKcs.some((kc) => (kc.atoms?.length ?? 0) > 0)
+      ) {
+        // 多选路径（length >= 2，阶段 3 新增）：单次 AI 调用获取跨 KC 的 atom 覆盖，按 kcId 分发更新
+        const sortedSelectedIds = selectedKcs.map((k) => k.id).sort().join('+');
+        const dedupeKey = `multi:${sortedSelectedIds}:${userMsg.timestamp}:${text}`;
+        if (lastAtomAnalyzeKeyRef.current !== dedupeKey) {
+          lastAtomAnalyzeKeyRef.current = dedupeKey;
+          try {
+            const { coveredAtomIds } = await analyzeMultiKcUtteranceForAtoms(
+              mergedContent,
+              selectedKcs,
+              text
+            );
+            // 多选模式不维护 gapAtomIdsRef（单 KC 的 probeMode 编排概念不适用多选）
+            if (coveredAtomIds.length > 0) {
+              onAtomCoverageChange(
+                mergeCoverageForKcs(
+                  workspaceAtomCoverageRef.current,
+                  coveredAtomIds,
+                  selectedKcs,
+                  workspaceLsapContentMap
+                )
+              );
+            }
+          } catch (e) {
+            console.warn('analyzeMultiKcUtteranceForAtoms', e);
           }
         }
       }
@@ -608,6 +711,8 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
     workspaceLsapKey,
     onChunkRetrievalRound,
     chunkRetrievalMaterialLinkIdFilter,
+    selectedKcs,
+    workspaceLsapContentMap,
   ]);
 
   const emptyState = contextBlocked || mergedLoading || !!mergedError || !mergedContent.trim();

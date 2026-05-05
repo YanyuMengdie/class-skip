@@ -510,6 +510,18 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
     return workspaceLsapContentMap.kcs.find((k) => k.id === selectedKcIds[0]) ?? null;
   }, [workspaceLsapContentMap, selectedKcIds]);
 
+  /**
+   * 阶段 3：解析 selectedKcIds 为 KC 对象数组（保持 contentMap 中的原序）。
+   * - length === 0：[]（input 已禁用）
+   * - length === 1：[活跃 KC]，但单 KC 路径仍由 activeKcForChat 驱动
+   * - length >= 2：多选路径，SocraticChat 会用本数组构造 multiKcCtx 并分发 atom 覆盖
+   */
+  const selectedKcs = useMemo(() => {
+    if (!workspaceLsapContentMap?.kcs?.length || selectedKcIds.length === 0) return [];
+    const idSet = new Set(selectedKcIds);
+    return workspaceLsapContentMap.kcs.filter((k) => idSet.has(k.id));
+  }, [workspaceLsapContentMap, selectedKcIds]);
+
   useEffect(() => {
     if (!activeKcForChat) setGlossaryDesktopOpen(false);
   }, [activeKcForChat]);
@@ -1080,6 +1092,8 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
               chunkSearchOnlyPreviewMaterial && previewJumpRequest?.linkId ? previewJumpRequest.linkId : null
             }
             noKcSelected={selectedKcIds.length === 0}
+            selectedKcs={selectedKcs}
+            workspaceLsapContentMap={workspaceLsapContentMap}
           />
         </div>
         {/* P0：讲义预览（大屏默认折叠；与对话、考点释义并排） */}

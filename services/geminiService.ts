@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, ExamMaterialLink, RetrievedChunk } from "@/types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk } from "@/types";
 import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProfiles";
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/lib/exam/scaffoldingClassifier";
@@ -1911,6 +1911,68 @@ ${atomLines || '（暂无原子，仅围绕考点概念讨论）'}
 `;
 }
 
+/** 阶段 3：备考台多选 KC（>=2）时的类型 guard。与 isKCScopedTutorContext 平级且互斥。 */
+function isMultiKCScopedTutorContext(
+  scaffolding: TutorScaffoldingContext | KCScopedTutorContext | MultiKCScopedTutorContext | undefined
+): scaffolding is MultiKCScopedTutorContext {
+  return (
+    !!scaffolding &&
+    typeof scaffolding === 'object' &&
+    'kcs' in scaffolding &&
+    Array.isArray((scaffolding as MultiKCScopedTutorContext).kcs) &&
+    (scaffolding as MultiKCScopedTutorContext).kcs.length >= 2
+  );
+}
+
+/**
+ * 阶段 3：多选 KC（>=2）锚定时附在用户消息末尾（在 P4 元指令之后）。
+ *
+ * 与 buildKCScopedTutorAppendix 平级——单选走单 KC 版本，多选走本函数。
+ * 不修改原 buildKCScopedTutorAppendix；多选时由 chatWithAdaptiveTutor 内的
+ * isMultiKCScopedTutorContext 分支选择。
+ *
+ * 设计要点：
+ * - 列出本场锚定的 N 个 KC（concept + 定义摘要 + 各自的 atom id 清单）
+ * - 不指定 probeMode / bloomTarget（多 KC 横跨不适用）
+ * - Markdown 粗体使用约定与单 KC 版本一致
+ */
+function buildMultiKCScopedTutorAppendix(ctx: MultiKCScopedTutorContext): string {
+  const kcBlocks = ctx.kcs
+    .map((kc, kcIndex) => {
+      const atomLines = (kc.atoms ?? [])
+        .slice(0, 32)
+        .map((a) => `  - ${a.id}: ${a.label}`)
+        .join('\n');
+      const gapForKc = ctx.gapAtomIdsByKcId?.[kc.id];
+      const gapPart =
+        gapForKc && gapForKc.length > 0
+          ? `\n  【待加强原子（上一轮分析）】${gapForKc.join('、')}`
+          : '';
+      return [
+        `### KC ${kcIndex + 1}：${kc.concept}`,
+        `- 定义摘要：${(kc.definition || '').slice(0, 300)}`,
+        `- 本考点逻辑原子 id 清单：`,
+        atomLines || '  - （暂无原子，仅围绕考点概念讨论）',
+        gapPart,
+      ]
+        .filter(Boolean)
+        .join('\n');
+    })
+    .join('\n\n');
+
+  return `
+
+【阶段 3·本场锚定多选考点（共 ${ctx.kcs.length} 个 KC，本轮可在以下范围内联合讨论）】
+请围绕下列考点联合追问与讲解，识别学生表述时按各 KC 各自的原子清单核对覆盖。
+不要泄露 atom id 给学生；保持苏格拉底式辅导口吻，不出"判对错"式题。
+
+${kcBlocks}
+
+【Markdown 与考点释义侧栏】
+请使用 Markdown；双星号粗体 **...** 仅用于本学科专有名词、术语、符号名、标准缩写等；不要用粗体强调普通词汇、整句或修辞性强调（否则会被侧栏误收为术语）。
+`;
+}
+
 /**
  * reading 模式下对用户本轮消息的追加（略读 / 备考 reading 共用）。
  * - 当 `studyMapBriefing`（trim 非空）存在时：以地图为唯一结构锚，追加「必须一致」+ 地图正文；
@@ -1961,7 +2023,7 @@ export const chatWithAdaptiveTutor = async (
     docType: DocType = 'STEM',
     readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number },
     disciplineBand: DisciplineBand = 'unspecified',
-    scaffolding?: TutorScaffoldingContext | KCScopedTutorContext,
+    scaffolding?: TutorScaffoldingContext | KCScopedTutorContext | MultiKCScopedTutorContext,
     /** P1：备考台传入本场材料时，追加 citations JSON 协议（略读走 `chatWithSkimAdaptiveTutor`，不经过此参数） */
     examWorkspaceMaterials?: ExamMaterialLink[],
     /** 1-3：非空时优先使用 chunk 白名单 + †chunkId† 协议，**不**再附加旧版 citations JSON */
@@ -2005,6 +2067,8 @@ export const chatWithAdaptiveTutor = async (
         }
         if (isKCScopedTutorContext(scaffolding)) {
             finalMessage = finalMessage + buildKCScopedTutorAppendix(scaffolding);
+        } else if (isMultiKCScopedTutorContext(scaffolding)) {
+            finalMessage = finalMessage + buildMultiKCScopedTutorAppendix(scaffolding);
         }
         /**
          * 1-3 / 1-4：`examChunkCitationAppendix` 与 `buildExamWorkspaceCitationInstruction` **互斥**（if / else）。
@@ -2559,6 +2623,98 @@ ${userText.slice(0, 8000)}`;
     };
   } catch (e) {
     console.warn('analyzeKcUtteranceForAtoms', e);
+    return { coveredAtomIds: [], gapAtomIds: [] };
+  }
+}
+
+/**
+ * 阶段 3：多选 KC（>=2）模式下,一次性评估学生本轮发言对所有选中 KC 的 atom 覆盖。
+ *
+ * 与 analyzeKcUtteranceForAtoms 平级——单选走原函数（不动），多选走本函数。
+ * 单次 Gemini 调用，prompt 列出所有选中 KC 的全部 atom 列表（含 kcId 提示），
+ * 客户端用 union 白名单二次过滤 AI 返回，防幻觉。
+ *
+ * 返回结构与 analyzeKcUtteranceForAtoms 一致：`{ coveredAtomIds, gapAtomIds }`
+ * （atomId 横跨多 KC，调用方需用 lookupKcIdByAtomId 反查归属再分发更新）。
+ */
+export async function analyzeMultiKcUtteranceForAtoms(
+  mergedDocContent: string,
+  kcs: LSAPKnowledgeComponent[],
+  userText: string
+): Promise<{ coveredAtomIds: string[]; gapAtomIds: string[] }> {
+  // 收集所有选中 KC 的 atom，构造 union 白名单
+  const allAtoms: { id: string; kcId: string; label: string; description: string }[] = [];
+  for (const kc of kcs) {
+    for (const atom of kc.atoms ?? []) {
+      allAtoms.push({
+        id: atom.id,
+        kcId: kc.id,
+        label: atom.label,
+        description: atom.description ?? '',
+      });
+    }
+  }
+  if (!allAtoms.length) return { coveredAtomIds: [], gapAtomIds: [] };
+  const allowed = new Set(allAtoms.map((a) => a.id));
+
+  try {
+    const contentPart = getContentPart(mergedDocContent);
+    const kcSummaryLines = kcs
+      .map((kc, i) => `- KC${i + 1} (id=${kc.id})：${kc.concept}`)
+      .join('\n');
+    const atomList = allAtoms
+      .map(
+        (a) => `- id=${a.id}; kcId=${a.kcId}; label=${a.label}; desc=${(a.description || '').slice(0, 200)}`
+      )
+      .join('\n');
+    const prompt = `你是严谨评阅助手。DOCUMENT 为本场合并讲义；本轮学生在多个考点（KC）的联合上下文中发言。
+
+任务：阅读学生的**本轮发言**（可能很短）。判断：
+1) coveredAtomIds：学生**明确、可核对地**体现了哪些原子（id 必须来自下方列表；无把握则不要列入；宁可少报）。可来自任意 KC，可跨 KC。
+2) gapAtomIds：结合讲义，哪些原子学生**尚未覆盖**或**表述可能不足**（同样必须来自下方列表；可空数组）。
+
+约束：
+- 只能输出 id 字符串；不要输出 kcId 字段（atomId 与 KC 的归属由前端用结构化反查确定，不要依赖你的描述）。
+- 若学生发言完全游离（既不靠近任意 KC，也无相关原子），返回两个空数组。
+
+本场锚定考点列表：
+${kcSummaryLines}
+
+学生发言：
+${userText.slice(0, 8000)}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3-flash-preview',
+      contents: [
+        { role: 'user', parts: [contentPart, { text: prompt + '\n\n所有候选原子列表：\n' + atomList }] },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            coveredAtomIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+            gapAtomIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+          required: ['coveredAtomIds', 'gapAtomIds'],
+        },
+      },
+    });
+    if (!response.text) return { coveredAtomIds: [], gapAtomIds: [] };
+    const parsed = JSON.parse(response.text) as {
+      coveredAtomIds?: string[];
+      gapAtomIds?: string[];
+    };
+    const filter = (ids: unknown): string[] =>
+      (Array.isArray(ids) ? ids : []).filter(
+        (x): x is string => typeof x === 'string' && allowed.has(x)
+      );
+    return {
+      coveredAtomIds: filter(parsed.coveredAtomIds),
+      gapAtomIds: filter(parsed.gapAtomIds),
+    };
+  } catch (e) {
+    console.warn('analyzeMultiKcUtteranceForAtoms', e);
     return { coveredAtomIds: [], gapAtomIds: [] };
   }
 }
