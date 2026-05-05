@@ -8,7 +8,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import type { ExamMaterialLink } from '@/types';
-import type { ExamWorkspaceCitation } from '@/utils/examWorkspaceCitations';
+import type { ExamWorkspaceCitation } from '@/features/exam/lib/examWorkspaceCitations';
 import { ExamWorkspaceCitationBlock, type OpenMaterialPageOptions } from '@/features/exam/workspace/ExamWorkspaceCitationBlock';
 
 const SkipBlockIndexContext = createContext(false);

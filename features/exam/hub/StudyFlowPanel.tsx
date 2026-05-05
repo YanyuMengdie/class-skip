@@ -9,7 +9,7 @@ import type {
   ExamMaterialLink,
   FilePersistedState,
 } from '@/types';
-import { buildExtendedScenarioKey, inferFamiliarity, inferUrgencyForFile } from '@/utils/studyFlowInference';
+import { buildExtendedScenarioKey, inferFamiliarity, inferUrgencyForFile } from '@/features/exam/lib/studyFlowInference';
 import { getTemplateForScenario } from '@/data/studyFlowTemplates';
 
 export interface StudyFlowPanelProps {

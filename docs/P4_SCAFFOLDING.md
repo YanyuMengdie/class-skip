@@ -3,7 +3,7 @@
 ## 类型
 
 - `LearnerTurnQuality` / `ScaffoldingPhase` / `TutorScaffoldingContext`：`types.ts`
-- 启发式：`utils/scaffoldingClassifier.ts`（文件头注释含阈值说明）
+- 启发式：`lib/exam/scaffoldingClassifier.ts`（文件头注释含阈值说明）
 - 强规则 Prompt：`data/scaffoldingPrompt.ts`
 
 ## `consecutiveWeakStreak` 规则

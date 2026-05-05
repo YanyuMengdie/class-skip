@@ -149,7 +149,7 @@
 ### 命名扫描
 - `components/PageMarkPanel.tsx` ✓
 - `features/exam/workspace/ExamWorkspaceAssistantMarkdown.tsx`（与 marks 无关，只是 markdown）
-- `utils/extractBoldTermsFromMarkdown.ts`（与 marks 无关）
+- `lib/text/extractBoldTermsFromMarkdown.ts`（与 marks 无关）
 
 ### 风险标记
 🟢 干净，但**类型字段被 Sidebar 共用**，搬迁时只搬组件即可，不搬类型。
@@ -353,19 +353,19 @@
 
 | 文件 | 行 | 用途 |
 |---|---|---|
-| [utils/examChunkIndex.ts](utils/examChunkIndex.ts) | 126 | 构建 PDF 切块索引 |
-| [utils/examChunkRetrieval.ts](utils/examChunkRetrieval.ts) | 195 | BM25 检索 |
-| [utils/examMaintenanceEligibility.ts](utils/examMaintenanceEligibility.ts) | 26 | 维护资格 |
-| [utils/examSchedule.ts](utils/examSchedule.ts) | 228 | 考试压力 + 每日规划 |
-| [utils/examWorkspaceCitations.ts](utils/examWorkspaceCitations.ts) | 176 | 引文解析 |
-| [utils/examWorkspaceLsapKey.ts](utils/examWorkspaceLsapKey.ts) | 115 | LSAP key + 工作台对话存储 |
-| [utils/examWorkspaceOrchestrator.ts](utils/examWorkspaceOrchestrator.ts) | 89 | LSAP 探针状态机 |
+| [features/exam/lib/examChunkIndex.ts](features/exam/lib/examChunkIndex.ts) | 126 | 构建 PDF 切块索引 |
+| [features/exam/lib/examChunkRetrieval.ts](features/exam/lib/examChunkRetrieval.ts) | 195 | BM25 检索 |
+| [features/exam/lib/examMaintenanceEligibility.ts](features/exam/lib/examMaintenanceEligibility.ts) | 26 | 维护资格 |
+| [features/exam/lib/examSchedule.ts](features/exam/lib/examSchedule.ts) | 228 | 考试压力 + 每日规划 |
+| [features/exam/lib/examWorkspaceCitations.ts](features/exam/lib/examWorkspaceCitations.ts) | 176 | 引文解析 |
+| [features/exam/lib/examWorkspaceLsapKey.ts](features/exam/lib/examWorkspaceLsapKey.ts) | 115 | LSAP key + 工作台对话存储 |
+| [features/exam/lib/examWorkspaceOrchestrator.ts](features/exam/lib/examWorkspaceOrchestrator.ts) | 89 | LSAP 探针状态机 |
 
 ### utils/maintenance* 系列
 
 | 文件 | 行 | 用途 |
 |---|---|---|
-| [utils/maintenanceStrategy.ts](utils/maintenanceStrategy.ts) | 160 | 维护策略 |
+| [features/exam/lib/maintenanceStrategy.ts](features/exam/lib/maintenanceStrategy.ts) | 160 | 维护策略 |
 | [data/maintenanceFeedbackCopy.ts](data/maintenanceFeedbackCopy.ts) | 75 | 维护文案数据（不在 utils 里，但归属一致） |
 
 ### services/ 中专属考试的服务
@@ -383,11 +383,11 @@
 | [data/maintenanceFeedbackCopy.ts](data/maintenanceFeedbackCopy.ts)（75 行） | 仅 ExamDailyMaintenancePanel 使用，归 `features/exam/maintenance/` |
 | [data/disciplineTeachingProfiles.ts](data/disciplineTeachingProfiles.ts)（49 行） | 被 services/geminiService 用（不只是考试用），P3 阶段处理，**不归 features/exam/** |
 | [data/scaffoldingPrompt.ts](data/scaffoldingPrompt.ts)（53 行） | 同上 |
-| [utils/studyFlowInference.ts](utils/studyFlowInference.ts)（100 行） | 仅 StudyFlowPanel 用，归 `features/exam/study-flow/lib/` |
-| [utils/scaffoldingClassifier.ts](utils/scaffoldingClassifier.ts)（91 行） | 被 ExamWorkspaceSocraticChat **和** services/geminiService 用——是跨 feature 的 lib/，**不归 features/exam/** |
-| [utils/bkt.ts](utils/bkt.ts)、[utils/lsapScore.ts](utils/lsapScore.ts) | 被 ExamPredictionPanel + WorkspaceKcProbeModal **和** App.tsx 用，归 `lib/bkt/`，**不归 features/exam/** |
-| [utils/extractBoldTermsFromMarkdown.ts](utils/extractBoldTermsFromMarkdown.ts) | 被 ExamWorkspaceSocraticChat + App.tsx 用——跨 feature，归 `lib/text/` |
-| [utils/glossaryTermFilter.ts](utils/glossaryTermFilter.ts) | 仅 ExamWorkspaceSocraticChat 用——但语义通用，归 `lib/text/` 或 workspace/lib/ 二选一 |
+| [features/exam/lib/studyFlowInference.ts](features/exam/lib/studyFlowInference.ts)（100 行） | 仅 StudyFlowPanel 用，归 `features/exam/study-flow/lib/` |
+| [lib/exam/scaffoldingClassifier.ts](lib/exam/scaffoldingClassifier.ts)（91 行） | 被 ExamWorkspaceSocraticChat **和** services/geminiService 用——是跨 feature 的 lib/，**不归 features/exam/** |
+| [features/exam/lib/bkt.ts](features/exam/lib/bkt.ts)、[features/exam/lib/lsapScore.ts](features/exam/lib/lsapScore.ts) | 被 ExamPredictionPanel + WorkspaceKcProbeModal **和** App.tsx 用，归 `lib/bkt/`，**不归 features/exam/** |
+| [lib/text/extractBoldTermsFromMarkdown.ts](lib/text/extractBoldTermsFromMarkdown.ts) | 被 ExamWorkspaceSocraticChat + App.tsx 用——跨 feature，归 `lib/text/` |
+| [features/exam/lib/glossaryTermFilter.ts](features/exam/lib/glossaryTermFilter.ts) | 仅 ExamWorkspaceSocraticChat 用——但语义通用，归 `lib/text/` 或 workspace/lib/ 二选一 |
 | [docs/EXAM_*.md](docs/) + [docs/P*_EXAM_*.md](docs/) | 4 个文档，归 `features/exam/docs/` 或保留在 docs/ |
 
 ### 风险标记

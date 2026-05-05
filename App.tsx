@@ -38,7 +38,7 @@ import { TurtleSoupPanel } from '@/features/turtleSoup/TurtleSoupPanel';
 import { ExamPredictionPanel } from '@/features/exam/ExamPredictionPanel';
 import { ExamHubModal } from '@/features/exam/ExamHubModal';
 import { ExamWorkspacePage } from '@/features/exam/workspace/ExamWorkspacePage';
-import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from '@/utils/pdfUtils';
+import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from '@/lib/pdf/pdfUtils';
 import { buildArtifactSourceLabel } from '@/shared/lib/artifactSourceLabel';
 import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap } from '@/services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from '@/services/transcriptionService';
@@ -53,9 +53,9 @@ import {
   saveWorkspaceLsapBundle,
   truncateWorkspaceDialogue,
   type WorkspaceDialogueTurn,
-} from '@/utils/examWorkspaceLsapKey';
-import { computePredictedScore } from '@/utils/lsapScore';
-import { normalizeTermKey } from '@/utils/extractBoldTermsFromMarkdown';
+} from '@/features/exam/lib/examWorkspaceLsapKey';
+import { computePredictedScore } from '@/features/exam/lib/lsapScore';
+import { normalizeTermKey } from '@/lib/text/extractBoldTermsFromMarkdown';
 import { Sparkles, X, ChevronDown, Loader2, Wand2 } from 'lucide-react';
 
 /** P0 备考工作台：当前考试 ID 存 localStorage */

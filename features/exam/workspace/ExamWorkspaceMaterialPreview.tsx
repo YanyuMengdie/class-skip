@@ -7,8 +7,8 @@ import { createPortal } from 'react-dom';
 import { ChevronLeft, ChevronRight, CornerUpLeft, Loader2, X, ZoomIn } from 'lucide-react';
 import type { ExamMaterialLink } from '@/types';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
-import { loadPdfDocumentFromFile, renderPdfPageToCanvas } from '@/utils/pdfUtils';
-import { computeQuoteHighlightRects } from '@/utils/pdfQuoteHighlight';
+import { loadPdfDocumentFromFile, renderPdfPageToCanvas } from '@/lib/pdf/pdfUtils';
+import { computeQuoteHighlightRects } from '@/features/exam/lib/pdfQuoteHighlight';
 
 const THUMB_TARGET_WIDTH = 120;
 const THUMB_CONCURRENCY = 2;

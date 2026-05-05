@@ -4,7 +4,7 @@
 任何 AI 助手（外部 Claude / Claude Code / Cursor）打开此文档都能立即接续工作。
 每次重大进度后请更新本文档。
 
-最后更新：2026-05-05 · P2 阶段 4 第 1 批（utils → lib/ 12 文件 + 1 改名）搬迁后
+最后更新：2026-05-05 · P2 阶段 4 收官（utils → lib/ 第 2 批 16 文件，utils/ 目录已清空）
 
 ================================================================
 项目基本信息
@@ -109,14 +109,21 @@ P2（阶段 3）内部子阶段进度
    推迟到 REFACTOR_PLAN.md 阶段 4 拆 App.tsx 时一并处理；详见
    产品事实修正第 11 条）
 
-🔵 阶段 4：utils → lib/ 重组
+✅ 阶段 4：utils → lib/ 重组（28 文件 + 1 改名，分 2 批完成，utils/ 已清空）
    ✅ 第 1 批：12 文件 + 1 改名（reader/app/service/shared 独占 4 + review 独占 8）
       - features/reader/lib/textUtils.ts
       - shared/lib/artifactSourceLabel.ts + savedArtifactMeta.tsx
       - lib/prompts/systemPrompts.ts（改名自 utils/prompts.ts）
       - features/review/lib/artifacts/{collectFromCloud, collectFromLocalHistory, mergeArtifactLibraries}
       - features/review/lib/mindMap/{ElkLayout, FlowAdapter, Label, Layout, Scope}
-   ⏳ 第 2 批：utils 余 16 文件（exam 集群 14 + 真跨域 2：pdfUtils, extractBoldTermsFromMarkdown）
+   ✅ 第 2 批：16 文件（exam 集群 13 + lib/exam/ 1 + lib/text/ 1 + lib/pdf/ 1）
+      - features/exam/lib/  bkt, examChunkIndex, examChunkRetrieval, examMaintenanceEligibility,
+                            examSchedule, examWorkspaceCitations, examWorkspaceLsapKey,
+                            examWorkspaceOrchestrator, glossaryTermFilter, lsapScore,
+                            maintenanceStrategy, pdfQuoteHighlight, studyFlowInference
+      - lib/exam/           scaffoldingClassifier（services 也用，避免 service→features 反向引用）
+      - lib/text/           extractBoldTermsFromMarkdown（App + exam 跨用纯字符串工具）
+      - lib/pdf/            pdfUtils（App + exam 真跨域基础工具）
 
 ================================================================
 当前真实目录结构（基于 git ls-tree 实测）
@@ -143,10 +150,16 @@ shared/
 
 lib/ 顶层（真正跨域基础工具）：
 lib/
-└── prompts/
-    └── systemPrompts.ts   (P2 阶段 4 第 1 批新增；改名自 utils/prompts.ts)
+├── exam/
+│   └── scaffoldingClassifier.ts   (services + exam 跨用，独立避免反向引用)
+├── pdf/
+│   └── pdfUtils.ts                (App + exam + utils-内部基础工具)
+├── prompts/
+│   └── systemPrompts.ts           (改名自 utils/prompts.ts)
+└── text/
+    └── extractBoldTermsFromMarkdown.ts   (App + exam 跨用纯字符串工具)
 
-features/ 已搬迁 55 个文件（P2 阶段 4 第 1 批新增 9 个 utils → lib/ 子目录）：
+features/ 已搬迁 68 个文件（P2 阶段 4 第 2 批新增 13 个 utils → features/exam/lib/）：
 
 features/
 ├── energyRefuel/
@@ -183,16 +196,30 @@ features/
 │   │   ├── MaintenanceFeedbackCelebration.tsx
 │   │   ├── MaintenanceFlashcardDeck.tsx
 │   │   └── StudyFlowPanel.tsx
-│   └── workspace/
-│       ├── ExamWorkspaceAssistantMarkdown.tsx
-│       ├── ExamWorkspaceCitationBlock.tsx
-│       ├── ExamWorkspaceMaterialPreview.tsx  (996 行，阶段 4 拆候选)
-│       ├── ExamWorkspacePage.tsx             (1492 行，阶段 4 拆候选)
-│       ├── ExamWorkspaceSocraticChat.tsx     (780 行)
-│       ├── KcGlossarySidebar.tsx
-│       ├── KnowledgePointInspectPanel.tsx
-│       ├── WorkspaceEvidenceReportModal.tsx  (含 ConflictPageHint 子组件供 KcProbe 用)
-│       └── WorkspaceKcProbeModal.tsx
+│   ├── workspace/
+│   │   ├── ExamWorkspaceAssistantMarkdown.tsx
+│   │   ├── ExamWorkspaceCitationBlock.tsx
+│   │   ├── ExamWorkspaceMaterialPreview.tsx  (996 行，阶段 4 拆候选)
+│   │   ├── ExamWorkspacePage.tsx             (1492 行，阶段 4 拆候选)
+│   │   ├── ExamWorkspaceSocraticChat.tsx     (780 行)
+│   │   ├── KcGlossarySidebar.tsx
+│   │   ├── KnowledgePointInspectPanel.tsx
+│   │   ├── WorkspaceEvidenceReportModal.tsx  (含 ConflictPageHint 子组件供 KcProbe 用)
+│   │   └── WorkspaceKcProbeModal.tsx
+│   └── lib/                                  (P2 阶段 4 第 2 批新增 13 文件)
+│       ├── bkt.ts
+│       ├── examChunkIndex.ts
+│       ├── examChunkRetrieval.ts
+│       ├── examMaintenanceEligibility.ts
+│       ├── examSchedule.ts
+│       ├── examWorkspaceCitations.ts
+│       ├── examWorkspaceLsapKey.ts
+│       ├── examWorkspaceOrchestrator.ts
+│       ├── glossaryTermFilter.ts
+│       ├── lsapScore.ts
+│       ├── maintenanceStrategy.ts
+│       ├── pdfQuoteHighlight.ts
+│       └── studyFlowInference.ts
 ├── review/
 │   ├── ReviewPage.tsx           (独立学习产物库页面，不挂载 tools；详见产品事实修正第 9 条)
 │   ├── tools/
@@ -233,18 +260,21 @@ components/ 仍剩 2 个文件（galgame 2），按归类候选分类：
   GalgameOverlay, GalgameSettings（之前规划为已归档，实际仍在 components/，
   本批不动）
 
-utils/（剩 16 文件，待 P2 阶段 4 第 2 批搬到 features/exam/lib/ 或 lib/）：
-  bkt, examChunkIndex, examChunkRetrieval, examMaintenanceEligibility,
-  examSchedule, examWorkspaceCitations, examWorkspaceLsapKey,
-  examWorkspaceOrchestrator, extractBoldTermsFromMarkdown, glossaryTermFilter,
-  lsapScore, maintenanceStrategy, pdfQuoteHighlight, pdfUtils,
-  scaffoldingClassifier, studyFlowInference
-
-（已搬走的 12 个：textUtils → features/reader/lib/；artifactSourceLabel +
-  savedArtifactMeta → shared/lib/；prompts.ts → lib/prompts/systemPrompts.ts
-  含改名；collectSavedArtifactsFromCloud + collectSavedArtifactsFromLocalHistory
-  + mergeArtifactLibraries → features/review/lib/artifacts/；mindMap 5 件 →
-  features/review/lib/mindMap/）
+utils/（已清空 0 文件 ✅）—— P2 阶段 4 全部搬迁完毕，原 28 文件分布如下：
+  - features/reader/lib/        textUtils
+  - features/review/lib/artifacts/  collectFromCloud + collectFromLocalHistory + mergeArtifactLibraries
+  - features/review/lib/mindMap/    elkLayout + flowAdapter + label + layout + scope
+  - features/exam/lib/          bkt, examChunkIndex, examChunkRetrieval,
+                                examMaintenanceEligibility, examSchedule,
+                                examWorkspaceCitations, examWorkspaceLsapKey,
+                                examWorkspaceOrchestrator, glossaryTermFilter,
+                                lsapScore, maintenanceStrategy, pdfQuoteHighlight,
+                                studyFlowInference (13 文件)
+  - shared/lib/                 artifactSourceLabel + savedArtifactMeta
+  - lib/exam/                   scaffoldingClassifier
+  - lib/text/                   extractBoldTermsFromMarkdown
+  - lib/pdf/                    pdfUtils
+  - lib/prompts/                systemPrompts (改名自 prompts)
 
 ================================================================
 App.tsx 状态（重要）
@@ -457,12 +487,14 @@ console 红字快速判断：
 | EXAM_BATCH1_MIGRATION.md           | 阶段 3 第 3 批 + 修复 review 归类 |
 | UTILS_PRE_MIGRATION_SCAN.md        | 阶段 4 utils 重组的预扫描         |
 | UTILS_BATCH1_MIGRATION.md          | 阶段 4 第 1 批（12 文件 + 1 改名） |
+| UTILS_BATCH2_MIGRATION.md          | 阶段 4 第 2 批 + 阶段 4 收官      |
 | docs/SKIM_VS_EXAM_TUTOR_API.md     | 略读 vs 备考 API 契约            |
 
 ================================================================
 Git 历史关键节点
 ================================================================
 
+(待 commit) refactor(p2): utils → lib/ 第 2 批（16 文件，utils/ 清空，阶段 4 收官）
 (待 commit) refactor(p2): utils → lib/ 第 1 批（12 文件 + prompts→systemPrompts 改名）
 (待 commit) docs: P2 阶段 3 主体完工归档 + 第 11 条 galgame 半死状态记录
 (待 commit) refactor(p2): 把 17 exam 组件搬到 features/exam/ + 修复 2 review 归类错误
@@ -492,21 +524,21 @@ aff6f3e 迁移到 Windows，准备开始屎山重构
 当前下一步
 ================================================================
 
-P2 阶段 4 第 1 批已完成（utils 28 → 16，本批搬 12 文件 + 1 改名）。等用户验证 + commit。
+**P2 阶段 3 + 阶段 4 主体全部完成**（utils/ 28 → 0、components/ 51 → 2，
+原本散落 79 个目录文件全部归位）。等用户验证 + commit。
 
-接下来按顺序：
+剩余待办：
 
-1. P2 阶段 4 第 2 批：utils 余 16 文件
-   - 11 个 exam 独占 → features/exam/lib/
-   - 3 个跨域 + 1 个独立：lsapScore + examWorkspaceLsapKey + scaffoldingClassifier
-                          + extractBoldTermsFromMarkdown
-   - 真跨域基础工具：pdfUtils + pdfQuoteHighlight → lib/pdf/
+1. galgame 收尾（components/ 余 2 文件）—— 推迟到 REFACTOR_PLAN.md 阶段 4
+   拆 App.tsx 时一并处理（清死接线 + 搬到 _archived/components/galgame/）
 
-2. REFACTOR_PLAN.md 阶段 4：拆 App.tsx + SkimPanel.tsx + ExamWorkspacePage(1492)
-   + ExamPredictionPanel(1035) + ExamWorkspaceMaterialPreview(996) 等巨型组件
-   —— 届时一并处理 galgame：清掉 App.tsx 死接线 + 搬到 _archived/components/galgame/
+2. REFACTOR_PLAN.md 阶段 4：拆 App.tsx (2856) + SkimPanel (1309)
+   + ExamWorkspacePage (1492) + ExamPredictionPanel (1035)
+   + ExamWorkspaceMaterialPreview (996) 等巨型组件
+
+3. REFACTOR_PLAN.md 阶段 5：类型严格化 + 测试
 
 ================================================================
 本文档应在每次重大进度后更新。
-当前阶段：P2 阶段 4 第 1 批已完成（utils → lib/ 12 文件 + 1 改名），待用户验证 + commit。
+当前阶段：P2 阶段 3 + 阶段 4 主体全部完工（utils/ 已清空、components/ 仅余 galgame 2 文件），待用户验证 + commit。
 ================================================================

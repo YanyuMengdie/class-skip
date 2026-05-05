@@ -273,23 +273,23 @@ class-skip/
 
 | 当前路径 | 行 | 内部依赖 |
 |---|---|---|
-| [utils/pdfUtils.ts](utils/pdfUtils.ts) | 142 | — |
-| [utils/pdfQuoteHighlight.ts](utils/pdfQuoteHighlight.ts) | 91 | — |
+| [lib/pdf/pdfUtils.ts](lib/pdf/pdfUtils.ts) | 142 | — |
+| [features/exam/lib/pdfQuoteHighlight.ts](features/exam/lib/pdfQuoteHighlight.ts) | 91 | — |
 
 ### 2.4 lib/text/
 
 | 当前路径 | 行 | 备注 |
 |---|---|---|
 | [features/reader/lib/textUtils.ts](features/reader/lib/textUtils.ts) | 121 | 通用 HTML/文本处理（plainTextToHtmlWithSupSub 等） |
-| [utils/extractBoldTermsFromMarkdown.ts](utils/extractBoldTermsFromMarkdown.ts) | 46 | 🤔 **决策**：与 KC 黑板术语高度耦合（被 ExamWorkspaceSocraticChat、App.tsx 用）。可放 `lib/text/`（通用）也可放 `features/exam/workspace/lib/`（专用）。建议放 `lib/text/`，因为它本质是 markdown 解析。 |
-| [utils/glossaryTermFilter.ts](utils/glossaryTermFilter.ts) | 205 | 🤔 同上，决策点同 §3 |
+| [lib/text/extractBoldTermsFromMarkdown.ts](lib/text/extractBoldTermsFromMarkdown.ts) | 46 | 🤔 **决策**：与 KC 黑板术语高度耦合（被 ExamWorkspaceSocraticChat、App.tsx 用）。可放 `lib/text/`（通用）也可放 `features/exam/workspace/lib/`（专用）。建议放 `lib/text/`，因为它本质是 markdown 解析。 |
+| [features/exam/lib/glossaryTermFilter.ts](features/exam/lib/glossaryTermFilter.ts) | 205 | 🤔 同上，决策点同 §3 |
 
 ### 2.5 lib/retrieval/
 
 | 当前路径 | 行 | 内部依赖 |
 |---|---|---|
-| [utils/examChunkIndex.ts](utils/examChunkIndex.ts) | 126 | utils/pdfUtils（→ lib/pdf） |
-| [utils/examChunkRetrieval.ts](utils/examChunkRetrieval.ts) | 195 | services/examChunkIndexStorage（→ lib/retrieval/storage） |
+| [features/exam/lib/examChunkIndex.ts](features/exam/lib/examChunkIndex.ts) | 126 | utils/pdfUtils（→ lib/pdf） |
+| [features/exam/lib/examChunkRetrieval.ts](features/exam/lib/examChunkRetrieval.ts) | 195 | services/examChunkIndexStorage（→ lib/retrieval/storage） |
 | [services/examChunkIndexStorage.ts](services/examChunkIndexStorage.ts) | 65 | — |
 
 > 🤔 **决策**：这三个文件名都带 "exam"，但实现是通用 BM25 + IndexedDB chunk 存储，可服务任何"PDF 切块检索"场景。建议**改名脱业务**：`chunkIndex.ts` / `bm25Retrieval.ts` / `chunkIndexStorage.ts`，归入 `lib/retrieval/`。如果你想保留 "exam" 前缀以表明当前只用于备考工作台，那放 `features/exam/workspace/lib/` 也行——见 §3。
@@ -298,8 +298,8 @@ class-skip/
 
 | 当前路径 | 行 | 备注 |
 |---|---|---|
-| [utils/bkt.ts](utils/bkt.ts) | 50 | BKT 算法本体 |
-| [utils/lsapScore.ts](utils/lsapScore.ts) | 18 | LSAP 预测分（依赖 BKT 状态） |
+| [features/exam/lib/bkt.ts](features/exam/lib/bkt.ts) | 50 | BKT 算法本体 |
+| [features/exam/lib/lsapScore.ts](features/exam/lib/lsapScore.ts) | 18 | LSAP 预测分（依赖 BKT 状态） |
 
 ### 2.7 lib/storage/
 
@@ -311,19 +311,19 @@ class-skip/
 
 | 当前路径 | 行 | 备注 |
 |---|---|---|
-| [utils/examWorkspaceCitations.ts](utils/examWorkspaceCitations.ts) | 176 | 引文解析 |
-| [utils/examWorkspaceLsapKey.ts](utils/examWorkspaceLsapKey.ts) | 115 | 工作台对话 key + LocalStorage |
-| [utils/examWorkspaceOrchestrator.ts](utils/examWorkspaceOrchestrator.ts) | 89 | LSAP 探针下一步状态机 |
-| [utils/scaffoldingClassifier.ts](utils/scaffoldingClassifier.ts) | 91 | 学习者发言分类 + 支架阶段（也被 geminiService 用） |
+| [features/exam/lib/examWorkspaceCitations.ts](features/exam/lib/examWorkspaceCitations.ts) | 176 | 引文解析 |
+| [features/exam/lib/examWorkspaceLsapKey.ts](features/exam/lib/examWorkspaceLsapKey.ts) | 115 | 工作台对话 key + LocalStorage |
+| [features/exam/lib/examWorkspaceOrchestrator.ts](features/exam/lib/examWorkspaceOrchestrator.ts) | 89 | LSAP 探针下一步状态机 |
+| [lib/exam/scaffoldingClassifier.ts](lib/exam/scaffoldingClassifier.ts) | 91 | 学习者发言分类 + 支架阶段（也被 geminiService 用） |
 
 ### 2.9 features/exam/lib/（考试领域算法）
 
 | 当前路径 | 行 | 备注 |
 |---|---|---|
-| [utils/examSchedule.ts](utils/examSchedule.ts) | 228 | 考试压力评估 + 每日规划 |
-| [utils/examMaintenanceEligibility.ts](utils/examMaintenanceEligibility.ts) | 26 | 维护资格 |
-| [utils/maintenanceStrategy.ts](utils/maintenanceStrategy.ts) | 160 | 维护策略 |
-| [utils/studyFlowInference.ts](utils/studyFlowInference.ts) | 100 | 情境推断 |
+| [features/exam/lib/examSchedule.ts](features/exam/lib/examSchedule.ts) | 228 | 考试压力评估 + 每日规划 |
+| [features/exam/lib/examMaintenanceEligibility.ts](features/exam/lib/examMaintenanceEligibility.ts) | 26 | 维护资格 |
+| [features/exam/lib/maintenanceStrategy.ts](features/exam/lib/maintenanceStrategy.ts) | 160 | 维护策略 |
+| [features/exam/lib/studyFlowInference.ts](features/exam/lib/studyFlowInference.ts) | 100 | 情境推断 |
 
 ### 2.10 features/mindmap/lib/
 
@@ -374,9 +374,9 @@ class-skip/
 | [shared/studio/SavedArtifactPreview.tsx](shared/studio/SavedArtifactPreview.tsx) | StudioPanel、ReviewPage | features/studio/ vs features/review/ vs shared/ | **features/studio/**，让 ReviewPage 反向 import |
 | [shared/lib/savedArtifactMeta.tsx](shared/lib/savedArtifactMeta.tsx) | StudioPanel、ReviewPage、SavedArtifactPreview | 同上 | **features/studio/lib/** |
 | [features/reader/lib/textUtils.ts](features/reader/lib/textUtils.ts) | ExplanationPanel、Notebook、SlideViewer | shared 还是 lib | **lib/text/** |
-| [utils/extractBoldTermsFromMarkdown.ts](utils/extractBoldTermsFromMarkdown.ts) | App.tsx、ExamWorkspaceSocraticChat | lib/text/ vs features/exam/workspace/lib/ | **lib/text/**（通用 markdown 解析） |
-| [utils/glossaryTermFilter.ts](utils/glossaryTermFilter.ts) | ExamWorkspaceSocraticChat | lib/text/ vs features/exam/workspace/lib/ | **lib/text/**（通用术语过滤；当前虽然只工作台用，但语义通用） |
-| [utils/scaffoldingClassifier.ts](utils/scaffoldingClassifier.ts) | ExamWorkspaceSocraticChat、services/geminiService | lib/scaffolding/ vs features/exam/workspace/lib/ | **lib/scaffolding/**（被 geminiService 跨域用，不该绑 feature） |
+| [lib/text/extractBoldTermsFromMarkdown.ts](lib/text/extractBoldTermsFromMarkdown.ts) | App.tsx、ExamWorkspaceSocraticChat | lib/text/ vs features/exam/workspace/lib/ | **lib/text/**（通用 markdown 解析） |
+| [features/exam/lib/glossaryTermFilter.ts](features/exam/lib/glossaryTermFilter.ts) | ExamWorkspaceSocraticChat | lib/text/ vs features/exam/workspace/lib/ | **lib/text/**（通用术语过滤；当前虽然只工作台用，但语义通用） |
+| [lib/exam/scaffoldingClassifier.ts](lib/exam/scaffoldingClassifier.ts) | ExamWorkspaceSocraticChat、services/geminiService | lib/scaffolding/ vs features/exam/workspace/lib/ | **lib/scaffolding/**（被 geminiService 跨域用，不该绑 feature） |
 | [shared/layout/MusicPlayer.tsx](shared/layout/MusicPlayer.tsx) | 仅 Header 一家 | shared/audio/ vs shared/layout/ | **shared/layout/**（与 Header 同居，单一调用方） |
 | [features/exam/hub/StudyFlowPanel.tsx](features/exam/hub/StudyFlowPanel.tsx) | 仅 ExamHubModal | features/exam/studyFlow/ vs 顶层独立 feature | **features/exam/studyFlow/**（实际是 ExamHub 第三个 tab） |
 | [services/storageService.ts](services/storageService.ts) | App、ExamLinkModal、ReviewPage | lib/storage/ vs features/studio/lib/ | **lib/storage/**（IndexedDB 通用层） |
@@ -409,13 +409,13 @@ class-skip/
 
 | Step | 内容 | 影响范围 | 工作量 |
 |------|------|----------|--------|
-| 1.1 | `lib/bkt/` ← `utils/bkt.ts` + `utils/lsapScore.ts` | 改 3 个调用方（ExamPredictionPanel、WorkspaceKcProbeModal、App.tsx） | 小 |
-| 1.2 | `lib/pdf/` ← `utils/pdfUtils.ts` + `utils/pdfQuoteHighlight.ts` | 改 3 个调用方 | 小 |
-| 1.3 | `lib/text/` ← `features/reader/lib/textUtils.ts` + `utils/extractBoldTermsFromMarkdown.ts` + `utils/glossaryTermFilter.ts` | 改 5+ 调用方 | 中 |
+| 1.1 | `lib/bkt/` ← `features/exam/lib/bkt.ts` + `features/exam/lib/lsapScore.ts` | 改 3 个调用方（ExamPredictionPanel、WorkspaceKcProbeModal、App.tsx） | 小 |
+| 1.2 | `lib/pdf/` ← `lib/pdf/pdfUtils.ts` + `features/exam/lib/pdfQuoteHighlight.ts` | 改 3 个调用方 | 小 |
+| 1.3 | `lib/text/` ← `features/reader/lib/textUtils.ts` + `lib/text/extractBoldTermsFromMarkdown.ts` + `features/exam/lib/glossaryTermFilter.ts` | 改 5+ 调用方 | 中 |
 | 1.4 | `lib/storage/` ← `services/storageService.ts` | 改 3 调用方 | 小 |
 | 1.5 | `lib/transcription/` ← `services/transcriptionService.ts` | 改 1 调用方（App） | 极小 |
-| 1.6 | `lib/scaffolding/` ← `utils/scaffoldingClassifier.ts` | 改 2 调用方 | 极小 |
-| 1.7 | `lib/retrieval/` ← `utils/examChunkIndex.ts` + `utils/examChunkRetrieval.ts` + `services/examChunkIndexStorage.ts` | 改 3 调用方 | 小 |
+| 1.6 | `lib/scaffolding/` ← `lib/exam/scaffoldingClassifier.ts` | 改 2 调用方 | 极小 |
+| 1.7 | `lib/retrieval/` ← `features/exam/lib/examChunkIndex.ts` + `features/exam/lib/examChunkRetrieval.ts` + `services/examChunkIndexStorage.ts` | 改 3 调用方 | 小 |
 
 ### 第 2 批：叶子 feature（独立性最强、依赖少）
 

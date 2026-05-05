@@ -1,5 +1,5 @@
 import type { DisciplineBand, DocType, Exam, ExamMaterialLink, LearnerMood, UrgencyBand } from '@/types';
-import type { FilePlanMeta } from '@/utils/examSchedule';
+import type { FilePlanMeta } from '@/features/exam/lib/examSchedule';
 
 const DAY_MS = 86_400_000;
 

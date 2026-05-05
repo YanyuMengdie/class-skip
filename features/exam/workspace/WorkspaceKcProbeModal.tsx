@@ -13,8 +13,8 @@ import {
   type LSAPEvalResult,
   type LSAPProbeDocScope,
 } from '@/services/geminiService';
-import { updateBKT } from '@/utils/bkt';
-import { computePredictedScore } from '@/utils/lsapScore';
+import { updateBKT } from '@/features/exam/lib/bkt';
+import { computePredictedScore } from '@/features/exam/lib/lsapScore';
 import { ConflictPageHint } from '@/features/exam/workspace/WorkspaceEvidenceReportModal';
 
 export function bloomLevelForWorkspaceProbe(kc: LSAPKnowledgeComponent): number {

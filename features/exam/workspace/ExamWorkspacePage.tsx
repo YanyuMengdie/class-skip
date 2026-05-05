@@ -40,10 +40,10 @@ import { KnowledgePointInspectPanel } from '@/features/exam/workspace/KnowledgeP
 import { WorkspaceKcProbeModal } from '@/features/exam/workspace/WorkspaceKcProbeModal';
 import { WorkspaceEvidenceReportModal } from '@/features/exam/workspace/WorkspaceEvidenceReportModal';
 import { ExamWorkspaceMaterialPreview } from '@/features/exam/workspace/ExamWorkspaceMaterialPreview';
-import type { WorkspaceDialogueTurn } from '@/utils/examWorkspaceLsapKey';
-import { buildExamMaterialChunkIndexForLinks, findChunkById } from '@/utils/examChunkIndex';
+import type { WorkspaceDialogueTurn } from '@/features/exam/lib/examWorkspaceLsapKey';
+import { buildExamMaterialChunkIndexForLinks, findChunkById } from '@/features/exam/lib/examChunkIndex';
 import { getExamChunkIndexStats, loadExamMaterialChunkIndex, saveExamMaterialChunkIndex } from '@/services/examChunkIndexStorage';
-import { DEFAULT_TOP_K, retrieveCandidateChunks } from '@/utils/examChunkRetrieval';
+import { DEFAULT_TOP_K, retrieveCandidateChunks } from '@/features/exam/lib/examChunkRetrieval';
 
 export interface ExamWorkspacePageProps {
   user: User;

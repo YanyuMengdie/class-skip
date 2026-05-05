@@ -4,7 +4,7 @@
  * **1-4 多材料**：对 `buildExamMaterialChunkIndexForLinks` 传入的 **排序后材料列表逐份** 处理；每份 PDF 独立切块，`chunkId` 前缀为 `materialLinkId`，故 **跨 PDF 全局唯一**。持久化时同一场 `workspaceKey` 下为 **单条记录合并所有材料的 chunk 数组**（非「每文件一条」），与 `retrieveCandidateChunks` 整场检索一致。
  */
 import type { ExamMaterialLink, ExamMaterialTextChunk } from '@/types';
-import { extractPdfText } from '@/utils/pdfUtils';
+import { extractPdfText } from '@/lib/pdf/pdfUtils';
 
 /** 单块最大字符数（页内超过则滑动切分） */
 export const EXAM_CHUNK_MAX_CHARS = 1000;

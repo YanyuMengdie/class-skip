@@ -23,17 +23,17 @@ import {
   classifyLearnerTurn,
   defineTermInLectureContext,
 } from '@/services/geminiService';
-import { buildKcGlossaryEntryId, extractBoldTermsFromMarkdown, normalizeTermKey } from '@/utils/extractBoldTermsFromMarkdown';
-import { filterGlossaryTermCandidates } from '@/utils/glossaryTermFilter';
-import { computeScaffoldingPhase, heuristicQuality } from '@/utils/scaffoldingClassifier';
-import { computeNextProbeState } from '@/utils/examWorkspaceOrchestrator';
-import type { WorkspaceDialogueTurn } from '@/utils/examWorkspaceLsapKey';
+import { buildKcGlossaryEntryId, extractBoldTermsFromMarkdown, normalizeTermKey } from '@/lib/text/extractBoldTermsFromMarkdown';
+import { filterGlossaryTermCandidates } from '@/features/exam/lib/glossaryTermFilter';
+import { computeScaffoldingPhase, heuristicQuality } from '@/lib/exam/scaffoldingClassifier';
+import { computeNextProbeState } from '@/features/exam/lib/examWorkspaceOrchestrator';
+import type { WorkspaceDialogueTurn } from '@/features/exam/lib/examWorkspaceLsapKey';
 import {
   parseAssistantCitations,
   parseExamWorkspaceModelReply,
   parseOptsFromSnapshot,
-} from '@/utils/examWorkspaceCitations';
-import { DEFAULT_TOP_K, EXAM_CHUNK_QUERY_ASSISTANT_TAIL_CHARS, retrieveCandidateChunks } from '@/utils/examChunkRetrieval';
+} from '@/features/exam/lib/examWorkspaceCitations';
+import { DEFAULT_TOP_K, EXAM_CHUNK_QUERY_ASSISTANT_TAIL_CHARS, retrieveCandidateChunks } from '@/features/exam/lib/examChunkRetrieval';
 import { loadExamMaterialChunkIndex } from '@/services/examChunkIndexStorage';
 import type { OpenMaterialPageOptions } from '@/features/exam/workspace/ExamWorkspaceCitationBlock';
 import { ExamWorkspaceAssistantMarkdown } from '@/features/exam/workspace/ExamWorkspaceAssistantMarkdown';

@@ -11,16 +11,16 @@ import type {
 } from '@/types';
 import { getDailyPlanCache, setDailyPlanCache } from '@/services/firebase';
 import { generateMaintenanceFlashCards, generateQuizSet } from '@/services/geminiService';
-import { evaluateMaintenanceEligibility } from '@/utils/examMaintenanceEligibility';
+import { evaluateMaintenanceEligibility } from '@/features/exam/lib/examMaintenanceEligibility';
 import {
   aggregateUrgencyFromSelectedExams,
   computeMaintenanceStrategy,
   resolveDisciplineBandForMergedMaintenance,
-} from '@/utils/maintenanceStrategy';
+} from '@/features/exam/lib/maintenanceStrategy';
 import { MaintenanceFlashcardDeck } from '@/features/exam/hub/MaintenanceFlashcardDeck';
 import { MaintenanceFeedbackCelebration } from '@/features/exam/hub/MaintenanceFeedbackCelebration';
 import { buildFeedbackExitCopy, buildFeedbackStrongCopy } from '@/data/maintenanceFeedbackCopy';
-import type { FilePlanMeta } from '@/utils/examSchedule';
+import type { FilePlanMeta } from '@/features/exam/lib/examSchedule';
 
 type Phase =
   | 'idle'

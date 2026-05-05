@@ -8,8 +8,8 @@
 |------|------|
 | `types.ts` | `Exam`、`ExamMaterialLink`、`DailySegment`、`DailyPlanCacheDoc`、Study Flow 相关类型；`CalendarEvent.linkedExamId` |
 | `services/firebase.ts` | `exams` / `examMaterials` / `dailyPlanCache` CRUD |
-| `utils/examSchedule.ts` | `buildDailyPlan` |
-| `utils/studyFlowInference.ts` | `inferFamiliarity`、`inferUrgencyForFile`、`buildScenarioKey` |
+| `features/exam/lib/examSchedule.ts` | `buildDailyPlan` |
+| `features/exam/lib/studyFlowInference.ts` | `inferFamiliarity`、`inferUrgencyForFile`、`buildScenarioKey` |
 | `data/studyFlowTemplates.ts` | 预置 ≥8 套情境模板 |
 | `features/exam/ExamHubModal.tsx` | 考试 / 今日学习 / 情境流程 三标签壳 |
 | `features/exam/hub/ExamCenterPanel.tsx` | 考试 CRUD、材料列表、关联入口 |
@@ -18,7 +18,7 @@
 | `docs/P1_EXAM_MAINTENANCE.md` | P1：Firestore `disciplineBand`、缓存 key、`LearnerMood` 与 Study Flow 映射说明 |
 | `features/exam/hub/MaintenanceFlashcardDeck.tsx` | 轻量闪卡浏览器（不跳全屏） |
 | `features/exam/hub/MaintenanceFeedbackCelebration.tsx` | 分层正反馈面板 |
-| `utils/examMaintenanceEligibility.ts` | sprint / warning / daily gate 资格判定 |
+| `features/exam/lib/examMaintenanceEligibility.ts` | sprint / warning / daily gate 资格判定 |
 | `data/maintenanceFeedbackCopy.ts` | 反馈文案常量与模板函数 |
 | `features/exam/hub/StudyFlowPanel.tsx` | 情境选择与步骤执行 |
 | `features/exam/ExamPredictionPanel.tsx` | `initialKCId` 深链 |
