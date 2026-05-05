@@ -9,7 +9,7 @@ import { SkimPanel } from '@/features/reader/skim/SkimPanel';
 import { Sidebar } from '@/components/Sidebar';
 import { TaskHug } from '@/features/energyRefuel/TaskHug';
 import { ChatHug } from '@/features/energyRefuel/ChatHug';
-import { Notebook } from '@/components/Notebook'; 
+import { Notebook } from '@/features/reader/notebook/Notebook';
 import { HistoryModal } from '@/components/HistoryModal';
 import { GalgameOverlay } from '@/components/GalgameOverlay';
 import { GalgameSettings } from '@/components/GalgameSettings'; 

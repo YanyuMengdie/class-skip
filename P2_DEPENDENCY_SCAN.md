@@ -161,7 +161,7 @@
 ### 预期清单核对
 | 文件 | 状态 |
 |---|---|
-| [components/Notebook.tsx](components/Notebook.tsx) | ✓ |
+| [features/reader/notebook/Notebook.tsx](features/reader/notebook/Notebook.tsx) | ✓ |
 
 ### Notebook.tsx 的依赖
 - `../types`：`PageNotes`、`Note`

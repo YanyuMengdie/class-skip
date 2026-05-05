@@ -223,7 +223,7 @@ class-skip/
 
 | 当前路径 | 行 | 定位 | 跨模块依赖 |
 |---|---|---|---|
-| [components/Notebook.tsx](components/Notebook.tsx) | 269 | 主 | utils/textUtils |
+| [features/reader/notebook/Notebook.tsx](features/reader/notebook/Notebook.tsx) | 269 | 主 | utils/textUtils |
 
 ### 1.20 features/studio/ + features/review/
 
