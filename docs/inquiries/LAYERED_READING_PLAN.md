@@ -2,16 +2,16 @@
 
 > **文档性质**：给 Claude Code 的实施计划。具体动手指南。
 > **配套文档**：`LAYERED_READING_INQUIRY.md`（诊断过程，了解为什么这样做）。
-> **实施前置**：读完 INQUIRY §5 七条铁律 + §5.5 阶段 2 后需求加码 + §6 风险评估 + §7 用户体验最终规格 + §10 代码索引。
+> **实施前置**：读完 INQUIRY §5 九条铁律 + §5.5 阶段 2 后需求加码 + §5.6 阶段 3 后题目系统拍板 + §6 风险评估 + §7 用户体验最终规格 + §10 代码索引。
 > **方法论**：沿用 `MULTISELECT_KC_PLAN.md` 的分阶段 + 守卫规则 + 阶段间用户介入 + 给 Claude Code 的执行指令模板。
 > **修订历史**：第一版（阶段 1-4 原计划）→ 第二版（阶段 2 完成后扩展，加溯源 + 提问到阶段 3）。
 
 ---
 
-## 1. 九条铁律（绝对不能违反）
+## 1. 十一条铁律（绝对不能违反）
 
 > 这些铁律来自 INQUIRY 阶段用户钉死的产品哲学。违反任何一条 = PLAN 失败。
-> 铁律 1-7 来自 INQUIRY §5（其中 6/7 是阶段 2 后新增的产品哲学）；铁律 8/9 是 PLAN 实施层钉死。
+> 铁律 1-9 来自 INQUIRY §5（其中 6/7 是阶段 2 后新增、8/9 是阶段 3 后新增的产品哲学）；铁律 10/11 是 PLAN 实施层钉死。
 
 1. **API 边界铁律**：新建独立 `chatWithLayeredReadingTutor`；递进阅读组件**绝不**调 `chatWithAdaptiveTutor` 或 `chatWithSkimAdaptiveTutor`。
 
@@ -27,9 +27,13 @@
 
 7. **Module 提问视觉独立、数据全局（阶段 2 后新增）**：每 module chat 框只显示该 module 的 Q&A（视觉过滤）；但每次调用 `chatWithLayeredReadingTutor` 都把**完整 globalChatHistory** 发给 AI（数据全局共享）；持久化在 `layeredReadingState.globalChatHistory`。
 
-8. **绝不动现有代码**：现有 `SkimPanel.tsx` (1309 行)、`chatWithSkimAdaptiveTutor`、`STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT` 内容、`FilePersistedState.studyMap` 字段、备考工作台所有代码——**完全不动**。
+8. **题目软门槛 + AI 批改（阶段 3 后新增）**：题目懒加载（用户点"📝 答题"按钮才生成）；用户答了 → AI 批改 + 显示参考答案；用户跳过 → 直接显示参考答案；答完/跳过都能推进；题目独立存 `LayeredReadingQuestion` 数组，**不进 globalChatHistory**。
 
-9. **AI 不自动推进三轮**：必须用户点"展开到 Round X"按钮才推进。AI 不能在回复末尾说"我接下来给你讲 Round 2"自动推进。
+9. **题目按题型分批改维度（阶段 3 后新增）**：故事题 = 故事感 + 主旨准确；结构题 = 步骤完整 + 步骤顺序；细节应用题 = 推理逻辑 + 细节抓取。每维度 ★1-5 + 一句话说明。
+
+10. **绝不动现有代码**：现有 `SkimPanel.tsx` (1309 行)、`chatWithSkimAdaptiveTutor`、`STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT` 内容、`FilePersistedState.studyMap` 字段、备考工作台所有代码——**完全不动**。**阶段 4 不修改阶段 2/3 的 Round 1/2/3 prompt** —— 题目相关 prompt 全部新建。
+
+11. **AI 不自动推进三轮**：必须用户点"展开到 Round X"按钮才推进。AI 不能在回复末尾说"我接下来给你讲 Round 2"自动推进。
 
 ---
 
@@ -146,9 +150,9 @@ layeredReadingState?: LayeredReadingState;
 | 阶段 | 范围 | 是否调 AI | 验收要点 | 状态 |
 |---|---|---|---|---|
 | 阶段 1 | viewMode 状态机扩展 + 入口按钮 + 空壳 panel + 持久化结构 | ❌ | 三态切换通过；空壳显示 | ✅ 已完成（commit `767dff3`）|
-| 阶段 2 | Round 1 module 列表生成 + 大白话故事 | ✅ | 能生成 module、能展开看 Round 1 内容 | ✅ 已完成（待用户提供 commit hash）|
-| **阶段 3（范围扩展）** | Round 2/3 + 树状 UI + 进度条 + 主动推进 + **溯源 + 提问** | ✅ | 完整画面终审场景 + 溯源准确性 + chat 跨 module 上下文连贯 | ⏳ 待开工（5-7h）|
-| 阶段 4 | 分层题目 + 学习状态记忆 + CHANGELOG / 边界文档更新 | ✅ | 题目能答、关页面再进能续上 | ⏳ 待开工 |
+| 阶段 2 | Round 1 module 列表生成 + 大白话故事 | ✅ | 能生成 module、能展开看 Round 1 内容 | ✅ 已完成（合并到 commit `050c3bb`，详见 INQUIRY §8.J）|
+| 阶段 3（范围扩展）| Round 2/3 + 树状 UI + 进度条 + 主动推进 + **溯源 + 提问** | ✅ | 完整画面终审场景 + 溯源准确性 + chat 跨 module 上下文连贯 | ✅ 已完成（合并到 commit `050c3bb`）|
+| **阶段 4（范围扩展）** | 分层题目（懒加载 + 软门槛 + AI 按维度批改）+ lastVisited + CHANGELOG / 边界文档更新 | ✅ | 题目能出、能批改、能跳过、状态能恢复 | ⏳ 待开工（3-4h）|
 
 ---
 
@@ -401,62 +405,161 @@ feat(layered-reading): 树状 UI + Round 2/3 + 溯源 + 提问 + 进度条
 
 ---
 
-### 阶段 4：分层题目 + 学习状态记忆 + 边界文档更新
 
-**目标**：题目能答、上次看到哪里能续上、CHANGELOG 和 API 边界文档更新。
+### 阶段 4：分层题目 + 学习状态记忆 + 边界文档更新（范围扩展）
 
-#### 4.1 分层题目
+**⚠️ 范围扩展提示**：本阶段在阶段 3 完成后扩展了范围（详见 INQUIRY §5.6）。原"分层题目"在 INQUIRY §5.4(d) 只有半句话画面；阶段 3 后用户主动拍板 6 个细节维度（题目分布 / 生成时机 / 批改方式 / 跳过 vs 答错 / 答错可重答 / 是否进 globalChatHistory + Prompt 处理），形成完整规格。预估工程量 3-4 小时。
 
-- Round 1 末尾：故事题（lecture 整体流程理解）
-- Round 2 末尾：结构题（module 内部逻辑递进）
-- Round 3 末尾：细节应用题（术语 / 实验 / 应用）
-- 题目数据：`LayeredReadingQuestion`，按 attachedTo 挂在树节点上
-- 新增 AI 调用：`generateLayeredRoundQuestion(fullText, context, roundLevel)`
-- 题目作答 UI 复用现有 SkimPanel 单题样式（参考但不复用代码）
+**目标**：题目能出能批改、能跳过、状态能恢复、CHANGELOG 和 API 边界文档更新。
 
-#### 4.2 学习状态记忆
+#### 4.1 类型定义扩展（先做这步）
 
-- 每次用户切换树节点 / 答题 → 更新 `layeredReadingState.lastVisited`
-- 重新进入 panel 时 → 顶部显示 banner："上次你看到 [module 标题] 的 Round X，要继续吗？" + "继续" / "重新开始" 按钮
+修改 `types.ts`：
 
-#### 4.3 边界文档更新
+- 新增 `LayeredReadingQuestion` 接口，含字段：`id` / `questionType: 'story' | 'structure' | 'application'` / `attachedTo: string`（moduleId 或 branchId）/ `questionText` / `referenceAnswer` / `userAnswer?: string | null` / `status: 'unanswered' | 'answered' | 'skipped'` / `aiGrade?` 含 `dimensions: Array<{label, stars, comment}>` / `generatedAt` / `answeredAt?`
+- 新增 `LayeredReadingLastVisited` 接口，含 `moduleId` / `round: 1 | 2 | 3` / `branchId?` / `lastUpdatedAt`
+- `LayeredReadingState` 加 `questions: LayeredReadingQuestion[]` + `lastVisited?: LayeredReadingLastVisited`
 
-- 修改 `docs/SKIM_VS_EXAM_TUTOR_API.md`：
-  - 引用校验表加一行：
-    ```
-    | `chatWithLayeredReadingTutor` | `services/geminiService.ts`、`features/reader/layered/LayeredReadingPanel.tsx` |
-    ```
-  - "不应"段落加一行：
-    ```
-    **不应**：`LayeredReadingPanel.tsx` 出现 `chatWithSkimAdaptiveTutor` 或 `chatWithAdaptiveTutor`。
-    ```
-  - 职责划分表加一行：
-    ```
-    | `chatWithLayeredReadingTutor` | 仅递进阅读（`LayeredReadingPanel`） | `LAYERED_READING_SYSTEM_PROMPT`，无任何附录 |
-    ```
+#### 4.2 新建 4 个题目相关 prompt（铁律 10：不动现有 Round 1/2/3 prompt）
 
-- 修改 `CHANGELOG.md`：在 Unreleased 段加：
-  ```
-  ### 🌳 递进阅读模式（新增第三种阅读模式）
+修改 `lib/prompts/layeredReadingPrompts.ts`，**新建** 4 个 prompt：
 
-  - **入口**：Header 略读按钮旁新增"递进阅读"按钮，不依赖 studyMap
-  - **三轮递进**：Round 1 大白话故事线 → Round 2 结构展开 → Round 3 细节挂载
-  - **树状 UI**：三轮共用同一棵树 zoom in，用户主动点按钮推进
-  - **数据独立**：与略读模式 module 完全独立（独立的 layeredReadingState）
-  - **API 隔离**：新建 chatWithLayeredReadingTutor，不复用现有 tutor
-  ```
+##### 4.2.1 `buildLayeredQuestionRound1Prompt(module)` — 故事题
 
-#### 4.4 阶段 4 commit message
+prompt 要求：
+- 出 1 道开放题（不是选择题），让学生用自己的话回答
+- 测试 2 个维度："故事感"（用大白话不堆术语）+ "主旨准确"（抓核心非细节）
+- 给好/差对比例子：好 = "用一句话总结这个 module 在讲什么？"；差 = "细胞膜的化学组成是什么？"（这是细节题）
+- 同时输出参考答案（150-300 字大白话）
+
+JSON 输出：`{questionText, referenceAnswer}`
+
+##### 4.2.2 `buildLayeredQuestionRound2Prompt(parentModule, branch)` — 结构题
+
+prompt 要求：
+- 出 1 道开放题，测试 2 个维度："步骤完整" + "步骤顺序"
+- 题目示例：好 = "作者用了哪几步来论证 X？"；差 = "X 是什么？"（这是定义题）
+- 参考答案：列出 2-5 步 + 步骤间连接（因果/时间/递进）
+
+JSON 输出：`{questionText, referenceAnswer}`
+
+##### 4.2.3 `buildLayeredQuestionRound3Prompt(parentModule, branch, details)` — 细节应用题
+
+prompt 要求：
+- 出 1 道**应用题或推理题**（不是定义复述）
+- 测试 2 个维度："推理逻辑"（结论符合逻辑）+ "细节抓取"（细节准确）
+- 题目示例：好 = "如果当时詹纳没用牛痘而是用马痘，实验会怎样？"（基于"同源病毒触发交叉免疫"的细节推理）
+- 参考答案：写明用到了哪些 detail 做推理
+
+JSON 输出：`{questionText, referenceAnswer}`
+
+##### 4.2.4 `buildLayeredQuestionGradingPrompt(question, userAnswer)` — AI 批改
+
+prompt 要求：
+- 接收：题目类型 + 题目 + 参考答案 + 学生答案
+- 按题型相应的 2 个维度打分（★1-5）+ 一句话说明
+- 维度对应表：
+  - story: 故事感 + 主旨准确
+  - structure: 步骤完整 + 步骤顺序
+  - application: 推理逻辑 + 细节抓取
+- 批改原则：宽松而非苛刻；学生答得"七成准"就给 4 星；"完全准 + 表达好"才 5 星
+- 一句话说明必须**指出具体好/差在哪**，不能是"答得不错/有待加强"等空泛词
+
+JSON 输出：`{dimensions: [{label, stars, comment}, {label, stars, comment}]}`
+
+#### 4.3 新增 4 个 AI 函数（修改 `services/geminiService.ts`）
+
+按铁律 10（新建，不动现有）：
+
+- `generateLayeredQuestionForRound1(module): Promise<{questionText, referenceAnswer} | null>`
+- `generateLayeredQuestionForRound2(parentModule, branch): Promise<{questionText, referenceAnswer} | null>`
+- `generateLayeredQuestionForRound3(parentModule, branch, details): Promise<{questionText, referenceAnswer} | null>`
+- `gradeLayeredQuestion(question, userAnswer): Promise<LayeredReadingQuestion['aiGrade'] | null>`
+
+每个函数用 `responseSchema` 强约束 JSON 格式。
+
+#### 4.4 新建 `LayeredReadingQuestionBox` 组件
+
+文件：`features/reader/layered/LayeredReadingQuestionBox.tsx`
+
+**Props**：`questionType` / `parentId` / `question: LayeredReadingQuestion | null` / `isGenerating` / `isGrading` / `onGenerate` / `onSubmit(answer)` / `onSkip`
+
+**视觉行为**（6 个场景）：
+
+- **场景 1**（question === null, 没在生成）：显示 "📝 答题" 按钮，点击触发 `onGenerate`
+- **场景 2**（isGenerating === true）：显示 "AI 正在出题..." loader
+- **场景 3**（question 存在, status === 'unanswered'）：显示题目文本 + 输入框 + 两个按钮 "📝 提交答案" / "⏭ 跳过看答案"
+- **场景 4**（isGrading === true）：显示 "AI 正在批改..." loader
+- **场景 5**（status === 'answered'）：显示用户答案 + AI 反馈（2 个维度的星星 + 一句话说明）+ 参考答案 + "✏️ 重新答题"按钮
+- **场景 6**（status === 'skipped'）：显示 "⏭ 已跳过" + 参考答案 + "✏️ 现在答题"按钮（跳过后还能改答）
+
+**关键事项**：
+- 不阻塞外层"展开到 Round X →"按钮——任何状态都不阻塞推进（铁律 8 软门槛）
+- "✏️ 重新答题" 清空 userAnswer + aiGrade，回到场景 3
+- 题目状态写入 `layeredReadingState.questions`（不进 globalChatHistory，铁律 8）
+
+#### 4.5 LayeredReadingTree 集成 QuestionBox
+
+修改 `features/reader/layered/LayeredReadingTree.tsx`：
+
+- **ModuleNode**：Round 1 内容下方加 `<LayeredReadingQuestionBox questionType="story" parentId={module.id} ... />`
+- **BranchNode**：Round 2 内容下方加 `<LayeredReadingQuestionBox questionType="structure" parentId={branch.id} ... />`
+- **BranchNode**：Round 3 details 列表**末尾**（不是每个 detail）加 `<LayeredReadingQuestionBox questionType="application" parentId={branch.id} ... />`
+
+#### 4.6 lastVisited banner（学习状态记忆）
+
+新建 `features/reader/layered/LastVisitedBanner.tsx`：
+
+**触发**：用户每次切换/展开树节点 / 答题 → Tree 调 `onUpdateLastVisited({moduleId, round, branchId})` → Panel 写 `setLayeredReadingState`
+
+**显示**：
+- 进入 panel 时（lastVisited 存在 + 距上次时间 > 1 小时）→ 顶部显示 banner："📍 上次你看到 module X「storyTitle」的 Round Y branch Z" + 两个按钮 "继续阅读" / "从头开始"
+- "继续阅读" → 自动展开到对应位置 + scroll 到该节点
+- "从头开始" → 关闭 banner，状态不变（用户自己浏览）
+- banner 显示一次后关闭，不重复显示
+
+#### 4.7 边界文档更新
+
+修改 `docs/SKIM_VS_EXAM_TUTOR_API.md`：
+
+- 引用校验表加 `chatWithLayeredReadingTutor` 一行（消费方为 LayeredReadingPanel + ModuleChatBox）
+- "不应"段落：`LayeredReadingPanel.tsx` 或其子组件不应出现 `chatWithSkimAdaptiveTutor` 或 `chatWithAdaptiveTutor`
+- 职责划分表加 `chatWithLayeredReadingTutor` 一行（仅递进阅读，含跨 module 上下文段）
+- 阶段 4 加题目相关 4 个新 AI 函数说明
+
+修改 `CHANGELOG.md` Unreleased 段，加"递进阅读模式"段，列出 8 个核心特性（入口 / 三轮 / 树状 UI / 数据独立 / 溯源 / 提问 / 题目 / lastVisited / API 隔离）。
+
+#### 4.8 验收要点
+
+- 完整画面终审场景全部跑通
+- 每 module Round 1 末有"📝 答题"按钮 → 点击生成故事题 → 答 → AI 按 2 维度批改
+- 每 branch Round 2 末有"📝 答题"按钮 → 生成结构题
+- 每 branch Round 3 末（不是每 detail）有"📝 答题"按钮 → 生成细节应用题
+- 跳过 → 直接显示参考答案，"展开到 Round X →"按钮不阻塞
+- 答错可重答（点"✏️ 重新答题"）
+- lastVisited 持久化 + 重新进入 banner 显示
+- **关键回归**：题目相关代码 0 处读 globalChatHistory（铁律 8 不混淆）
+- **关键回归**：AI 批改维度跟题型对应正确（故事题用故事感+主旨准确，不会用结构题维度）
+
+#### 4.9 阶段 4 commit message
 
 ```
-feat(layered-reading): 分层题目 + 学习状态记忆 + 边界文档
+feat(layered-reading): 阶段 4 - 分层题目 + lastVisited + 边界文档
 
-- generateLayeredRoundQuestion: 故事题/结构题/细节题
-- 学习状态记忆 banner（lastVisited 持久化）
-- 更新 docs/SKIM_VS_EXAM_TUTOR_API.md（API 边界守卫）
+- 类型扩展:LayeredReadingQuestion(含 questionType/dimensions/aiGrade)
+  + LayeredReadingLastVisited
+- 4 个新 prompt:Round1/2/3 题目生成 + 1 个批改 prompt
+  (铁律 10:不动现有 Round 1/2/3 prompt)
+- 4 个新 AI 函数:generateLayeredQuestionForRound1/2/3 + gradeLayeredQuestion
+- 新建 LayeredReadingQuestionBox 组件:
+  懒加载 + 软门槛 + 跳过 + 重答 + 按题型 2 维度批改 (铁律 8 + 9)
+- 新建 LastVisitedBanner 组件:关页面再开续读
+- 题目独立存 layeredReadingState.questions,不进 globalChatHistory (铁律 8)
+- 更新 docs/SKIM_VS_EXAM_TUTOR_API.md 边界守卫
 - 更新 CHANGELOG.md
-- 阶段 4/4 of 递进阅读模式（功能完整）
+- 阶段 4/4 of 递进阅读模式(功能完整)
 ```
+
 
 ---
 
@@ -473,16 +576,23 @@ feat(layered-reading): 分层题目 + 学习状态记忆 + 边界文档
 | **`chatWithLayeredReadingTutor` 调用时 history 参数必须是完整 globalChatHistory（不过滤）** | 铁律 7 | AI 跨 module 失忆，违反用户拍板 |
 | **`globalChatHistory` 持久化到 `FilePersistedState.layeredReadingState`** | 铁律 7 | 关页面对话历史丢失 |
 | **每条 LayeredReadingChatMessage 必须有 askedInModuleId 字段** | 铁律 7 | 视觉过滤无法工作 |
-| 不修改 `STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT` 内容 | 铁律 8 | 污染略读模式 |
-| 不修改 `SkimPanel.tsx` | 铁律 8 | 破坏现有略读 |
-| 不修改 `chatWithSkimAdaptiveTutor` / `chatWithAdaptiveTutor` | 铁律 8 | 污染既有 API |
+| 不修改 `STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT` 内容 | 铁律 10 | 污染略读模式 |
+| 不修改 `SkimPanel.tsx` | 铁律 10 | 破坏现有略读 |
+| 不修改 `chatWithSkimAdaptiveTutor` / `chatWithAdaptiveTutor` | 铁律 10 | 污染既有 API |
 | 递进阅读按钮显示条件不抄 `hasStudyMap` | INQUIRY 风险/RECON | 破坏"独立路径"画面 |
-| AI prompt 明文禁止"接下来我给你讲 Round X"自动推进语 | 铁律 9 | 破坏"用户主动推进"画面 |
+| AI prompt 明文禁止"接下来我给你讲 Round X"自动推进语 | 铁律 11 | 破坏"用户主动推进"画面 |
 | 不做 page-level coverage map / A-D 风险标签 / 自动补洞 | 铁律 3 | scope creep |
 | 不做 STEM/HUMANITIES 分流的递进阅读 prompt | 铁律 5 | 违反"轻盈起步" |
 | 不做 diagnosis/tutoring/quiz 三阶段前置门控 | 铁律 4 | 违反"轻盈直入" |
 | 不做右侧 panel 详情区 | 用户否决 (f) | 违反终审画面 |
-| 不动备考工作台 / KC / atom coverage / BKT | 铁律 8 | 越界 |
+| 不动备考工作台 / KC / atom coverage / BKT | 铁律 10 | 越界 |
+| **题目懒加载——用户点"📝 答题"按钮才调 AI** | 铁律 8 | 浪费 token 在用户不答的题上 |
+| **题目"提交"和"跳过"都不阻塞外层"展开到 Round X →"按钮** | 铁律 8 | 强制门槛违反"软门槛"用户拍板 |
+| **题目数据存 `layeredReadingState.questions`,不进 globalChatHistory** | 铁律 8 | 题目和提问 chat 混淆 = 概念分裂 |
+| **AI 批改维度按题型严格对应**（故事题=故事感+主旨准确;结构题=步骤完整+步骤顺序;细节题=推理逻辑+细节抓取）| 铁律 9 | 维度错配丢失题型差异 |
+| **不修改阶段 2/3 的 Round 1/2/3 prompt**(题目相关 prompt 全部新建) | 铁律 10 | 改 prompt 风险大,会污染已通过测试的 Round 内容质量 |
+| **题目按 attachedTo 挂在树节点**(story → moduleId; structure/application → branchId)| INQUIRY §5.6 | 不按拍板分布会导致 UI 混乱 |
+| **每 branch Round 3 末只 1 道细节应用题**(不是每个 detail 1 道)| INQUIRY §5.6 | 每 detail 1 道 = 题目数量爆炸 |
 
 ---
 
@@ -560,7 +670,7 @@ git push              # 推回退到远程
 请按 docs/inquiries/LAYERED_READING_PLAN.md 实施"递进阅读模式"功能。
 
 要求：
-1. 严格遵守 §1 七条铁律和 §2 全局技术约束
+1. 严格遵守 §1 十一条铁律和 §2 全局技术约束
 2. 严格按 §3 四个阶段顺序执行，每阶段一个独立 commit
 3. 每阶段 commit 前必须通过 §5 基础冒烟测试清单
 4. 阶段间停下来等我确认测试通过，再开始下一阶段
@@ -670,3 +780,14 @@ module 拆分跑偏、Round 1 不够大白话、Round 3 细节归类错乱——
 *- 阶段 3 内部分子步骤 3.1-3.9*
 *- 守卫规则汇总扩展到 16 条*
 *- 用户主动选择"阶段 3 一次做完"而非拆分（INQUIRY §5.5 节奏决策）*
+
+*第三次修订（阶段 3 commit 完成后）：阶段 4 题目系统范围扩展。*
+*- 加入题目软门槛 + AI 批改（铁律 8）：懒加载、可跳过、可重答、独立持久化*
+*- 加入题目按题型分批改维度（铁律 9）：故事题/结构题/细节题各 2 维度 ★1-5*
+*- 铁律体系从 9 条扩展到 11 条（INQUIRY §5 九条 + PLAN §1 实施层 10/11 两条）*
+*- 阶段 4 范围明确化：原"分层题目"半句话画面 → 9 个子步骤的完整规格（4.1-4.9）*
+*- 4 个新 prompt（题目生成 ×3 + 批改 ×1）+ 4 个新 AI 函数 + 1 个新组件 LayeredReadingQuestionBox + 1 个新组件 LastVisitedBanner*
+*- 工程量预估 3-4 小时（用户接受 token 成本上升以换产品完整度）*
+*- 守卫规则汇总扩展到 23 条（加 7 条阶段 4 相关）*
+*- 阶段 1/2/3 状态标注完成 commit hash（767dff3 / 050c3bb）*
+*- INQUIRY §8.J/K 元反思已沉淀（commit 控制权移交盲点 + 阶段 4 加码工作流自纠）*

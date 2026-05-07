@@ -152,6 +152,21 @@
    - **持久化**：`globalChatHistory` 持久化到 `FilePersistedState.layeredReadingState.globalChatHistory`。
    - **理由**：用户提出"针对每个 module 都可以提问并且得到回答"。研究者列了 (p) 视觉独立 + (q) 视觉共享 + 折中三种形态，用户选了折中——视觉简洁但 AI 上下文完整。这避免了 (p) "跨 module AI 困惑"和 (q) "全 panel 一个 chat 视觉混乱"两种极端。
 
+8. **题目系统：软门槛、可跳过、AI 按维度批改**（阶段 3 完成后新增，详见 §5.6）：
+   - **题目分布**：每 module Round 1 末尾 1 道故事题 + 每 branch Round 2 末尾 1 道结构题 + 每 branch Round 3 末尾 1 道细节应用题
+   - **生成时机**：**懒加载**——用户主动点"📝 答题"按钮才触发 AI 生成
+   - **生成方式**：独立 4 个新 prompt，**不动现有 Round 1/2/3 prompt**——隔离风险，避免污染已通过测试的 Round 内容质量
+   - **软门槛**：用户可答可跳过。答了→ AI 批改 + 显示参考答案；跳过 → 直接显示参考答案；任一情况都能展开下一 Round
+   - **不进 globalChatHistory**：题目独立存 `LayeredReadingQuestion` 数组，跟提问 chat 解耦
+   - **理由**：用户拍板"软门槛、可跳过、AI 批改"——既保留题目作为产品维度（INQUIRY §5.4(d)"题目跟解读混在一起不是事后测试"），又不让题目变成挫败感来源（铁律 8 的"软"）。
+
+9. **题目批改：按题目类型分维度**（阶段 3 完成后新增，详见 §5.6）：
+   - 故事题（Round 1）维度：**故事感** + **主旨准确**
+   - 结构题（Round 2）维度：**步骤完整** + **步骤顺序**
+   - 细节应用题（Round 3）维度：**推理逻辑** + **细节抓取**
+   - 每维度用星星评分（★1-5）+ 一句话说明
+   - **理由**：不同题型测的产品维度不同——故事题测"会不会大白话讲清"、结构题测"会不会复述论证步骤"、细节题测"会不会用细节做推理"。统一维度会丢失题型差异。
+
 ### 选定方案
 
 | 维度 | 决策 |
@@ -171,6 +186,8 @@
 | **Round 2/3 溯源**（新增）| Round 2/3 内容必须含页码 + 位置描述；点击页码可跳转 PDF 对应页 |
 | **Module 提问**（新增）| 每 module 视觉独立 chat 框；数据/AI 上下文全局共享（globalChatHistory） |
 | **阶段 3 范围**（新增）| 树状 UI + Round 2/3 + 进度条 + 溯源 + chat 框，**一次做完**（用户拍板） |
+| **阶段 4 题目系统**（新增）| 每 module Round 1 末 + 每 branch Round 2/3 末出题；懒加载生成；软门槛可跳过；AI 按维度批改 |
+| **阶段 4 节奏**（新增）| 题目 + lastVisited + 文档更新一次做完(用户拍板选项 A) |
 
 ### 用户勾选的 6 条交互维度
 
@@ -291,6 +308,87 @@
 
 ---
 
+## 5.6 阶段 3 完成后的题目系统拍板（新增章节）
+
+### 触发场景
+
+阶段 3 实施完成、AI 输出测试通过、commit 推送之后——研究者准备给阶段 4 执行指令时，按 PLAN 阶段 4 原始范围给用户列了"分层题目 + lastVisited + 文档更新"4 项工作。**用户选了选项 A（一次做完所有 4 项）**。
+
+但研究者意识到："分层题目"在 INQUIRY §5.4(d)"题目跟解读混在一起不是事后测试"那条画面感受里**只有半句话**——画面没真正对齐过。如果直接让 Claude Code 做，它会自己脑补：
+- 题目形态：选择题 vs 开放题？
+- 推进逻辑：答完才能推进 vs 可跳过 vs 软引导？
+- AI 是否批改：批改 vs 不批改给参考答案？
+
+这三个产品决策**完全不同**，会做出完全不同的产品。研究者踩刹车，列了 4 种形态让用户选。
+
+### 形态对比与用户决策
+
+研究者列的 4 种形态：
+- **(a) 温柔引导，不评分**：AI 出题 → 用户答 → 显示参考答案（不批改）→ 用户自己对比 → 推进
+- **(b) AI 批改，给反馈**：AI 出题 → 用户答 → AI 评价 → 才能推进
+- **(c) 软门槛，可跳过**：AI 出题 → 答或跳过都行 → 推进无门槛
+- **(d) 完全不在 Round 内做，单独"题目模式"**：所有 Round 完成后单独进入题目页
+
+**用户的拍板**：**(c) 基础形态 + (b) 的 AI 批改部分**——这是用户主动重新组合：
+- 软门槛（可跳过）
+- 但答了的话 AI 要批改给反馈
+- 跳过 → 直接显示参考答案
+- 答完/跳过都能推进
+
+研究者把这个组合命名为"软门槛 + AI 批改"——升格成**铁律 8**。
+
+### 6 个细节维度的画面对齐
+
+研究者继续列了 6 个细节维度让用户拍板，每个维度都涉及隐含产品决策：
+
+| 维度 | 用户最终拍板 | 研究者推荐 |
+|---|---|---|
+| 题目分布 | 每 module Round 1 末 + 每 branch Round 2/3 末（共 N+2M 题）| 一致 |
+| 生成时机 | (ii) 懒加载（用户点"答题"按钮才生成）| 推荐 (i) 并发,**用户改了** |
+| AI 批改方式 | (y3) 按题目类型不同维度（每类 2 维度）| 推荐 (y1) 固定 2 维度,**用户升级了** |
+| 跳过 vs 答错 | (n) 不区分 | 一致 |
+| 答错可重答 | (s) 能 | 一致 |
+| 是否进 globalChatHistory | (II) 不进 | 一致 |
+| Prompt 处理 | (Q) 新建 4 个独立题目 prompt | 推荐 (Q),**用户接受 token 上升代价** |
+
+**用户的两次"反向拍板"值得记录**：
+- **生成时机用户选 ii 而非研究者推荐的 i**：研究者倾向并发生成（隐藏第二个 loading），但用户选懒加载——**理由可能是**"不浪费 token 在用户根本不会答的题上"。这是用户自己的产品判断
+- **批改维度用户选 y3 而非研究者推荐的 y1**：研究者觉得 y1 简洁就够，但用户选 y3 按题型分维度——**这是教学法判断**：故事题/结构题/细节题测的能力不同，统一维度会丢失差异
+
+研究者**不否决**这两次反向拍板，按用户决策修订铁律 8 + 9。
+
+### 6 个批改维度（按题型分组）
+
+| 题型 | Round | 维度 1 | 维度 2 |
+|---|---|---|---|
+| 故事题 | Round 1 末 | 故事感（用大白话讲不堆术语）| 主旨准确（抓住核心而非某个细节）|
+| 结构题 | Round 2 末 | 步骤完整（关键步骤都答到）| 步骤顺序（先后/因果关系正确）|
+| 细节应用题 | Round 3 末 | 推理逻辑（从已知细节得出的结论符合逻辑）| 细节抓取（人名/数字/术语的准确性）|
+
+每维度用 ★1-5 评分 + 一句话说明。
+
+### 加码后的阶段 4 范围对比
+
+| 维度 | 阶段 3 完成时（原 PLAN）| 阶段 3 完成后题目加码 |
+|---|---|---|
+| 阶段 4 范围 | 分层题目 + lastVisited + 边界文档 + CHANGELOG | + 题目分布钉死 + 懒加载机制 + 6 维度批改 prompt |
+| 新建 prompt | 不明确 | **明确 4 个**：Round 1/2/3 题目生成 + 1 个批改 prompt |
+| 新建 AI 函数 | 不明确 | **5 个**：generateLayeredQuestionRound1 / Round2 / Round3 / gradeLayeredQuestion |
+| AI 调用次数 | 不明确 | 用户每次"出题"+ 1 次,"批改" + 1 次。一份 PDF 多约 N+2M 次出题 + 用户答题对应批改次数 |
+| Token 成本 | 未评估 | 上升,**用户接受** |
+| 工程时间预估 | 1.5-2.5h | **3-4 小时** |
+| 风险点 | UI 简单 | + 题目质量(prompt 调试) + 批改准确度 + 视觉过滤 |
+
+### 这次加码记录的诚实
+
+**研究者承认**：
+
+1. 第一次列阶段 4 时**只列了"分层题目"4 个字**——这是工作流盲点：之前 INQUIRY 没把题目画面对齐充分，到了阶段 4 才补
+2. 用户选 A"一次做完"时**研究者没立刻让 Claude Code 开工**，而是踩刹车走画面对齐——这次符合 INQUIRY §8.H 第二次翻译层警觉的训练
+3. 用户两次"反向推荐"（ii / y3）**保留作为产品判断的证据**——用户不是机械接受研究者推荐，是有自己的产品哲学。研究者尊重这一点
+
+---
+
 ## 6. 已识别的实施风险
 
 ### 风险 1：树状数据结构 + UI 工程量较重
@@ -393,6 +491,61 @@ Gemini 2.5 Pro 上下文窗口 200 万 token，理论上完全装得下。但：
 - Claude Code 自检报告必须按子步骤分组列出
 - 阶段 3 commit 前的 AI 输出验证（参考阶段 2 的"上线前 AI 输出验证步骤"模式）扩展到包括溯源准确性 + 提问 chat 上下文测试
 
+### 风险 10：题目生成质量参差（阶段 3 后新增）
+
+题目质量受 prompt 影响极大。可能的故障：
+- AI 出题脱离 Round 内容（不基于 module/branch 实际讲了什么）
+- 题目太简单（"这个 module 讲了什么？"——答案就是标题）
+- 题目太难（"如果把第 23 页第三个箭头改成蓝色,实验设计会怎样变化？"——脱离应用场景）
+
+**缓解**：
+- 4 个 prompt 都给 1-2 个 good/bad 例子
+- 用 IMM250 PDF 实测题目质量后再 commit
+- prompt 调优作为阶段 4 后的迭代工作，可以独立小 commit
+
+### 风险 11：AI 批改准确度（阶段 3 后新增）
+
+按题型分维度批改（y3 形态）意味着 AI 要：
+- 理解题目类型
+- 按 2 个维度独立打分
+- 给出一句话说明
+
+**潜在故障**：
+- AI 维度分数飘忽（同一答案两次评分不一致）
+- AI 偏宽松或偏严格
+- 维度说明跟评分不对齐（"故事感 ★★★☆☆"但文字说"非常好"）
+
+**缓解**：
+- 批改 prompt 给 reference rubric（每个维度的 5 星标准）
+- 用 IMM250 PDF 实测，用户故意输入"完美答案 / 部分答案 / 离题答案"看 AI 打分是否合理
+- 接受 AI 评分有 ±1 星浮动——不强求严格一致
+
+### 风险 12：题目持久化大小（阶段 3 后新增）
+
+每个 module 的 layeredReadingState 会膨胀：
+- N+2M 道题 × 每题（题目 100 字 + 参考答案 200 字 + 用户答案变长 + AI 反馈 200 字）
+- 一份 PDF 可能再增加 50-100 KB layeredReadingState
+
+加上 globalChatHistory（风险 6）+ Round 1/2/3 内容——**单 PDF layeredReadingState 可能 200-300 KB**。
+
+**缓解**：
+- 监控 layeredReadingState 大小——超过 500 KB 给用户提示
+- 阶段 4 后如真出问题再加"清空某 module 题目历史"功能
+- 不在阶段 4 处理（YAGNI）
+
+### 风险 13：题目和提问混淆（阶段 3 后新增）
+
+用户可能混淆"💬 提问"和"📝 答题"两个入口的语义：
+- "💬 提问" = 用户主动问 AI（回答自由形式）
+- "📝 答题" = AI 出题，用户答（AI 批改）
+
+**可能故障**：用户在"💬 提问" chat 框输入"我想做题"——AI 该怎么处理？
+
+**缓解**：
+- LAYERED_READING_SYSTEM_PROMPT 明确说："如果用户在 chat 框里说想做题/想测试,引导他点 module 节点的'📝 答题'按钮,不要在 chat 框里出题"
+- UI 上"💬 提问"和"📝 答题"按钮视觉区分（颜色/位置）
+- 阶段 4 实测中观察这条是否真的发生
+
 ---
 
 ## 7. 用户体验最终规格
@@ -418,6 +571,12 @@ Gemini 2.5 Pro 上下文窗口 200 万 token，理论上完全装得下。但：
 | **每 module chat 框**（新增）| module 节点下默认折叠，点 "💬 提问" 展开；只显示该 module 的 Q&A |
 | **chat 框 AI 上下文**（新增）| 每次发完整 globalChatHistory 给 AI，AI 跨 module 时仍记得之前问过什么 |
 | **chat 框持久化**（新增）| globalChatHistory 存 `FilePersistedState.layeredReadingState.globalChatHistory` |
+| **每 module Round 1 末出故事题**（阶段 4 新增）| Round 1 内容下方显示"📝 答题"按钮；点击后才生成题目（懒加载）|
+| **每 branch Round 2/3 末出题**（阶段 4 新增）| 每 branch 末显示"📝 答题"按钮；Round 2 出结构题、Round 3 出细节应用题 |
+| **题目软门槛**（阶段 4 新增）| 答题：用户输入答案 → 提交 → AI 批改（按题型 2 维度打 ★1-5）+ 显示参考答案；跳过：直接显示参考答案 |
+| **答完/跳过都能推进**（阶段 4 新增）| 答完或跳过都不阻塞"展开到 Round X →"按钮 |
+| **题目可重答**（阶段 4 新增）| 用户可以多次答同一题，每次重新批改 |
+| **题目独立持久化**（阶段 4 新增）| 题目 + 答案 + 反馈存 `layeredReadingState.questions`，不进 globalChatHistory |
 | 进度可视化 | 顶部进度条三条：Round 1 X/N · Round 2 Y/N · Round 3 Z/N |
 | 关闭后再进入 | 提示"上次你在 Round X 的 module Y 子枝干 Z.W，要继续吗？" |
 | API | 调用 `chatWithLayeredReadingTutor`，统一 prompt（不分学科） |
@@ -559,6 +718,73 @@ GPT 文档是脱离 class-skip 现状写的。直接照搬会导致：
 
 这条沉淀给未来：**需求加码不是"加功能"，是"重新走画面对齐流程"**。如果只是加功能不修订文档，那等于把工作流降级为"用户说什么 Claude Code 就做什么"——失去了 INQUIRY/PLAN 的产品哲学保护功能。
 
+### J. 工作流盲区——commit 控制权移交时的间断点（阶段 3 后新增）
+
+**事故复盘**：
+
+阶段 2 实施完成时，研究者按方案 B（"实施完不 commit、用户跑 dev 测 AI、满意再 commit"）让 Claude Code 把代码留在工作树。用户测试通过后说"AI 输出 OK"，研究者让 Claude Code 执行 commit。**但用户当时立刻进入了"加溯源 + 提问"的新需求对话**——焦点立刻转向新需求，**commit hash 确认环节被完全跳过**。
+
+事故的真实证据链直到阶段 3 准备 commit 时才浮现：
+- `lib/prompts/layeredReadingPrompts.ts` 一直是 untracked 状态
+- `services/geminiService.ts` 工作树 diff +312 行（远超阶段 3 应改的量）
+- git log 历史里阶段 1 → 阶段 1.5 docs → 直接是阶段 3 docs，**中间没有阶段 2 commit**
+
+研究者和用户花了几个回合诊断后承认：阶段 2 commit 可能从未真正执行（或执行了但代码没进 commit）。最终决策是"选项 A 合并 commit"——把阶段 2+3 合并成一个 commit，commit message 注明事故原因。
+
+**根因分析（工作流层）**：
+
+这不是 Claude Code 失误，也不是用户失误，是**工作流设计的盲点**：
+
+| 角色 | 阶段 2 commit 这件事的责任分担 |
+|---|---|
+| 用户 | 以为自己 commit 了（可能执行了 commit 命令但代码没进去；或者以为 push 完成 = commit 完成）|
+| chat AI（研究者）| 假设用户 commit 了——因为用户说"AI 输出 OK，我 push 完了"；**没追问 commit hash** |
+| Claude Code | 当时可能没真的 commit（焦点立刻被新需求抢走）|
+
+**4 件事同时发生时，"commit hash 确认"被挤掉了**：
+1. AI 输出验证刚通过（用户刚松一口气）
+2. 用户提了新需求（"我希望加溯源 + 提问"）
+3. 研究者立刻按新工作流引导用户（"踩刹车，按工作流处理新需求"）
+4. Claude Code 当时把代码留在工作树里没自动 commit
+
+**未来工作流的改进**：
+
+研究者在每次说"OK，进入下一阶段"前，**强制问"上一阶段的 commit hash 是多少"**——把这一步钉死成工作流的强制环节。如果用户答不上来，停下来核查。
+
+这条沉淀写进未来的 INQUIRY 通用模板：**阶段间过渡必须有 commit hash 确认环节**。
+
+**对 Claude Code 的赞赏**：
+
+事故被 Claude Code 在阶段 3 准备 commit 前发现并停下来——它没硬上、没自作主张拆 commit、没假装 git 状态正常。它列了完整证据链 + 列了两种可能 + 列了两种处理方案，**把决策权完整交回给用户**。
+
+这正是 INQUIRY §9.E "捍卫产品哲学" + §8.F "工作流分层"的完美执行。Claude Code 知道边界在哪、知道什么时候停下来问。
+
+### K. 阶段 4 加码时的工作流自纠（阶段 3 后新增）
+
+阶段 4 PLAN 原始范围只列了"分层题目 + lastVisited + 边界文档 + CHANGELOG"4 项。用户选选项 A"一次做完"时，研究者**没立刻让 Claude Code 开工**，而是意识到：
+
+> "分层题目"在 INQUIRY §5.4(d)"题目跟解读混在一起不是事后测试"那条画面感受里**只有半句话**——画面没真正对齐过。如果直接让 Claude Code 做，它会自己脑补：题目形态？推进逻辑？AI 是否批改？
+
+研究者列了 4 种基础形态（a-d）让用户选。**用户主动重新组合**：(c) 软门槛 + (b) 的 AI 批改部分——这是用户做的产品判断。
+
+之后研究者继续列 6 个细节维度（生成时机 / 批改方式 / 跳过 vs 答错 / 答错可重答 / 是否进 globalChatHistory / Prompt 处理），每个维度让用户拍板。**用户两次"反向拍板"研究者推荐**：
+- 生成时机：研究者推 (i) 并发，用户选 (ii) 懒加载（不浪费 token 在用户不会答的题上）
+- 批改维度：研究者推 (y1) 固定 2 维度，用户选 (y3) 按题型分维度（教学法判断）
+
+研究者**不否决**反向拍板，按用户决策修订铁律 8 + 9。
+
+**这条对工作流的意义**：
+
+1. INQUIRY 第一版没把"分层题目"画面对齐充分是事实——研究者承认
+2. 阶段 4 加码时**主动停下来走画面对齐流程**，而不是直接执行——这是 §8.H 第二次翻译层警觉的训练成果
+3. 用户两次反向拍板**保留作为产品判断的证据**——研究者不是替用户想清楚，而是列维度让用户选；用户的克制和主见值得尊重
+
+这次跟 §8.J commit 缺失事故是**镜像**关系：
+- §8.J：研究者**该追问没追问**（commit hash 没核实）
+- §8.K：研究者**该追问追问了**（题目画面对齐前没让 Claude Code 开工）
+
+研究者在第一次事故后立刻在第二次场景里做对了——**这是工作流的自纠**。
+
 ---
 
 ## 9. 给 PLAN.md 的指引
@@ -569,16 +795,17 @@ PLAN 阶段需要覆盖：
 
 考虑分 3-4 个阶段，每阶段独立可 commit：
 
-1. **阶段 1**：viewMode 状态机扩展 + 入口按钮 + 空壳页面 + 持久化结构
+1. **阶段 1** ✅ **已完成**（commit `767dff3`）：viewMode 状态机扩展 + 入口按钮 + 空壳页面 + 持久化结构
    - 不调 AI、不生成 prompt、不画树
    - 验收：能切换到递进模式、能切回精读、空壳显示
 
-2. **阶段 2**：Round 1 大白话故事线（最小可用）
+2. **阶段 2** ✅ **已完成**（合并到 commit `050c3bb`）：Round 1 大白话故事线（最小可用）
    - 新建 prompt + `chatWithLayeredReadingTutor`
    - module 列表生成 + 简单展开（不做完整树状 UI）
    - 验收：能生成 Round 1 内容、能切换 module、能持久化
+   - 注：阶段 2 当时实施完成 + 测试通过但未独立 commit（详见 §8.J），跟阶段 3 合并提交
 
-3. **阶段 3**（范围在阶段 2 后扩展）：Round 2 / Round 3 + 树状 UI + 进度条 + 溯源 + 提问
+3. **阶段 3** ✅ **已完成**（合并到 commit `050c3bb`，范围在阶段 2 后扩展）：Round 2 / Round 3 + 树状 UI + 进度条 + 溯源 + 提问
    - 三轮共用一棵树的数据结构
    - 用户主动推进按钮
    - **Round 2/3 内容含溯源**（页码 + 位置描述 + 点击跳转）（铁律 6）
@@ -586,10 +813,15 @@ PLAN 阶段需要覆盖：
    - 验收：完整画面终审场景能跑通 + 溯源准确性 + chat 跨 module 上下文连贯
    - **工程量提示**：从原 1.5-2.5h 扩展到 5-7h（用户接受工程量翻倍以换产品完整度）
 
-4. **阶段 4**：分层题目 + 学习状态记忆
-   - 故事题/结构题/细节题
-   - "上次看到哪里"提示
-   - 验收：题目能答、状态能恢复
+4. **阶段 4**（范围在阶段 3 后扩展）：分层题目 + 学习状态记忆 + 文档收尾
+   - 题目系统：每 module Round 1 末出故事题、每 branch Round 2/3 末出结构题/细节应用题
+   - **题目懒加载**：用户点"📝 答题"按钮才生成（铁律 8）
+   - **AI 按题型分维度批改**：故事题/结构题/细节题各 2 维度 ★1-5 评分（铁律 9）
+   - **软门槛**：可答可跳过，都不阻塞推进（铁律 8）
+   - "上次看到哪里"持久化 banner（lastVisited）
+   - 边界文档更新（docs/SKIM_VS_EXAM_TUTOR_API.md）+ CHANGELOG.md
+   - 验收：题目能出能批改、状态能恢复
+   - **工程量提示**：3-4 小时（含 4 个新 prompt 调试 + AI 批改测试）
 
 ### 9.2 守卫规则（PLAN 必含）
 
@@ -609,6 +841,11 @@ PLAN 阶段需要覆盖：
 | **每 module chat 框视觉独立**（只显示该 module Q&A） | 铁律 7（阶段 2 后新增） | 违反"视觉简洁"用户拍板 |
 | **chat AI 调用 context 含 globalChatHistory（跨 module 共享）** | 铁律 7（阶段 2 后新增） | 违反"AI 不在 module 间失忆"用户拍板 |
 | **globalChatHistory 持久化到 layeredReadingState** | 铁律 7（阶段 2 后新增） | 关页面对话历史丢失 = 学习链路断裂 |
+| **题目懒加载——用户点按钮才调 AI** | 铁律 8（阶段 3 后新增） | 浪费 token 在用户不答的题上 |
+| **题目软门槛——答 / 跳过都能推进** | 铁律 8（阶段 3 后新增） | 强制门槛会让用户挫败感累积 |
+| **题目独立持久化（不进 globalChatHistory）** | 铁律 8（阶段 3 后新增） | 题目和提问混在一起 = 概念分裂 |
+| **批改维度按题型分**（故事题/结构题/细节题各 2 维度） | 铁律 9（阶段 3 后新增） | 统一维度丢失题型差异 |
+| **不动现有 Round 1/2/3 prompt** | 阶段 4 决策（用户拍板 Q 方案） | 改 Round prompt 风险大,会污染已通过测试的内容质量 |
 
 ### 9.3 测试重点（PLAN 必含）
 
@@ -663,13 +900,15 @@ PLAN 阶段需要覆盖：
 - **`features/reader/layered/LayeredReadingTree.tsx`**（如拆分）：树状 UI 组件 — 阶段 3 新建
 - **`features/reader/layered/ModuleChatBox.tsx`**（阶段 3 新增）：每 module chat 框组件，按 askedInModuleId 过滤渲染 globalChatHistory
 - **`features/reader/layered/RoundContentWithSource.tsx`**（阶段 3 新增）：Round 2/3 内容渲染 + 溯源页码点击跳转
-- **`lib/prompts/layeredReadingPrompts.ts`**（阶段 2 已建立，阶段 3 扩展）：阶段 3 新增 `buildLayeredRound2Prompt` / `buildLayeredRound3Prompt`（含溯源指令）
+- **`features/reader/layered/LayeredReadingQuestionBox.tsx`**（阶段 4 新增）：题目 UI——出题按钮 + 答题输入 + 跳过 + AI 批改维度显示 + 参考答案
+- **`features/reader/layered/LastVisitedBanner.tsx`**（阶段 4 新增）：顶部"上次看到 module X 的 Round Y branch Z"提示 banner
+- **`lib/prompts/layeredReadingPrompts.ts`**（阶段 2 已建立，阶段 3 + 4 扩展）：阶段 3 新增 `buildLayeredRound2Prompt` / `buildLayeredRound3Prompt`（含溯源指令）；阶段 4 新增 4 个题目相关 prompt（`buildLayeredQuestionRound1Prompt` / `buildLayeredQuestionRound2Prompt` / `buildLayeredQuestionRound3Prompt` / `buildLayeredQuestionGradingPrompt`）
 - 其他子组件由 PLAN 阶段细化
 
 ### 阶段 2 后新增涉及的现有文件修改
 
-- **`types.ts`**：阶段 3 起新增 `LayeredReadingRound2Branch` / `LayeredReadingRound3Detail` / `LayeredReadingChatMessage`（含 askedInModuleId）/ globalChatHistory 字段
-- **`services/geminiService.ts`**：阶段 3 起新增 `generateLayeredRound2Branches` / `generateLayeredRound3Details`；`chatWithLayeredReadingTutor` 调用方在 Panel 里实际消费（阶段 2 仅占位）
+- **`types.ts`**：阶段 3 起新增 `LayeredReadingRound2Branch` / `LayeredReadingRound3Detail` / `LayeredReadingChatMessage`（含 askedInModuleId）/ globalChatHistory 字段；阶段 4 新增 `LayeredReadingQuestion`（含 questionType / dimensions / userAnswer / aiGrade / referenceAnswer 等字段）/ `lastVisited` 字段
+- **`services/geminiService.ts`**：阶段 3 起新增 `generateLayeredRound2Branches` / `generateLayeredRound3Details`；阶段 4 新增 `generateLayeredQuestionForRound1` / `generateLayeredQuestionForRound2` / `generateLayeredQuestionForRound3` / `gradeLayeredQuestion`
 
 ### RECON 出的关键事实（PLAN 阶段需要参照）
 
@@ -684,3 +923,5 @@ PLAN 阶段需要覆盖：
 *文档完成于画面终审之后、PLAN 起草之前。*
 
 *第二次修订：阶段 2 commit 完成后、阶段 3 起草前。修订包括：新增铁律 6（溯源到 slides）+ 铁律 7（视觉独立、数据全局）；新增 §5.5 "阶段 2 完成后的需求加码" + §8.H "第二次翻译层警觉成功" + §8.I "大需求加码时的范围决策"；新增风险 6-9；阶段 3 范围扩展记录。*
+
+*第三次修订：阶段 3 commit 完成后、阶段 4 起草前。修订包括：新增铁律 8（题目软门槛 + AI 批改）+ 铁律 9（按题型分批改维度）；新增 §5.6 "阶段 3 完成后的题目系统拍板"（含 6 个细节维度的画面对齐和 6 个批改维度设计）；新增 §8.J "工作流盲区——commit 控制权移交时的间断点"（阶段 2 commit 缺失事故复盘）+ §8.K "阶段 4 加码时的工作流自纠"；新增风险 10-13；阶段 4 范围扩展记录；§9.1 阶段 1/2/3 标注已完成 commit hash；§9.2 加 6 条新守卫规则；§10 加阶段 4 新建文件清单。*
