@@ -1,11 +1,21 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail } from "@/types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail, LayeredReadingQuestion, LayeredReadingQuestionGrade } from "@/types";
 import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProfiles";
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/lib/exam/scaffoldingClassifier";
 import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "@/lib/prompts/systemPrompts";
-import { LAYERED_READING_SYSTEM_PROMPT, buildLayeredModuleGenPrompt, buildLayeredRound1Prompt, buildLayeredRound2Prompt, buildLayeredRound3Prompt } from "@/lib/prompts/layeredReadingPrompts";
+import {
+  LAYERED_READING_SYSTEM_PROMPT,
+  buildLayeredModuleGenPrompt,
+  buildLayeredRound1Prompt,
+  buildLayeredRound2Prompt,
+  buildLayeredRound3Prompt,
+  buildLayeredQuestionRound1Prompt,
+  buildLayeredQuestionRound2Prompt,
+  buildLayeredQuestionRound3Prompt,
+  buildLayeredQuestionGradingPrompt,
+} from "@/lib/prompts/layeredReadingPrompts";
 
 // Ensure API Key exists or fail gracefully in logs (though process.env check is assumed handled elsewhere)
 const apiKey = process.env.API_KEY || "";
@@ -3406,6 +3416,214 @@ export const generateLayeredRound3Details = async (
         return details;
     } catch (e) {
         console.error('generateLayeredRound3Details Error:', e);
+        return null;
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// 阶段 4:递进阅读题目系统 — 4 个新 AI 函数(铁律 8/9/10)
+//
+// 设计原则:
+// - 不复用 chatWithSkimAdaptiveTutor / chatWithAdaptiveTutor 任何代码逻辑(铁律 1)
+// - 不接收 scaffolding / KC / chunk / citations / docType 任何附录参数
+// - 题目生成 3 个函数都接收 fullText(铁律 6 精神:题目基于原始 slides,不是二手内容)
+// - 批改函数 gradeLayeredQuestion 不接收 fullText(批改基于参考答案 + 用户答案就够,省 token)
+// - 4 个函数都用 responseSchema 强约束 JSON
+// - prompt 已含禁推进语段(铁律 11)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * 阶段 4:为某 module 生成 Round 1 末故事题(铁律 9 故事感 + 主旨准确)。
+ *
+ * @returns { questionText, referenceAnswer } 或失败时 null
+ */
+export const generateLayeredQuestionForRound1 = async (
+    fullText: string,
+    layeredModule: LayeredReadingModule
+): Promise<{ questionText: string; referenceAnswer: string } | null> => {
+    try {
+        const contentPart = getContentPart(fullText);
+        const prompt = buildLayeredQuestionRound1Prompt(layeredModule);
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        questionText: { type: Type.STRING },
+                        referenceAnswer: { type: Type.STRING },
+                    },
+                    required: ['questionText', 'referenceAnswer'],
+                },
+            },
+        });
+        if (!response.text) return null;
+        const parsed = JSON.parse(response.text) as {
+            questionText?: string;
+            referenceAnswer?: string;
+        };
+        const q = (parsed.questionText ?? '').trim();
+        const a = (parsed.referenceAnswer ?? '').trim();
+        if (!q || !a) return null;
+        return { questionText: q, referenceAnswer: a };
+    } catch (e) {
+        console.error('generateLayeredQuestionForRound1 Error:', e);
+        return null;
+    }
+};
+
+/**
+ * 阶段 4:为某 branch 生成 Round 2 末结构题(铁律 9 步骤完整 + 步骤顺序)。
+ */
+export const generateLayeredQuestionForRound2 = async (
+    fullText: string,
+    parentModule: LayeredReadingModule,
+    branch: LayeredReadingRound2Branch
+): Promise<{ questionText: string; referenceAnswer: string } | null> => {
+    try {
+        const contentPart = getContentPart(fullText);
+        const prompt = buildLayeredQuestionRound2Prompt(parentModule, branch);
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        questionText: { type: Type.STRING },
+                        referenceAnswer: { type: Type.STRING },
+                    },
+                    required: ['questionText', 'referenceAnswer'],
+                },
+            },
+        });
+        if (!response.text) return null;
+        const parsed = JSON.parse(response.text) as {
+            questionText?: string;
+            referenceAnswer?: string;
+        };
+        const q = (parsed.questionText ?? '').trim();
+        const a = (parsed.referenceAnswer ?? '').trim();
+        if (!q || !a) return null;
+        return { questionText: q, referenceAnswer: a };
+    } catch (e) {
+        console.error('generateLayeredQuestionForRound2 Error:', e);
+        return null;
+    }
+};
+
+/**
+ * 阶段 4:为某 branch 生成 Round 3 末细节应用题(铁律 9 推理逻辑 + 细节抓取)。
+ * 题目基于已展开的 details 列表,要求是应用/推理题而非定义复述题。
+ */
+export const generateLayeredQuestionForRound3 = async (
+    fullText: string,
+    parentModule: LayeredReadingModule,
+    branch: LayeredReadingRound2Branch,
+    details: LayeredReadingRound3Detail[]
+): Promise<{ questionText: string; referenceAnswer: string } | null> => {
+    try {
+        const contentPart = getContentPart(fullText);
+        const prompt = buildLayeredQuestionRound3Prompt(parentModule, branch, details);
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        questionText: { type: Type.STRING },
+                        referenceAnswer: { type: Type.STRING },
+                    },
+                    required: ['questionText', 'referenceAnswer'],
+                },
+            },
+        });
+        if (!response.text) return null;
+        const parsed = JSON.parse(response.text) as {
+            questionText?: string;
+            referenceAnswer?: string;
+        };
+        const q = (parsed.questionText ?? '').trim();
+        const a = (parsed.referenceAnswer ?? '').trim();
+        if (!q || !a) return null;
+        return { questionText: q, referenceAnswer: a };
+    } catch (e) {
+        console.error('generateLayeredQuestionForRound3 Error:', e);
+        return null;
+    }
+};
+
+/**
+ * 阶段 4:批改用户对某题的答案(铁律 9 按题型分维度)。
+ * 不接收 fullText:批改基于参考答案 + 用户答案就够,省 token。
+ *
+ * @returns LayeredReadingQuestionGrade 或失败时 null
+ */
+export const gradeLayeredQuestion = async (
+    question: LayeredReadingQuestion,
+    userAnswer: string
+): Promise<LayeredReadingQuestionGrade | null> => {
+    try {
+        const prompt = buildLayeredQuestionGradingPrompt(question, userAnswer);
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-flash-preview',
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        dimensions: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    label: { type: Type.STRING },
+                                    stars: { type: Type.NUMBER },
+                                    comment: { type: Type.STRING },
+                                },
+                                required: ['label', 'stars', 'comment'],
+                            },
+                        },
+                    },
+                    required: ['dimensions'],
+                },
+            },
+        });
+        if (!response.text) return null;
+        const parsed = JSON.parse(response.text) as {
+            dimensions?: Array<{ label?: string; stars?: number; comment?: string }>;
+        };
+        const rawDims = Array.isArray(parsed.dimensions) ? parsed.dimensions : [];
+        // 客户端二次过滤:每个维度必须有 label、合法 stars(1-5 整数)、非空 comment
+        const valid = rawDims.filter((d) => {
+            const s = typeof d.stars === 'number' ? d.stars : -1;
+            return (
+                typeof d.label === 'string' &&
+                d.label.trim().length > 0 &&
+                Number.isFinite(s) &&
+                s >= 1 &&
+                s <= 5 &&
+                typeof d.comment === 'string' &&
+                d.comment.trim().length > 0
+            );
+        });
+        if (valid.length < 2) return null; // 必须 2 个维度
+        return {
+            dimensions: valid.slice(0, 2).map((d) => ({
+                label: d.label!.trim(),
+                stars: Math.round(d.stars!) as 1 | 2 | 3 | 4 | 5,
+                comment: d.comment!.trim(),
+            })),
+            gradedAt: Date.now(),
+        };
+    } catch (e) {
+        console.error('gradeLayeredQuestion Error:', e);
         return null;
     }
 };

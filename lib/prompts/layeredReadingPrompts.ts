@@ -10,7 +10,12 @@
  *                                              §8.G（概念相同 ≠ 数据共享）
  */
 
-import type { LayeredReadingModule, LayeredReadingRound2Branch } from '@/types';
+import type {
+  LayeredReadingModule,
+  LayeredReadingQuestion,
+  LayeredReadingRound2Branch,
+  LayeredReadingRound3Detail,
+} from '@/types';
 
 /**
  * 递进阅读对话主 prompt（chatWithLayeredReadingTutor 用作 systemInstruction）。
@@ -230,4 +235,265 @@ export function buildLayeredRound3Prompt(
 }
 
 不要输出额外字段;不要包含 markdown 代码围栏。`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// 阶段 4:题目系统 prompt(铁律 8/9/10)
+//
+// 设计原则:
+// - 4 个全新独立 prompt;**不动**已有 Round 1/2/3 内容生成 prompt(铁律 10)
+// - 题目基于 PDF 全文 + module/branch 上下文出(铁律 6 精神延伸——题目不能脱离原始 slides)
+// - 故事题/结构题/细节应用题三类题型,每类测不同能力维度(铁律 9)
+// - 开放题(非选择题),让学生用自己的话答
+// - 严禁推进语(铁律 11)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * 阶段 4:Round 1 末故事题 prompt(buildLayeredQuestionRound1Prompt)。
+ *
+ * 设计要点:
+ * - 1 道开放题,测"故事感"+"主旨准确"两个维度
+ * - 题目要让学生用大白话讲清这个 module 的核心故事/主旨
+ * - 参考答案 150-300 字大白话(与 Round 1 内容风格一致)
+ * - 不出"细节定义题"——那是 Round 3 应用题的范畴
+ */
+export function buildLayeredQuestionRound1Prompt(layeredModule: LayeredReadingModule): string {
+  const { storyTitle, pageRange } = layeredModule;
+  const pageRangePart = pageRange ? `(对应 PDF 第 ${pageRange} 页)` : '';
+  const round1Excerpt = layeredModule.round1Content
+    ? `\n\n【该 module 的 Round 1 大白话故事(供你了解学生已看到什么)】\n${layeredModule.round1Content.slice(0, 1500)}`
+    : '';
+  return `你是 class-skip 的「递进阅读模式」Round 1 故事题出题助手。
+
+学生刚看完 module:「${storyTitle}」${pageRangePart}的 Round 1 大白话故事。
+现在为这个 module 出**1 道故事题**,测试学生是否真的抓住了核心故事。
+
+【你要做的】
+出 **1 道开放题**(不是选择题),测试 2 个维度:
+1. 故事感:学生能不能用大白话讲清,不堆术语
+2. 主旨准确:学生抓的是核心故事,不是某个细节
+
+【题目设计原则】
+- ✅ 好的故事题:"用一句话总结这个 module 在讲什么故事?"
+                 "如果你要把这一段讲给一个完全没读过的朋友,你会怎么讲?"
+                 "作者写这一段最想让读者明白什么?"
+- ❌ 差的故事题:"细胞膜的化学组成是什么?"     ← 这是细节题,不是故事题
+                 "请列举 X 的 5 个特征"          ← 这是知识复述题
+                 "请定义 Y"                     ← 这是定义题
+- 题目要基于 PDF 实际内容,**不要编造讲义里没有的概念**
+
+【参考答案要求】
+150-300 字大白话(与 Round 1 内容风格一致),展示"什么是好的故事感答案"——
+不堆术语 / 抓核心 / 用类比或日常语言表达。${round1Excerpt}
+
+【严格禁令】
+1. **绝不在末尾说"接下来""下一题""让我们看看下一个 module"等推进语**(铁律 11)。
+2. 不要给学生写解题步骤——题目是开放题,没有"标准步骤"。
+3. 不要在题目里给提示词("提示:你应该提到 X")——题目应该独立成立。
+
+【输出 JSON 严格格式】
+{ "questionText": "...", "referenceAnswer": "..." }
+
+不要输出额外字段;不要包含 markdown 代码围栏。`;
+}
+
+/**
+ * 阶段 4:Round 2 末结构题 prompt(buildLayeredQuestionRound2Prompt)。
+ *
+ * 设计要点:
+ * - 1 道开放题,测"步骤完整"+"步骤顺序"两个维度
+ * - 题目要让学生复述这个 branch 在论证过程中的"步骤"或"递进"
+ * - 参考答案列出 2-5 步 + 步骤间连接(因果/时间/递进)
+ */
+export function buildLayeredQuestionRound2Prompt(
+  parentModule: LayeredReadingModule,
+  branch: LayeredReadingRound2Branch
+): string {
+  const moduleStoryTitle = parentModule.storyTitle;
+  const branchTitle = branch.title;
+  const branchSourcePage = branch.sourcePage ?? '?';
+  const branchExcerpt = branch.content
+    ? `\n\n【该 branch 的 Round 2 内容(供你了解学生已看到什么)】\n${branch.content.slice(0, 1500)}`
+    : '';
+  return `你是 class-skip 的「递进阅读模式」Round 2 结构题出题助手。
+
+学生刚看完 module:「${moduleStoryTitle}」的子枝干:「${branchTitle}」(主要在 PDF 第 ${branchSourcePage} 页)的 Round 2 结构内容。
+现在为这个 branch 出**1 道结构题**,测试学生是否真的抓住了论证步骤。
+
+【你要做的】
+出 **1 道开放题**(不是选择题),测试 2 个维度:
+1. 步骤完整:学生能否答出关键步骤(2-5 步)
+2. 步骤顺序:学生能否说清步骤之间的先后/因果/递进关系
+
+【题目设计原则】
+- ✅ 好的结构题:"作者用了哪几步来论证 X?这些步骤之间是什么关系?"
+                 "这一段是怎么从 Y 推到 Z 的?中间经过了哪些环节?"
+                 "如果让你复述这一段的论证逻辑,你会分成几个阶段?"
+- ❌ 差的结构题:"X 是什么?"                    ← 这是定义题
+                 "Y 的特征有哪些?"              ← 这是列举题(测细节抓取,不是步骤)
+                 "请评价作者的论证"               ← 这是评价题,超出 Round 2 范围
+- 题目基于 PDF 实际内容,**不要编造讲义里没有的论证**
+
+【参考答案要求】
+列出 2-5 步,**显式标注步骤连接**(如"步骤 1 → 步骤 2 是因果"、"步骤 2 与 3 是并列",或者用编号 + 解释方式)——
+让学生看到"步骤完整 + 步骤顺序"两个维度的好答案模板。${branchExcerpt}
+
+【严格禁令】
+1. **绝不在末尾说"接下来""让我们看看 Round 3"等推进语**(铁律 11)。
+2. 不要给学生写解题步骤。
+3. 不要在题目里给提示词。
+
+【输出 JSON 严格格式】
+{ "questionText": "...", "referenceAnswer": "..." }
+
+不要输出额外字段;不要包含 markdown 代码围栏。`;
+}
+
+/**
+ * 阶段 4:Round 3 末细节应用题 prompt(buildLayeredQuestionRound3Prompt)。
+ *
+ * 设计要点:
+ * - 1 道**应用题或推理题**(不是定义复述!)
+ * - 测"推理逻辑"+"细节抓取"两个维度
+ * - 题目要让学生用 Round 3 已展开的细节做推理或反事实推断
+ * - 参考答案明确指出"用了哪些 detail 做推理"
+ */
+export function buildLayeredQuestionRound3Prompt(
+  parentModule: LayeredReadingModule,
+  branch: LayeredReadingRound2Branch,
+  details: LayeredReadingRound3Detail[]
+): string {
+  const moduleStoryTitle = parentModule.storyTitle;
+  const branchTitle = branch.title;
+  const detailsList = details
+    .map((d, i) => `  ${i + 1}. [${d.kind}] ${d.label}:${(d.description ?? '').slice(0, 200)}`)
+    .join('\n');
+  return `你是 class-skip 的「递进阅读模式」Round 3 细节应用题出题助手。
+
+学生刚看完 module:「${moduleStoryTitle}」的子枝干:「${branchTitle}」的 Round 3 细节挂载列表。
+
+【已挂载的细节(供你出题参考)】
+${detailsList || '(暂无细节)'}
+
+现在为这个 branch 出**1 道细节应用题**,测试学生是否能用细节做推理。
+
+【你要做的】
+出 **1 道开放题**——必须是**应用题或推理题**(反事实推断 / 类比应用 / 因果推断),
+**不能**是定义复述题或列举题。测试 2 个维度:
+1. 推理逻辑:学生从已知细节得出的结论符合逻辑
+2. 细节抓取:学生在推理中用到的人名/数字/术语准确
+
+【题目设计原则】
+- ✅ 好的细节应用题:
+   "如果当时詹纳没用牛痘而是用马痘,实验会怎样?为什么?"
+                                   (基于"同源病毒触发交叉免疫"这一细节做反事实推理)
+   "Variola major 的死亡率是 30%,如果换成致死率 1% 的病毒,
+    詹纳的免疫接种实验还能产生同样有说服力的证据吗?"
+   "Thucydides 在公元前 430 年的观察,如果用今天的病毒学解释会是什么样的现代版本?"
+- ❌ 差的细节应用题:
+   "什么是 Variola major?"          ← 这是定义题
+   "詹纳做了什么实验?"               ← 这是列举/复述题
+   "Thucydides 在哪一年观察的?"     ← 这是事实查询题
+- 题目应**驱动学生用细节(人名/术语/数字)做推理**,而不是单纯复述细节
+- 题目基于 PDF 实际内容 + 上方挂载的细节列表,**不要编造**
+
+【参考答案要求】
+**明确指出用了哪些 detail 做推理**(可以引用上方列表中的 label),让学生看到
+"推理逻辑(从 detail A → 结论 B)+ 细节抓取(label 准确)"两个维度的好答案。
+
+【严格禁令】
+1. **绝不在末尾说"接下来""下一题"等推进语**(铁律 11)。
+2. 不要在题目里把推理思路抄给学生。
+3. 不要写"标准答案唯一"——开放题应允许不同合理推理。
+
+【输出 JSON 严格格式】
+{ "questionText": "...", "referenceAnswer": "..." }
+
+不要输出额外字段;不要包含 markdown 代码围栏。`;
+}
+
+/**
+ * 阶段 4:AI 批改 prompt(buildLayeredQuestionGradingPrompt)。
+ *
+ * 设计要点(铁律 9):
+ * - 按题型严格分维度:
+ *   - story: 故事感 + 主旨准确
+ *   - structure: 步骤完整 + 步骤顺序
+ *   - application: 推理逻辑 + 细节抓取
+ * - 每维度 ★1-5 + 一句话**指出具体好/差在哪**(禁止"答得不错/有待加强"等空泛词)
+ * - 批改原则:宽松而非苛刻;七成准 → ★4;完全准 + 表达好 → ★5
+ * - 不接收 fullText:批改基于参考答案 + 用户答案就够,省 token
+ */
+export function buildLayeredQuestionGradingPrompt(
+  question: LayeredReadingQuestion,
+  userAnswer: string
+): string {
+  const dimensionMap: Record<
+    LayeredReadingQuestion['questionType'],
+    { d1: string; d2: string; d1desc: string; d2desc: string }
+  > = {
+    story: {
+      d1: '故事感',
+      d1desc: '用大白话讲清而非堆术语;用类比/日常语言表达',
+      d2: '主旨准确',
+      d2desc: '抓住核心故事/作者意图,不是某个边角细节',
+    },
+    structure: {
+      d1: '步骤完整',
+      d1desc: '关键步骤都答到(2-5 步,缺一即扣分)',
+      d2: '步骤顺序',
+      d2desc: '步骤之间的先后/因果/递进关系正确,不能颠倒',
+    },
+    application: {
+      d1: '推理逻辑',
+      d1desc: '从已知细节得出的结论符合逻辑;反事实推断/类比应用站得住脚',
+      d2: '细节抓取',
+      d2desc: '推理中引用的人名/数字/术语准确,不张冠李戴',
+    },
+  };
+  const dims = dimensionMap[question.questionType];
+  const roundNum =
+    question.questionType === 'story' ? '1' : question.questionType === 'structure' ? '2' : '3';
+  const typeLabel =
+    question.questionType === 'story'
+      ? '故事题'
+      : question.questionType === 'structure'
+        ? '结构题'
+        : '细节应用题';
+  return `你是 class-skip 的「递进阅读模式」Round ${roundNum} 题目批改助手。
+
+【题型】${question.questionType}(${typeLabel})
+
+【题目】
+${question.questionText}
+
+【参考答案(来自出题时 AI 生成,作为评分参照)】
+${question.referenceAnswer}
+
+【学生答案】
+${userAnswer}
+
+【你要做的】
+按以下 2 个维度评分(每维度 ★1-5 + 一句话说明):
+
+维度 1 — **${dims.d1}**:${dims.d1desc}
+维度 2 — **${dims.d2}**:${dims.d2desc}
+
+【评分原则】
+- 宽松而非苛刻——学生答得"七成准"就给 ★4;"完全准 + 表达好"才 ★5
+- ★1 = 完全没答到这个维度 / 离题;★2 = 沾边但缺关键;★3 = 一般,部分到位;★4 = 七成准;★5 = 完全到位
+- 每个 comment 必须**指出具体好/差在哪**——禁止"答得不错"、"有待加强"、"还可以"这类空泛词
+- 例如(✅):"故事感强,用'像门卫'的类比让概念立刻具象;但没提到'选择性'这个核心机制,主旨抓不全"
+- 例如(❌):"答得不错,继续努力"  ← 太空泛,不告诉学生具体好在哪
+
+【输出 JSON 严格格式】
+{
+  "dimensions": [
+    { "label": "${dims.d1}", "stars": <1|2|3|4|5>, "comment": "..." },
+    { "label": "${dims.d2}", "stars": <1|2|3|4|5>, "comment": "..." }
+  ]
+}
+
+不要输出额外字段;不要包含 markdown 代码围栏。
+**绝不在末尾说"再接再厉""下一题"等推进语**(铁律 11)。`;
 }

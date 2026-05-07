@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### 📚 递进阅读模式 · 阶段 4(题目系统 + 学习状态记忆)
+
+> 严守 11 铁律(API 隔离 / 数据独立 / 不分 STEM·HUMANITIES / PDF 溯源 / globalChatHistory 视觉过滤 / 题目软门槛 / 题目按题型分维度 / 不动现有代码 / AI 不自动推进 Round)。本期 9 个特性:
+
+1. **题目系统**:每 module Round 1 末"📝 答题(故事题)" / 每 branch Round 2 末"📝 答题(结构题)" / 每 branch Round 3 末"📝 答题(细节应用题)" 三类按需懒加载,不点不调 AI(铁律 8)。
+2. **AI 出题**:`generateLayeredQuestionForRound1/2/3` 走 `gemini-3-pro-preview` + `responseSchema` 强约束 `{ questionText, referenceAnswer }`;Round 1 故事题强调情景+主旨,Round 2 结构题要求 2-5 步 + 步骤连接,Round 3 应用题禁止"定义复述",必须为应用/推理题。
+3. **AI 批改**:`gradeLayeredQuestion` 走 `gemini-3-flash-preview`(批改用更快的 flash 模型,且**不传 fullText**省 token);按题型给固定 2 维度 ★1-5 + 一句话 comment(铁律 9)`story → 故事感 + 主旨准确` / `structure → 步骤完整 + 步骤顺序` / `application → 推理逻辑 + 细节抓取`;客户端二次过滤合法 stars / 非空 label·comment;prompt 强约束"宽松而非苛刻"(7 成准 → ★4)+ 禁空泛词。
+4. **软门槛**:任何题目状态都不阻塞外层"展开到 Round X →"按钮;"⏭ 跳过看答案" 直接显示参考答案 + "✏️ 现在答题" 回到 unanswered;"✏️ 重新答题" 覆盖式清空旧答案 + 旧批改回到 unanswered(澄清 C)。
+5. **题目独立持久化**:题目数据存 `LayeredReadingState.questions`(铁律 8 **不进** `globalChatHistory`);id 命名约定 `${attachedTo}-${questionType}` 保证 (挂载点, 题型) 唯一。
+6. **lastVisited 学习状态记忆**:`LayeredReadingState.lastVisited` 记录上次 (moduleId, round, branchId?, lastUpdatedAt);6 条触发事件:展开 module → round 1 / 展开到 Round 2 成功 → round 2 / 展开 branch → round 2 / 展开到 Round 3 成功 → round 3 / 答题完成 / 跳过完成。**点溯源跳 PDF 不更新**(澄清 D)。
+7. **lastVisited banner**:进入 panel 时若距上次 > 1 小时且本会话未关闭,顶部弹出黄色 banner 显示 "📍 上次你看到 module X「storyTitle」的 Round Y[ branch Z]";按钮"继续阅读"自动展开树到对应位置 + scrollIntoView,"从头开始"/X 仅本会话关闭 banner(useState 不持久化,viewMode 切走再切回会重新评估 — 澄清 G)。
+8. **expandTarget 自动展开**:Tree 接收 `expandTarget` prop,useEffect 监听 → 加入 `expandedModuleIds` / `expandedBranchIds` + `requestAnimationFrame` 后 `scrollIntoView({ behavior: 'smooth', block: 'start' })`。模块/枝干元素挂 `data-layered-node-id` 用于 querySelector 定位。
+9. **边界 + CHANGELOG**:`docs/SKIM_VS_EXAM_TUTOR_API.md` 新增 4 个题目函数引用校验 + 不应段落(题目数据禁入 globalChatHistory / 递进阅读不读写 studyMap) + 职责划分表;手动回归清单新增 6 条递进阅读 layered 模式回归项。
+
 ### 考前预测 · LSAP 单材料 scope（第二期）
 
 - **ExamPredictionPanel**：摸底探测、复习验证/深层题、阅卷与针对性教学（含内联追问）调用 `generateLSAPProbeQuestion` / `evaluateLSAPAnswer` / `generateLSAPTargetedTeaching` / `answerLSAPTeachingQuestion` 时统一传入 `LSAPProbeDocScope`（`docIsSingleMaterial` + `materialDisplayName`），与备考工作台按 `sourceLinkId` 切片后的 prompt 边界语义对齐；本面板始终针对当前打开的单一 PDF。

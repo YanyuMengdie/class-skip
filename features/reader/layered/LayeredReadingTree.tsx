@@ -1,19 +1,31 @@
 /**
  * 递进阅读模式 — 树状 UI(三轮 zoom in 共用一棵树)。
  *
- * 设计原则(来自 LAYERED_READING_PLAN.md §3.2):
+ * 设计原则(来自 LAYERED_READING_PLAN.md §3.2 + §3.4 阶段 4):
  * - module → branch → detail 三层 zoom in,同一棵树越长越深(交互维度 a)
- * - 用户主动点「展开到 Round X」按钮才推进(交互维度 c,铁律 9)
+ * - 用户主动点「展开到 Round X」按钮才推进(交互维度 c,铁律 11)
  * - Round 2/3 内容含溯源标签可跳转 PDF(铁律 6)
  * - Round 2/3 内容**按需生成**——不点不调 AI(避免一次性把 1×N×M 全生成)
  * - 每 module 节点下挂 ModuleChatBox(铁律 7)
+ * - 每 module Round 1 末 / 每 branch Round 2 末 / 每 branch Round 3 末挂 QuestionBox(铁律 8/9)
+ *
+ * 事件驱动 lastVisited(澄清 D 6 条):
+ * - toggleModule(展开)→ {round: 1}
+ * - 展开到 Round 2 成功 → {round: 2, branchId}
+ * - toggleBranch(展开)→ {round: 2, branchId}
+ * - 展开到 Round 3 成功 → {round: 3, branchId}
+ * - 答题/跳过完成 → 按题型挂载点
+ * - 点溯源跳 PDF → 不更新(澄清 D)
  */
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
 import type {
   LayeredReadingChatMessage,
+  LayeredReadingLastVisited,
   LayeredReadingModule,
+  LayeredReadingQuestion,
+  LayeredReadingQuestionType,
   LayeredReadingRound2Branch,
   LayeredReadingRound3Detail,
 } from '@/types';
@@ -23,12 +35,15 @@ import {
 } from '@/services/geminiService';
 import { RoundContentWithSource } from '@/features/reader/layered/RoundContentWithSource';
 import { ModuleChatBox } from '@/features/reader/layered/ModuleChatBox';
+import { LayeredReadingQuestionBox } from '@/features/reader/layered/LayeredReadingQuestionBox';
 
 export interface LayeredReadingTreeProps {
   modules: LayeredReadingModule[];
   fullText: string | null;
   pdfDataUrl: string | null;
   globalChatHistory: LayeredReadingChatMessage[];
+  /** 阶段 4:题目数据(铁律 8 独立持久化) */
+  questions: LayeredReadingQuestion[];
   /** 写入单个 module 的 immutable updater */
   onUpdateModule: (
     moduleId: string,
@@ -38,6 +53,22 @@ export interface LayeredReadingTreeProps {
   onAppendChatMessage: (msg: LayeredReadingChatMessage) => void;
   /** 跳转 PDF 到指定页(1-based);未传时溯源标签只显示不可点击 */
   onJumpToPage?: (page1Based: number) => void;
+  /** 阶段 4:题目动作 5 个 callbacks(由 Panel 实现) */
+  onGenerateQuestion: (
+    questionType: LayeredReadingQuestionType,
+    parentModule: LayeredReadingModule,
+    branch?: LayeredReadingRound2Branch
+  ) => void;
+  onSubmitQuestion: (questionId: string, userAnswer: string) => void;
+  onSkipQuestion: (questionId: string) => void;
+  onResetQuestion: (questionId: string) => void;
+  /** 阶段 4:in-flight 状态(由 Panel 维护) */
+  generatingQuestionIds: Set<string>;
+  gradingQuestionIds: Set<string>;
+  /** 阶段 4:lastVisited 触发回调(澄清 D 6 条事件) */
+  onUpdateLastVisited: (lv: LayeredReadingLastVisited) => void;
+  /** 阶段 4:从 banner"继续阅读"传入的展开目标(Tree 据此自动展开 + scroll) */
+  expandTarget?: LayeredReadingLastVisited | null;
 }
 
 const KIND_LABELS: Record<string, string> = {
@@ -48,14 +79,34 @@ const KIND_LABELS: Record<string, string> = {
   comparison: '对比',
 };
 
+/** 工具:根据 (attachedTo, questionType) 在 questions 数组里查找题目;约定 id = `${attachedTo}-${type}` */
+function findQuestion(
+  questions: LayeredReadingQuestion[],
+  attachedTo: string,
+  questionType: LayeredReadingQuestionType
+): LayeredReadingQuestion | null {
+  return (
+    questions.find((q) => q.attachedTo === attachedTo && q.questionType === questionType) ?? null
+  );
+}
+
 export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
   modules,
   fullText,
   pdfDataUrl,
   globalChatHistory,
+  questions,
   onUpdateModule,
   onAppendChatMessage,
   onJumpToPage,
+  onGenerateQuestion,
+  onSubmitQuestion,
+  onSkipQuestion,
+  onResetQuestion,
+  generatingQuestionIds,
+  gradingQuestionIds,
+  onUpdateLastVisited,
+  expandTarget,
 }) => {
   // 本地 UI 态:展开/折叠(不持久化,刷新页面会折叠回)
   const [expandedModuleIds, setExpandedModuleIds] = useState<Set<string>>(new Set());
@@ -70,27 +121,74 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
   const docSource = pdfDataUrl ?? fullText ?? '';
   const hasDoc = docSource.length > 0;
 
-  const toggleModule = useCallback((moduleId: string) => {
-    setExpandedModuleIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(moduleId)) next.delete(moduleId);
-      else next.add(moduleId);
-      return next;
+  /** 阶段 4:expandTarget 由 banner 传入时自动展开 + scroll(澄清 D 继续阅读流程) */
+  useEffect(() => {
+    if (!expandTarget) return;
+    setExpandedModuleIds((prev) => new Set(prev).add(expandTarget.moduleId));
+    if (expandTarget.branchId) {
+      setExpandedBranchIds((prev) => new Set(prev).add(expandTarget.branchId!));
+    }
+    // scroll 到对应节点
+    const targetId = expandTarget.branchId ?? expandTarget.moduleId;
+    requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-layered-node-id="${targetId}"]`);
+      if (el && 'scrollIntoView' in el) {
+        (el as HTMLElement).scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
-  }, []);
+  }, [expandTarget]);
 
-  const toggleBranch = useCallback((branchId: string) => {
-    setExpandedBranchIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(branchId)) next.delete(branchId);
-      else next.add(branchId);
-      return next;
-    });
-  }, []);
+  const toggleModule = useCallback(
+    (m: LayeredReadingModule) => {
+      setExpandedModuleIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(m.id)) {
+          next.delete(m.id);
+          return next;
+        }
+        next.add(m.id);
+        return next;
+      });
+      // lastVisited:展开 module = round 1(澄清 D)
+      // 折叠时不更新(避免覆盖更精细的 round 2/3 进度)
+      if (!expandedModuleIds.has(m.id)) {
+        onUpdateLastVisited({
+          moduleId: m.id,
+          round: 1,
+          lastUpdatedAt: Date.now(),
+        });
+      }
+    },
+    [expandedModuleIds, onUpdateLastVisited]
+  );
+
+  const toggleBranch = useCallback(
+    (m: LayeredReadingModule, b: LayeredReadingRound2Branch) => {
+      setExpandedBranchIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(b.id)) {
+          next.delete(b.id);
+          return next;
+        }
+        next.add(b.id);
+        return next;
+      });
+      // lastVisited:展开 branch = round 2(已有 round 3 details 时仍标 round 2,
+      //  因为 toggleBranch 本身只代表"看到 branch 内容",不强制 round 3 解锁)
+      if (!expandedBranchIds.has(b.id)) {
+        onUpdateLastVisited({
+          moduleId: m.id,
+          round: 2,
+          branchId: b.id,
+          lastUpdatedAt: Date.now(),
+        });
+      }
+    },
+    [expandedBranchIds, onUpdateLastVisited]
+  );
 
   const handleExpandToRound2 = useCallback(
     async (m: LayeredReadingModule) => {
-      // 已有 branches → 仅展开,不重复调 AI
       if (m.round2Branches && m.round2Branches.length > 0) {
         setExpandedModuleIds((prev) => new Set(prev).add(m.id));
         return;
@@ -115,8 +213,14 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
           return;
         }
         onUpdateModule(m.id, (mod) => ({ ...mod, round2Branches: branches }));
-        // 自动展开 module 让用户立即看到子枝干
         setExpandedModuleIds((prev) => new Set(prev).add(m.id));
+        // lastVisited:展开到 Round 2 成功(澄清 D)
+        onUpdateLastVisited({
+          moduleId: m.id,
+          round: 2,
+          branchId: branches[0].id,
+          lastUpdatedAt: Date.now(),
+        });
       } catch (e) {
         console.error('handleExpandToRound2', e);
         setRound2Errors((prev) => ({ ...prev, [m.id]: 'AI 调用异常,请重试。' }));
@@ -128,12 +232,11 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
         });
       }
     },
-    [hasDoc, docSource, onUpdateModule]
+    [hasDoc, docSource, onUpdateModule, onUpdateLastVisited]
   );
 
   const handleExpandToRound3 = useCallback(
     async (parentModule: LayeredReadingModule, branch: LayeredReadingRound2Branch) => {
-      // 已有 details → 仅展开
       if (branch.round3Details && branch.round3Details.length > 0) {
         setExpandedBranchIds((prev) => new Set(prev).add(branch.id));
         return;
@@ -164,6 +267,13 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
           ),
         }));
         setExpandedBranchIds((prev) => new Set(prev).add(branch.id));
+        // lastVisited:展开到 Round 3 成功(澄清 D)
+        onUpdateLastVisited({
+          moduleId: parentModule.id,
+          round: 3,
+          branchId: branch.id,
+          lastUpdatedAt: Date.now(),
+        });
       } catch (e) {
         console.error('handleExpandToRound3', e);
         setRound3Errors((prev) => ({ ...prev, [branch.id]: 'AI 调用异常,请重试。' }));
@@ -175,7 +285,7 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
         });
       }
     },
-    [hasDoc, docSource, onUpdateModule]
+    [hasDoc, docSource, onUpdateModule, onUpdateLastVisited]
   );
 
   return (
@@ -185,12 +295,18 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
         const round2Generating = generatingRound2For.has(m.id);
         const round2Error = round2Errors[m.id];
         const hasBranches = (m.round2Branches?.length ?? 0) > 0;
+        const storyQuestion = findQuestion(questions, m.id, 'story');
+        const storyQuestionId = `${m.id}-story`;
         return (
-          <div key={m.id} className="rounded-md border border-stone-200 bg-white">
+          <div
+            key={m.id}
+            data-layered-node-id={m.id}
+            className="rounded-md border border-stone-200 bg-white"
+          >
             {/* === Module 头(Round 1) === */}
             <button
               type="button"
-              onClick={() => toggleModule(m.id)}
+              onClick={() => toggleModule(m)}
               className="w-full text-left px-3 py-2 flex items-start gap-2 hover:bg-stone-50"
             >
               <span className="text-stone-400 text-sm shrink-0 mt-0.5">
@@ -218,8 +334,22 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
                   )}
                 </div>
 
+                {/* === Round 1 末故事题(铁律 8/9) === */}
+                <div className="px-3">
+                  <LayeredReadingQuestionBox
+                    questionType="story"
+                    question={storyQuestion}
+                    isGenerating={generatingQuestionIds.has(storyQuestionId)}
+                    isGrading={gradingQuestionIds.has(storyQuestionId)}
+                    onGenerate={() => onGenerateQuestion('story', m)}
+                    onSubmit={(ans) => onSubmitQuestion(storyQuestionId, ans)}
+                    onSkip={() => onSkipQuestion(storyQuestionId)}
+                    onResetAnswer={() => onResetQuestion(storyQuestionId)}
+                  />
+                </div>
+
                 {/* === Round 2 操作 === */}
-                <div className="px-3 pb-2 border-t border-stone-100 pt-2">
+                <div className="px-3 pb-2 border-t border-stone-100 pt-2 mt-2">
                   {!hasBranches && !round2Generating && !round2Error && (
                     <button
                       type="button"
@@ -257,12 +387,20 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
                         const round3Generating = generatingRound3For.has(b.id);
                         const round3Error = round3Errors[b.id];
                         const hasDetails = (b.round3Details?.length ?? 0) > 0;
+                        const structureQuestion = findQuestion(questions, b.id, 'structure');
+                        const structureQuestionId = `${b.id}-structure`;
+                        const applicationQuestion = findQuestion(questions, b.id, 'application');
+                        const applicationQuestionId = `${b.id}-application`;
                         return (
-                          <div key={b.id} className="rounded border border-stone-100 bg-stone-50/40">
+                          <div
+                            key={b.id}
+                            data-layered-node-id={b.id}
+                            className="rounded border border-stone-100 bg-stone-50/40"
+                          >
                             {/* === Branch 头(Round 2) === */}
                             <button
                               type="button"
-                              onClick={() => toggleBranch(b.id)}
+                              onClick={() => toggleBranch(m, b)}
                               className="w-full text-left px-2.5 py-1.5 flex items-start gap-1.5 hover:bg-white"
                             >
                               <span className="text-stone-400 text-xs shrink-0 mt-0.5">
@@ -285,6 +423,18 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
                                     onJumpToPage={onJumpToPage}
                                   />
                                 )}
+
+                                {/* === Round 2 末结构题 === */}
+                                <LayeredReadingQuestionBox
+                                  questionType="structure"
+                                  question={structureQuestion}
+                                  isGenerating={generatingQuestionIds.has(structureQuestionId)}
+                                  isGrading={gradingQuestionIds.has(structureQuestionId)}
+                                  onGenerate={() => onGenerateQuestion('structure', m, b)}
+                                  onSubmit={(ans) => onSubmitQuestion(structureQuestionId, ans)}
+                                  onSkip={() => onSkipQuestion(structureQuestionId)}
+                                  onResetAnswer={() => onResetQuestion(structureQuestionId)}
+                                />
 
                                 {/* === Round 3 操作 === */}
                                 {!hasDetails && !round3Generating && !round3Error && (
@@ -336,6 +486,20 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
                                       </div>
                                     ))}
                                   </div>
+                                )}
+
+                                {/* === Round 3 末细节应用题(详情列表后,不是每 detail 一道) === */}
+                                {hasDetails && (
+                                  <LayeredReadingQuestionBox
+                                    questionType="application"
+                                    question={applicationQuestion}
+                                    isGenerating={generatingQuestionIds.has(applicationQuestionId)}
+                                    isGrading={gradingQuestionIds.has(applicationQuestionId)}
+                                    onGenerate={() => onGenerateQuestion('application', m, b)}
+                                    onSubmit={(ans) => onSubmitQuestion(applicationQuestionId, ans)}
+                                    onSkip={() => onSkipQuestion(applicationQuestionId)}
+                                    onResetAnswer={() => onResetQuestion(applicationQuestionId)}
+                                  />
                                 )}
                               </div>
                             )}

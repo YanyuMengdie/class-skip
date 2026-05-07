@@ -334,27 +334,92 @@ export interface LayeredReadingChatMessage {
   timestamp: number;
 }
 
+/**
+ * 阶段 4：递进阅读题目类型(铁律 8/9)。
+ *
+ * 题型对应:
+ * - story:每 module Round 1 末出 1 道(attachedTo = moduleId)
+ * - structure:每 branch Round 2 末出 1 道(attachedTo = branchId)
+ * - application:每 branch Round 3 末出 1 道(attachedTo = branchId,不是每 detail 一道)
+ *
+ * 检索方式:复合 `(attachedTo, questionType)` 唯一定位;
+ *           id 命名约定 `${attachedTo}-${questionType}`(如 module-1-story / module-1.2-structure)。
+ *
+ * 软门槛(铁律 8):
+ * - 答 / 跳过 / 不答都不阻塞外层"展开到 Round X →"按钮
+ * - 跳过后能回头答(status: 'skipped' → 'answered')
+ * - 答完后能重答(✏️ 重新答题 → 清空 userAnswer + aiGrade,回到 'unanswered')
+ *
+ * 题目数据完全独立于 globalChatHistory(铁律 8:不混淆)——题目代码 0 处读 globalChatHistory。
+ */
+export type LayeredReadingQuestionType = 'story' | 'structure' | 'application';
+export type LayeredReadingQuestionStatus = 'unanswered' | 'answered' | 'skipped';
+
+/**
+ * 阶段 4:批改维度(铁律 9 按题型分组)。
+ * - story: 故事感 + 主旨准确
+ * - structure: 步骤完整 + 步骤顺序
+ * - application: 推理逻辑 + 细节抓取
+ */
+export interface LayeredReadingQuestionDimension {
+  /** 维度名称(中文,与 prompt 输出对齐) */
+  label: string;
+  /** ★1-5 评分 */
+  stars: 1 | 2 | 3 | 4 | 5;
+  /** 一句话说明,必须指出具体好/差在哪(prompt 强约束) */
+  comment: string;
+}
+
+export interface LayeredReadingQuestionGrade {
+  /** 2 个维度,顺序与题型对应表一致 */
+  dimensions: LayeredReadingQuestionDimension[];
+  /** 批改完成时间 */
+  gradedAt: number;
+}
+
 export interface LayeredReadingQuestion {
+  /** 主键;命名约定 `${attachedTo}-${questionType}` 保证唯一 */
   id: string;
-  /** 题目所属轮次：1/2/3，对应故事题/结构题/细节题 */
-  roundLevel: 1 | 2 | 3;
-  /** 题目挂在哪个节点下 */
-  attachedTo: { moduleId: string; branchId?: string; detailId?: string };
-  question: string;
-  options?: string[];
-  correctIndex?: number;
-  explanation?: string;
-  /** 用户作答记录 */
-  userAnswerIndex?: number;
+  /** 题型决定批改维度(铁律 9) */
+  questionType: LayeredReadingQuestionType;
+  /** 挂载点:story → moduleId;structure / application → branchId */
+  attachedTo: string;
+  /** AI 出的题(开放题) */
+  questionText: string;
+  /** 参考答案(150-300 字大白话) */
+  referenceAnswer: string;
+  /** 用户答案;null 时表示未答或跳过 */
+  userAnswer?: string | null;
+  /** 答题状态(软门槛三态,铁律 8) */
+  status: LayeredReadingQuestionStatus;
+  /** AI 批改结果(仅 status === 'answered' 时有) */
+  aiGrade?: LayeredReadingQuestionGrade | null;
+  /** 题目生成时间 */
+  generatedAt: number;
+  /** 最后一次答题/跳过时间 */
   answeredAt?: number;
+}
+
+/**
+ * 阶段 4:学习状态记忆(铁律 8 / 用户拍板交互维度 g)。
+ *
+ * 触发:用户每次切换/展开树节点 / 答题完成时更新。
+ * 显示:进入 panel 时(距上次时间 > 1 小时)弹 banner;本次会话只显示一次。
+ */
+export interface LayeredReadingLastVisited {
+  moduleId: string;
+  round: 1 | 2 | 3;
+  /** round=1 时无;round=2/3 时为当前展开的 branch.id */
+  branchId?: string;
+  lastUpdatedAt: number;
 }
 
 export interface LayeredReadingState {
   /** 本模式独立 module 列表，与 studyMap 无关 */
   modules: LayeredReadingModule[];
-  /** 用户上次浏览到的位置（学习状态记忆） */
-  lastVisited?: { moduleId: string; round: 1 | 2 | 3; branchId?: string };
-  /** 题目作答记录 */
+  /** 用户上次浏览到的位置（学习状态记忆，阶段 4 升级为 LayeredReadingLastVisited） */
+  lastVisited?: LayeredReadingLastVisited;
+  /** 题目作答记录(阶段 4 钉死结构;铁律 8 不进 globalChatHistory) */
   questions: LayeredReadingQuestion[];
   /** 阶段 3 新增：全局对话历史（铁律 7：视觉独立、数据全局） */
   globalChatHistory?: LayeredReadingChatMessage[];

@@ -1,29 +1,40 @@
 /**
- * 递进阅读模式(layered reading)—— 阶段 3 容器版
+ * 递进阅读模式(layered reading)—— 阶段 4 容器版
  *
  * 设计原则:
  * - 与 SkimPanel 数据完全独立(铁律 2):不读 / 不写 FilePersistedState.studyMap
  * - 与 chatWithSkimAdaptiveTutor / chatWithAdaptiveTutor 完全隔离(铁律 1)
  * - 不分 STEM / HUMANITIES(铁律 5)
+ * - 题目数据存 layeredReadingState.questions(铁律 8 不进 globalChatHistory)
  *
- * 阶段 3 改造:
- * - 本组件从"渲染整棵 module 列表"下放到 LayeredReadingTree
- * - 本组件保留:空状态(选数 + 开始)、Round 1 懒加载、顶部进度条、state 写入 helper
- * - 新增 props:onJumpToPage(铁律 6 溯源跳转)
+ * 阶段 4 改造:
+ * - 新增 5 个题目动作 callbacks(generate / submit / skip / reset)
+ * - 新增 lastVisited banner(进入 panel 距上次 > 1 小时 + 未本会话 dismiss 时显示)
+ * - 新增 expandTarget 状态(banner"继续阅读"传给 Tree 自动展开)
+ * - 题目调 AI 走 generateLayeredQuestionForRoundN + gradeLayeredQuestion
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type {
   LayeredReadingChatMessage,
+  LayeredReadingLastVisited,
   LayeredReadingModule,
+  LayeredReadingQuestion,
+  LayeredReadingQuestionType,
+  LayeredReadingRound2Branch,
   LayeredReadingState,
 } from '@/types';
 import {
+  generateLayeredQuestionForRound1,
+  generateLayeredQuestionForRound2,
+  generateLayeredQuestionForRound3,
   generateLayeredReadingModules,
   generateLayeredRound1Content,
+  gradeLayeredQuestion,
 } from '@/services/geminiService';
 import { LayeredReadingTree } from '@/features/reader/layered/LayeredReadingTree';
+import { LastVisitedBanner } from '@/features/reader/layered/LastVisitedBanner';
 
 export interface LayeredReadingPanelProps {
   fullText: string | null;
@@ -37,6 +48,13 @@ export interface LayeredReadingPanelProps {
 
 const MODULE_COUNT_OPTIONS = [2, 3, 4, 5, 6, 7] as const;
 const DEFAULT_MODULE_COUNT = 4;
+/** banner 触发阈值:1 小时 */
+const BANNER_STALE_MS = 60 * 60 * 1000;
+
+/** 工具:根据 (attachedTo, questionType) 生成题目 id(命名约定与 Tree 一致) */
+function buildQuestionId(attachedTo: string, questionType: LayeredReadingQuestionType): string {
+  return `${attachedTo}-${questionType}`;
+}
 
 export const LayeredReadingPanel: React.FC<LayeredReadingPanelProps> = ({
   fullText,
@@ -53,6 +71,13 @@ export const LayeredReadingPanel: React.FC<LayeredReadingPanelProps> = ({
   const [round1Errors, setRound1Errors] = useState<Record<string, string>>({});
   /** 阶段 2 沿用:Panel 自身的"已展开过 Round 1"集合(用于 panel 自动触发 Round 1 懒加载) */
   const [moduleIdsSeenForRound1, setModuleIdsSeenForRound1] = useState<Set<string>>(new Set());
+  /** 阶段 4:题目 in-flight Sets */
+  const [generatingQuestionIds, setGeneratingQuestionIds] = useState<Set<string>>(new Set());
+  const [gradingQuestionIds, setGradingQuestionIds] = useState<Set<string>>(new Set());
+  /** 阶段 4:banner 本会话已关闭(useState,刷新页面/重挂载会重置——澄清 G) */
+  const [bannerDismissed, setBannerDismissed] = useState(false);
+  /** 阶段 4:从 banner"继续阅读"传给 Tree 的展开目标 */
+  const [expandTarget, setExpandTarget] = useState<LayeredReadingLastVisited | null>(null);
 
   const docSource = pdfDataUrl ?? fullText ?? '';
   const hasDoc = docSource.length > 0;
@@ -79,6 +104,46 @@ export const LayeredReadingPanel: React.FC<LayeredReadingPanelProps> = ({
           ...prev,
           globalChatHistory: [...(prev.globalChatHistory ?? []), msg],
         };
+      });
+    },
+    [setLayeredReadingState]
+  );
+
+  /** 阶段 4:upsert 单个 question(若 id 已在 questions[] 则替换,否则 append) */
+  const upsertQuestion = useCallback(
+    (q: LayeredReadingQuestion) => {
+      setLayeredReadingState((prev) => {
+        if (!prev) return prev;
+        const list = prev.questions ?? [];
+        const idx = list.findIndex((x) => x.id === q.id);
+        const next = idx >= 0 ? list.map((x, i) => (i === idx ? q : x)) : [...list, q];
+        return { ...prev, questions: next };
+      });
+    },
+    [setLayeredReadingState]
+  );
+
+  /** 阶段 4:按 id 局部更新 question;不存在时 no-op */
+  const patchQuestion = useCallback(
+    (id: string, patch: Partial<LayeredReadingQuestion>) => {
+      setLayeredReadingState((prev) => {
+        if (!prev) return prev;
+        const list = prev.questions ?? [];
+        const idx = list.findIndex((x) => x.id === id);
+        if (idx < 0) return prev;
+        const next = list.map((x, i) => (i === idx ? { ...x, ...patch } : x));
+        return { ...prev, questions: next };
+      });
+    },
+    [setLayeredReadingState]
+  );
+
+  /** 阶段 4:写入 lastVisited(澄清 D 6 条事件) */
+  const updateLastVisited = useCallback(
+    (lv: LayeredReadingLastVisited) => {
+      setLayeredReadingState((prev) => {
+        if (!prev) return prev;
+        return { ...prev, lastVisited: lv };
       });
     },
     [setLayeredReadingState]
@@ -216,6 +281,162 @@ export const LayeredReadingPanel: React.FC<LayeredReadingPanelProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layeredReadingState?.modules]);
 
+  // ─── 阶段 4:题目 5 个动作 callbacks ───
+
+  /** 生成题目(铁律 8 懒加载;按题型路由到对应 Round N AI 函数) */
+  const handleGenerateQuestion = useCallback(
+    async (
+      questionType: LayeredReadingQuestionType,
+      parentModule: LayeredReadingModule,
+      branch?: LayeredReadingRound2Branch
+    ) => {
+      const attachedTo =
+        questionType === 'story' ? parentModule.id : branch ? branch.id : parentModule.id;
+      const qid = buildQuestionId(attachedTo, questionType);
+      if (generatingQuestionIds.has(qid)) return;
+      if (!hasDoc) return;
+      setGeneratingQuestionIds((prev) => new Set(prev).add(qid));
+      try {
+        let result: { questionText: string; referenceAnswer: string } | null = null;
+        if (questionType === 'story') {
+          result = await generateLayeredQuestionForRound1(docSource, parentModule);
+        } else if (questionType === 'structure' && branch) {
+          result = await generateLayeredQuestionForRound2(docSource, parentModule, branch);
+        } else if (questionType === 'application' && branch) {
+          const details = branch.round3Details ?? [];
+          if (details.length === 0) return; // 防御:没有 details 不该调
+          result = await generateLayeredQuestionForRound3(docSource, parentModule, branch, details);
+        }
+        if (!result) return;
+        const newQ: LayeredReadingQuestion = {
+          id: qid,
+          questionType,
+          attachedTo,
+          questionText: result.questionText,
+          referenceAnswer: result.referenceAnswer,
+          status: 'unanswered',
+          userAnswer: null,
+          aiGrade: null,
+          generatedAt: Date.now(),
+        };
+        upsertQuestion(newQ);
+      } catch (e) {
+        console.error('handleGenerateQuestion', e);
+      } finally {
+        setGeneratingQuestionIds((prev) => {
+          const next = new Set(prev);
+          next.delete(qid);
+          return next;
+        });
+      }
+    },
+    [hasDoc, docSource, generatingQuestionIds, upsertQuestion]
+  );
+
+  /** 提交答案 → 更新 status='answered' + 调 AI 批改 */
+  const handleSubmitQuestion = useCallback(
+    async (questionId: string, userAnswer: string) => {
+      const list = layeredReadingState?.questions ?? [];
+      const q = list.find((x) => x.id === questionId);
+      if (!q) return;
+      const trimmed = userAnswer.trim();
+      if (!trimmed) return;
+      patchQuestion(questionId, {
+        userAnswer: trimmed,
+        status: 'answered',
+        answeredAt: Date.now(),
+        aiGrade: null,
+      });
+      // lastVisited:答题完成(澄清 D)
+      updateLastVisited({
+        moduleId:
+          q.questionType === 'story'
+            ? q.attachedTo
+            : findModuleIdByBranchId(layeredReadingState?.modules ?? [], q.attachedTo) ??
+              q.attachedTo,
+        round: q.questionType === 'story' ? 1 : q.questionType === 'structure' ? 2 : 3,
+        branchId: q.questionType === 'story' ? undefined : q.attachedTo,
+        lastUpdatedAt: Date.now(),
+      });
+      setGradingQuestionIds((prev) => new Set(prev).add(questionId));
+      try {
+        const grade = await gradeLayeredQuestion({ ...q, userAnswer: trimmed }, trimmed);
+        if (grade) {
+          patchQuestion(questionId, { aiGrade: grade });
+        }
+      } catch (e) {
+        console.error('handleSubmitQuestion', e);
+      } finally {
+        setGradingQuestionIds((prev) => {
+          const next = new Set(prev);
+          next.delete(questionId);
+          return next;
+        });
+      }
+    },
+    [layeredReadingState?.questions, layeredReadingState?.modules, patchQuestion, updateLastVisited]
+  );
+
+  /** 跳过题 → 直接 status='skipped',显示参考答案 */
+  const handleSkipQuestion = useCallback(
+    (questionId: string) => {
+      const list = layeredReadingState?.questions ?? [];
+      const q = list.find((x) => x.id === questionId);
+      if (!q) return;
+      patchQuestion(questionId, {
+        status: 'skipped',
+        userAnswer: null,
+        aiGrade: null,
+        answeredAt: Date.now(),
+      });
+      updateLastVisited({
+        moduleId:
+          q.questionType === 'story'
+            ? q.attachedTo
+            : findModuleIdByBranchId(layeredReadingState?.modules ?? [], q.attachedTo) ??
+              q.attachedTo,
+        round: q.questionType === 'story' ? 1 : q.questionType === 'structure' ? 2 : 3,
+        branchId: q.questionType === 'story' ? undefined : q.attachedTo,
+        lastUpdatedAt: Date.now(),
+      });
+    },
+    [layeredReadingState?.questions, layeredReadingState?.modules, patchQuestion, updateLastVisited]
+  );
+
+  /** 重答 → 清空 userAnswer + aiGrade + 回到 'unanswered'(澄清 C 重答覆盖) */
+  const handleResetQuestion = useCallback(
+    (questionId: string) => {
+      patchQuestion(questionId, {
+        status: 'unanswered',
+        userAnswer: null,
+        aiGrade: null,
+      });
+    },
+    [patchQuestion]
+  );
+
+  // ─── 阶段 4:lastVisited banner 显示判定 ───
+  const showBanner = useMemo(() => {
+    if (bannerDismissed) return false;
+    const lv = layeredReadingState?.lastVisited;
+    if (!lv) return false;
+    if (Date.now() - lv.lastUpdatedAt < BANNER_STALE_MS) return false;
+    // 防御:lv.moduleId 必须仍存在
+    if (!layeredReadingState?.modules.some((m) => m.id === lv.moduleId)) return false;
+    return true;
+  }, [bannerDismissed, layeredReadingState?.lastVisited, layeredReadingState?.modules]);
+
+  const handleBannerContinue = useCallback(() => {
+    const lv = layeredReadingState?.lastVisited;
+    if (!lv) return;
+    setExpandTarget(lv);
+    setBannerDismissed(true);
+  }, [layeredReadingState?.lastVisited]);
+
+  const handleBannerDismiss = useCallback(() => {
+    setBannerDismissed(true);
+  }, []);
+
   // ─── 状态分支 1:还没开始(无 modules)→ module 数选数器 ───
   if (!layeredReadingState || layeredReadingState.modules.length === 0) {
     return (
@@ -224,7 +445,7 @@ export const LayeredReadingPanel: React.FC<LayeredReadingPanelProps> = ({
           <h2 className="text-base font-bold text-slate-700 mb-2">递进阅读模式</h2>
           <p className="text-xs text-stone-500 leading-relaxed mb-4">
             用三轮递进的方式理解这份 lecture:Round 1 大白话故事 → Round 2 结构展开 → Round 3 细节挂载。
-            阶段 3 启用全部三轮,Round 2/3 内容含 PDF 溯源跳转。
+            阶段 4 启用题目系统,每轮末可练习与 AI 批改(软门槛,可跳可重答)。
           </p>
           <p className="text-xs font-semibold text-slate-600 mb-2">先选 module 数(2-7):</p>
           <div className="flex items-center gap-1.5 mb-4">
@@ -268,7 +489,7 @@ export const LayeredReadingPanel: React.FC<LayeredReadingPanelProps> = ({
     );
   }
 
-  // ─── 状态分支 2:已有 modules → 进度条 + 树状 UI ───
+  // ─── 状态分支 2:已有 modules → 进度条 + (可选 banner) + 树状 UI ───
   const round1Errored = Object.keys(round1Errors).length > 0;
   const anyRound1Generating = generatingRound1Ids.size > 0;
 
@@ -294,6 +515,15 @@ export const LayeredReadingPanel: React.FC<LayeredReadingPanelProps> = ({
           <p className="text-[10px] text-rose-600">部分 module 的 Round 1 生成失败,请刷新页面或检查网络。</p>
         )}
       </div>
+      {/* 阶段 4:lastVisited banner */}
+      {showBanner && layeredReadingState.lastVisited && (
+        <LastVisitedBanner
+          lastVisited={layeredReadingState.lastVisited}
+          modules={layeredReadingState.modules}
+          onContinue={handleBannerContinue}
+          onDismiss={handleBannerDismiss}
+        />
+      )}
       {/* 树状 UI */}
       <div className="flex-1 overflow-y-auto p-3">
         <LayeredReadingTree
@@ -301,9 +531,18 @@ export const LayeredReadingPanel: React.FC<LayeredReadingPanelProps> = ({
           fullText={fullText}
           pdfDataUrl={pdfDataUrl}
           globalChatHistory={layeredReadingState.globalChatHistory ?? []}
+          questions={layeredReadingState.questions ?? []}
           onUpdateModule={updateModule}
           onAppendChatMessage={appendChatMessage}
           onJumpToPage={onJumpToPage}
+          onGenerateQuestion={handleGenerateQuestion}
+          onSubmitQuestion={handleSubmitQuestion}
+          onSkipQuestion={handleSkipQuestion}
+          onResetQuestion={handleResetQuestion}
+          generatingQuestionIds={generatingQuestionIds}
+          gradingQuestionIds={gradingQuestionIds}
+          onUpdateLastVisited={updateLastVisited}
+          expandTarget={expandTarget}
         />
       </div>
     </div>
@@ -324,3 +563,16 @@ const ProgressLine: React.FC<{ label: string; done: number; total: number }> = (
     </div>
   );
 };
+
+/** 工具:从 modules 中根据 branchId 反查 moduleId(用于 lastVisited 写入) */
+function findModuleIdByBranchId(
+  modules: LayeredReadingModule[],
+  branchId: string
+): string | null {
+  for (const m of modules) {
+    for (const b of m.round2Branches ?? []) {
+      if (b.id === branchId) return m.id;
+    }
+  }
+  return null;
+}
