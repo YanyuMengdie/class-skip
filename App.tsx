@@ -15,6 +15,7 @@ import { GalgameOverlay } from '@/components/GalgameOverlay';
 import { GalgameSettings } from '@/components/GalgameSettings'; 
 import { WelcomeScreen } from '@/shared/layout/WelcomeScreen';
 import { SideQuestPanel } from '@/features/reader/side-quest/SideQuestPanel';
+import { LayeredReadingPanel } from '@/features/reader/layered/LayeredReadingPanel';
 import { QuizReviewPanel } from '@/features/review/tools/QuizReviewPanel';
 import { FlashCardReviewPanel } from '@/features/review/tools/FlashCardReviewPanel';
 import { PageMarkPanel } from '@/features/reader/marks/PageMarkPanel';
@@ -45,7 +46,7 @@ import { startRecording, stopRecording, isTranscriptionSupported } from '@/servi
 import { storageService } from '@/services/storageService';
 import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks } from '@/services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry } from '@/types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState } from '@/types';
 import {
   computeExamWorkspaceLsapKey,
   loadWorkspaceLsapBundle,
@@ -123,6 +124,8 @@ const App: React.FC = () => {
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
   const [studyMap, setStudyMap] = useState<StudyMap | null>(null);
   const [studyMapModuleCount, setStudyMapModuleCount] = useState<number | null>(null);
+  /** 递进阅读模式独立 state，与 studyMap 完全无关（铁律 2，详见 docs/inquiries/LAYERED_READING_INQUIRY.md §8.G） */
+  const [layeredReadingState, setLayeredReadingState] = useState<LayeredReadingState | null>(null);
   const [fullPdfText, setFullPdfText] = useState<string | null>(null); 
   const [isStudyMapLoading, setIsStudyMapLoading] = useState<boolean>(false);
   
@@ -694,7 +697,7 @@ const App: React.FC = () => {
       const stateToRestore = restoreData || (existingRecord ? existingRecord.state : null);
       if (stateToRestore) {
         setExplanations(stateToRestore.explanations || {}); setChatCache(stateToRestore.chatCache || {}); setSkimMessages(stateToRestore.skimMessages || []); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
-        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setSkimTopHeight(stateToRestore.skimTopHeight || 60); setStudyMap(stateToRestore.studyMap || null); setStudyMapModuleCount(null); setSkimStage(stateToRestore.skimStage || 'diagnosis'); setQuizData(stateToRestore.quizData || null); setDocType(stateToRestore.docType || 'STEM');
+        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setSkimTopHeight(stateToRestore.skimTopHeight || 60); setStudyMap(stateToRestore.studyMap || null); setStudyMapModuleCount(null); setLayeredReadingState(stateToRestore.layeredReadingState ?? null); setSkimStage(stateToRestore.skimStage || 'diagnosis'); setQuizData(stateToRestore.quizData || null); setDocType(stateToRestore.docType || 'STEM');
         setReviewQuizRounds(stateToRestore.reviewQuizRounds || []); setReviewFlashCards(stateToRestore.reviewFlashCards || []); setFlashCardEstimate(stateToRestore.flashCardEstimate);
         setPageMarks(stateToRestore.pageMarks || {});
         setStudyGuide(stateToRestore.studyGuide || null);
@@ -704,7 +707,7 @@ const App: React.FC = () => {
         if (restoredBg) setCustomBackgroundUrl(restoredBg); else if (stateToRestore.galgameBackgroundUrl) setCustomBackgroundUrl(stateToRestore.galgameBackgroundUrl);
         if (stateToRestore.personaSettings) setPersonaSettings(stateToRestore.personaSettings);
       } else {
-        setExplanations({}); setChatCache({}); setSkimMessages([]); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('deep'); setSkimTopHeight(60); setStudyMap(null); setStudyMapModuleCount(null); setSkimStage('diagnosis'); setQuizData(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
+        setExplanations({}); setChatCache({}); setSkimMessages([]); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('deep'); setSkimTopHeight(60); setStudyMap(null); setStudyMapModuleCount(null); setLayeredReadingState(null); setSkimStage('diagnosis'); setQuizData(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
       }
       if (!stateToRestore?.studyMap) {
         setIsStudyMapLoading(true); const diagnosisContent = rawPdfData || fullText;
@@ -796,6 +799,7 @@ const App: React.FC = () => {
         skimMessages: fullData.skimMessages,
         viewMode: fullData.viewMode,
         studyMap: fullData.studyMap,
+        layeredReadingState: fullData.layeredReadingState,
         skimStage: fullData.skimStage,
         quizData: fullData.quizData,
         docType: fullData.docType,
@@ -1679,6 +1683,7 @@ const App: React.FC = () => {
       viewMode,
       skimTopHeight,
       studyMap,
+      layeredReadingState,
       skimStage,
       quizData,
       docType,
@@ -1706,6 +1711,7 @@ const App: React.FC = () => {
     viewMode,
     skimTopHeight,
     studyMap,
+    layeredReadingState,
     skimStage,
     quizData,
     docType,
@@ -2013,7 +2019,8 @@ const App: React.FC = () => {
       onToggleImmersive={toggleImmersiveMode} 
       onLayoutPreset={setLeftPanelWidth} 
       viewMode={viewMode} 
-      onToggleViewMode={() => setViewMode(prev => prev === 'deep' ? 'skim' : 'deep')} 
+      onToggleSkim={() => setViewMode(prev => prev === 'skim' ? 'deep' : 'skim')}
+      onToggleLayered={() => setViewMode(prev => prev === 'layered' ? 'deep' : 'layered')}
       hasStudyMap={!!studyMap} 
       onOpenHistory={handleOpenHistory} 
       onEnterGalgameMode={() => setIsGalgameMode(true)}
@@ -2095,8 +2102,16 @@ const App: React.FC = () => {
       onRegenerateStudyMap={handleRegenerateStudyMap}
       studyMapModuleCount={studyMapModuleCount}
     />
+  ) : viewMode === 'layered' ? (
+    <LayeredReadingPanel
+      fullText={fullPdfText}
+      pdfDataUrl={pdfDataUrl}
+      fileName={fileName}
+      layeredReadingState={layeredReadingState}
+      setLayeredReadingState={setLayeredReadingState}
+    />
   ) : (
-    <ExplanationPanel 
+    <ExplanationPanel
       explanation={currentSlide ? explanations[currentSlide.id] : undefined} 
       isLoadingExplanation={isGeneratingAI} 
       onRetryExplanation={handleRetryExplanation} 

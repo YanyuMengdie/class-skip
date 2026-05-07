@@ -273,8 +273,74 @@ export type SavedArtifact =
   | (SavedArtifactBase & { type: 'flashcard'; payload: { count: number } })
   | (SavedArtifactBase & { type: 'trapList'; payload: { itemIds: string[] } });
 
-export type ViewMode = 'deep' | 'skim';
+export type ViewMode = 'deep' | 'skim' | 'layered';
 export type SkimStage = 'diagnosis' | 'tutoring' | 'quiz' | 'reading';
+
+// --- 递进阅读模式（layered reading）---
+// 数据完全独立于 studyMap，详见 docs/inquiries/LAYERED_READING_INQUIRY.md §8.G
+export interface LayeredReadingModule {
+  id: string;
+  index: number;
+  storyTitle: string;
+  pageRange?: string;
+  /** Round 1 内容（大白话故事）；按需填充，未生成时为 null */
+  round1Content?: string | null;
+  /** Round 2 子枝干列表；按需填充 */
+  round2Branches?: LayeredReadingRound2Branch[];
+  /** 各 Round 完成状态 */
+  round1Done?: boolean;
+  round2Done?: boolean;
+  round3Done?: boolean;
+}
+
+export interface LayeredReadingRound2Branch {
+  id: string;
+  index: number;
+  title: string;
+  content?: string | null;
+  /** Round 3 细节挂载 */
+  round3Details?: LayeredReadingRound3Detail[];
+}
+
+export interface LayeredReadingRound3Detail {
+  id: string;
+  /** "term" | "experiment" | "figure" | "evidence" | "comparison" 等自由文本类型 */
+  kind: string;
+  label: string;
+  description: string;
+}
+
+export interface LayeredReadingQuestion {
+  id: string;
+  /** 题目所属轮次：1/2/3，对应故事题/结构题/细节题 */
+  roundLevel: 1 | 2 | 3;
+  /** 题目挂在哪个节点下 */
+  attachedTo: { moduleId: string; branchId?: string; detailId?: string };
+  question: string;
+  options?: string[];
+  correctIndex?: number;
+  explanation?: string;
+  /** 用户作答记录 */
+  userAnswerIndex?: number;
+  answeredAt?: number;
+}
+
+export interface LayeredReadingState {
+  /** 本模式独立 module 列表，与 studyMap 无关 */
+  modules: LayeredReadingModule[];
+  /** 用户上次浏览到的位置（学习状态记忆） */
+  lastVisited?: { moduleId: string; round: 1 | 2 | 3; branchId?: string };
+  /** 题目作答记录 */
+  questions: LayeredReadingQuestion[];
+  /** 进度统计快照 */
+  progressSnapshot?: {
+    round1: { done: number; total: number };
+    round2: { done: number; total: number };
+    round3: { done: number; total: number };
+  };
+  /** 创建时间 */
+  createdAt: number;
+}
 
 // --- PAGE MARK TYPES ---
 export type MarkType = 'core' | 'formula' | 'example' | 'trap' | 'exam' | 'difficult' | 'summary' | 'custom';
@@ -386,6 +452,8 @@ export interface FilePersistedState {
   viewMode: ViewMode;
   skimTopHeight: number;
   studyMap: StudyMap | null;
+  /** 递进阅读模式独立 state；与 studyMap 完全独立（铁律 2） */
+  layeredReadingState?: LayeredReadingState | null;
   skimStage?: SkimStage;
   quizData?: QuizData | null;
   docType?: DocType;
@@ -443,6 +511,8 @@ export interface CloudSession {
   skimMessages?: ChatMessage[];
   viewMode?: ViewMode;
   studyMap?: StudyMap | null;
+  /** 递进阅读模式独立 state（铁律 2） */
+  layeredReadingState?: LayeredReadingState | null;
   skimStage?: SkimStage;
   quizData?: QuizData | null;
   docType?: DocType;

@@ -38,9 +38,12 @@ interface HeaderProps {
   onToggleImmersive: () => void;
   onLayoutPreset?: (ratio: number) => void;
 
-  // Skim Mode
+  // Skim Mode + Layered Reading Mode
   viewMode: ViewMode;
-  onToggleViewMode: () => void;
+  /** 切换略读 ↔ 精读（'skim' 时回 'deep'，否则切到 'skim'，含从 'layered' 直切） */
+  onToggleSkim: () => void;
+  /** 切换递进阅读 ↔ 精读（'layered' 时回 'deep'，否则切到 'layered'，含从 'skim' 直切） */
+  onToggleLayered: () => void;
   hasStudyMap: boolean;
 
   // History
@@ -136,7 +139,8 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleImmersive,
   onLayoutPreset,
   viewMode,
-  onToggleViewMode,
+  onToggleSkim,
+  onToggleLayered,
   hasStudyMap,
   onOpenHistory,
   onEnterGalgameMode,
@@ -270,13 +274,13 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
              </div>
 
-             {/* Mode Toggle Button */}
+             {/* Mode Toggle Button — 略读 */}
              {hasStudyMap && (
-                 <button 
-                    onClick={onToggleViewMode}
+                 <button
+                    onClick={onToggleSkim}
                     className={`flex items-center space-x-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm ${
-                        viewMode === 'skim' 
-                        ? 'bg-indigo-600 text-white shadow-indigo-200 hover:bg-indigo-700' 
+                        viewMode === 'skim'
+                        ? 'bg-indigo-600 text-white shadow-indigo-200 hover:bg-indigo-700'
                         : 'bg-white text-slate-600 border border-stone-200 hover:bg-stone-50'
                     }`}
                  >
@@ -284,6 +288,18 @@ export const Header: React.FC<HeaderProps> = ({
                     <span>{viewMode === 'skim' ? '返回精读' : '进入略读'}</span>
                  </button>
              )}
+
+             {/* Mode Toggle Button — 递进阅读（不依赖 hasStudyMap，铁律 2；视觉为朴素默认样式，阶段 3 再精修） */}
+             <button
+                onClick={onToggleLayered}
+                className={`flex items-center space-x-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm border ${
+                    viewMode === 'layered'
+                    ? 'bg-slate-700 text-white border-slate-700 hover:bg-slate-800'
+                    : 'bg-white text-slate-600 border-stone-200 hover:bg-stone-50'
+                }`}
+             >
+                <span>{viewMode === 'layered' ? '返回精读' : '进入递进阅读'}</span>
+             </button>
 
              {/* Immersive Layout Controls */}
              {isImmersive && onLayoutPreset && viewMode === 'deep' && (
