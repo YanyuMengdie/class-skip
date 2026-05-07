@@ -2,14 +2,16 @@
 
 > **文档性质**：给 Claude Code 的实施计划。具体动手指南。
 > **配套文档**：`LAYERED_READING_INQUIRY.md`（诊断过程，了解为什么这样做）。
-> **实施前置**：读完 INQUIRY §5 五条铁律 + §6 风险评估 + §7 用户体验最终规格 + §10 代码索引。
+> **实施前置**：读完 INQUIRY §5 七条铁律 + §5.5 阶段 2 后需求加码 + §6 风险评估 + §7 用户体验最终规格 + §10 代码索引。
 > **方法论**：沿用 `MULTISELECT_KC_PLAN.md` 的分阶段 + 守卫规则 + 阶段间用户介入 + 给 Claude Code 的执行指令模板。
+> **修订历史**：第一版（阶段 1-4 原计划）→ 第二版（阶段 2 完成后扩展，加溯源 + 提问到阶段 3）。
 
 ---
 
-## 1. 七条铁律（绝对不能违反）
+## 1. 九条铁律（绝对不能违反）
 
 > 这些铁律来自 INQUIRY 阶段用户钉死的产品哲学。违反任何一条 = PLAN 失败。
+> 铁律 1-7 来自 INQUIRY §5（其中 6/7 是阶段 2 后新增的产品哲学）；铁律 8/9 是 PLAN 实施层钉死。
 
 1. **API 边界铁律**：新建独立 `chatWithLayeredReadingTutor`；递进阅读组件**绝不**调 `chatWithAdaptiveTutor` 或 `chatWithSkimAdaptiveTutor`。
 
@@ -21,9 +23,13 @@
 
 5. **不分 STEM / HUMANITIES prompt**：递进阅读统一一套 prompt。新 prompt **不继承**现有 STEM_SYSTEM_PROMPT / HUMANITIES_SYSTEM_PROMPT 里的"必须沿用学习地图"全局约束。
 
-6. **绝不动现有代码**：现有 `SkimPanel.tsx` (1309 行)、`chatWithSkimAdaptiveTutor`、`STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT` 内容、`FilePersistedState.studyMap` 字段、备考工作台所有代码——**完全不动**。
+6. **AI 解读不取代原始 slides（阶段 2 后新增）**：Round 2/3 内容必须含溯源（页码 + 位置描述）；用户能从任意 module 节点跳回 PDF 对应位置；**AI 不许编造页码**——如果 PDF 没有相关内容，宁可少给细节。
 
-7. **AI 不自动推进三轮**：必须用户点"展开到 Round X"按钮才推进。AI 不能在回复末尾说"我接下来给你讲 Round 2"自动推进。
+7. **Module 提问视觉独立、数据全局（阶段 2 后新增）**：每 module chat 框只显示该 module 的 Q&A（视觉过滤）；但每次调用 `chatWithLayeredReadingTutor` 都把**完整 globalChatHistory** 发给 AI（数据全局共享）；持久化在 `layeredReadingState.globalChatHistory`。
+
+8. **绝不动现有代码**：现有 `SkimPanel.tsx` (1309 行)、`chatWithSkimAdaptiveTutor`、`STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT` 内容、`FilePersistedState.studyMap` 字段、备考工作台所有代码——**完全不动**。
+
+9. **AI 不自动推进三轮**：必须用户点"展开到 Round X"按钮才推进。AI 不能在回复末尾说"我接下来给你讲 Round 2"自动推进。
 
 ---
 
@@ -137,12 +143,12 @@ layeredReadingState?: LayeredReadingState;
 
 ### 总览
 
-| 阶段 | 范围 | 是否调 AI | 验收要点 |
-|---|---|---|---|
-| 阶段 1 | viewMode 状态机扩展 + 入口按钮 + 空壳 panel + 持久化结构 | ❌ | 三态切换通过；空壳显示 |
-| 阶段 2 | Round 1 module 列表生成 + 大白话故事 | ✅ | 能生成 module、能展开看 Round 1 内容 |
-| 阶段 3 | Round 2/3 + 树状 UI + 进度条 + 主动推进按钮 | ✅ | 完整画面终审场景跑通 |
-| 阶段 4 | 分层题目 + 学习状态记忆 + CHANGELOG / 边界文档更新 | ✅ | 题目能答、关页面再进能续上 |
+| 阶段 | 范围 | 是否调 AI | 验收要点 | 状态 |
+|---|---|---|---|---|
+| 阶段 1 | viewMode 状态机扩展 + 入口按钮 + 空壳 panel + 持久化结构 | ❌ | 三态切换通过；空壳显示 | ✅ 已完成（commit `767dff3`）|
+| 阶段 2 | Round 1 module 列表生成 + 大白话故事 | ✅ | 能生成 module、能展开看 Round 1 内容 | ✅ 已完成（待用户提供 commit hash）|
+| **阶段 3（范围扩展）** | Round 2/3 + 树状 UI + 进度条 + 主动推进 + **溯源 + 提问** | ✅ | 完整画面终审场景 + 溯源准确性 + chat 跨 module 上下文连贯 | ⏳ 待开工（5-7h）|
+| 阶段 4 | 分层题目 + 学习状态记忆 + CHANGELOG / 边界文档更新 | ✅ | 题目能答、关页面再进能续上 | ⏳ 待开工 |
 
 ---
 
@@ -274,57 +280,122 @@ feat(layered-reading): Round 1 大白话故事线 + 独立 prompt
 
 ---
 
-### 阶段 3：Round 2/3 + 树状 UI + 进度条 + 主动推进
+### 阶段 3：Round 2/3 + 树状 UI + 进度条 + 主动推进 + 溯源 + 提问
 
-**目标**：完整画面终审场景跑通——树状结构可视化、三轮 zoom in、用户主动点按钮推进、顶部进度条。
+**⚠️ 范围扩展提示**：本阶段在阶段 2 完成后扩展了范围（详见 INQUIRY §5.5）。包含原 4 项 + 溯源 + 提问 = 6 项，预估工程量 5-7 小时。
 
-#### 3.1 树状 UI 实现
+**目标**：完整画面终审场景跑通——树状结构可视化、三轮 zoom in、用户主动点按钮推进、顶部进度条、Round 2/3 内容含溯源、每 module 提问。
+
+#### 3.1 类型定义扩展（先做这步）
+
+修改 `types.ts`：
+
+- `LayeredReadingRound3Detail` 加溯源字段：`sourcePage: number` + `sourceLocation: string`（铁律 6）
+- `LayeredReadingRound2Branch` 加溯源字段：`sourcePage?: number` + `sourceLocation?: string`（铁律 6）
+- 新增 `LayeredReadingChatMessage` 类型：包含 `id` / `role` / `content` / `askedInModuleId` / `timestamp`（铁律 7 关键字段）
+- `LayeredReadingState` 加 `globalChatHistory: LayeredReadingChatMessage[]`（铁律 7）
+
+#### 3.2 树状 UI 实现
 
 - 新建 `features/reader/layered/LayeredReadingTree.tsx`（如果太大可继续拆）
 - 树节点结构：
-  - module 节点（Round 1）→ 展开后里面有 Round 1 内容 + "展开到 Round 2" 按钮
+  - module 节点（Round 1）→ 展开后里面有 Round 1 内容 + "展开到 Round 2" 按钮 + "💬 提问" 按钮
   - 点 "展开到 Round 2" → 调 AI 生成 round2Branches → module 节点下长出子枝干
-  - 子枝干节点（Round 2）→ 展开后里面有 Round 2 内容 + "展开到 Round 3" 按钮
-  - 点 "展开到 Round 3" → 调 AI 生成 round3Details → 子枝干下长出细节列表
+  - 子枝干节点（Round 2）→ 展开后里面有 Round 2 内容 + 溯源标签 + "展开到 Round 3" 按钮
+  - 点 "展开到 Round 3" → 调 AI 生成 round3Details → 子枝干下长出细节列表（每个细节带溯源标签）
 - 折叠展开行为：
   - 默认每个新生成的层级**自动展开** + 滚动到位置
   - 用户可手动收起
   - 已答题的节点用打勾标记
+  - chat 框默认折叠
 
-#### 3.2 顶部进度条
+#### 3.3 顶部进度条
 
 - 三条独立进度（Round 1 X/N · Round 2 Y/N · Round 3 Z/N）
 - 数据源：`layeredReadingState.progressSnapshot`
 - 每次 Round X 节点状态变化时更新 snapshot
 - 不要 toast、不要动画——只是静态显示（按你跟现有 atom coverage 一致的"温和反馈"风格）
 
-#### 3.3 新增 AI 调用
+#### 3.4 新增 AI 调用 + Prompt 改造（含溯源指令）
 
-- `generateLayeredRound2Branches(fullText, module)`：为某个 module 生成 Round 2 子枝干列表 + 内容
-- `generateLayeredRound3Details(fullText, branch)`：为某个子枝干生成 Round 3 细节挂载
+修改 `lib/prompts/layeredReadingPrompts.ts`，新增：
 
-#### 3.4 用户主动推进按钮
+- **`buildLayeredRound2Prompt(module)`**：生成 Round 2 子枝干列表 + 内容 + **溯源信息**（铁律 6）
+  - prompt 里明文要求：每个子枝干必须含 `sourcePage`（来自 PDF 真实页码，**不许编造**）+ `sourceLocation`（"右上方"、"流程图下方"等位置描述）
+  - JSON Schema 强约束 sourcePage 是数字、sourceLocation 是字符串
+  - 给 1-2 个示例：good vs bad（"page: 23, location: '关于细胞膜的图示下方'" vs "page: 999, location: '某处'"）
+  
+- **`buildLayeredRound3Prompt(branch)`**：为某个子枝干生成 Round 3 细节 + **溯源信息**（铁律 6）
+  - 同上，每个细节含 sourcePage + sourceLocation
+  - 严格禁令："如果该 PDF 没有相关内容，宁可少给细节也不要编造页码"
+
+修改 `services/geminiService.ts`，新增：
+
+- `generateLayeredRound2Branches(fullText, module)`：为某个 module 生成 Round 2 子枝干列表 + 内容 + 溯源
+- `generateLayeredRound3Details(fullText, branch)`：为某个子枝干生成 Round 3 细节挂载 + 溯源
+
+#### 3.5 用户主动推进按钮（原 3.4，编号顺延）
 
 - "展开到 Round 2" 按钮放在 module 节点 Round 1 内容末尾
 - "展开到 Round 3" 按钮放在子枝干 Round 2 内容末尾
-- AI 回复中**不允许**出现"接下来我给你讲 Round X"这类自动推进语——铁律 7
+- AI 回复中**不允许**出现"接下来我给你讲 Round X"这类自动推进语——铁律 7（原编号铁律 7，对应阶段 2 已落地的"AI 不自动推进"——注意：阶段 2 后铁律体系扩展为 7 条，原"AI 不自动推进"是其中第 7 条之前的版本，新铁律 7 是"chat 视觉独立数据全局"——上下文按 INQUIRY §5 最新版本理解）
 - prompt 里明文禁止 AI 提议推进
 
-#### 3.5 验收要点
+#### 3.6 溯源跳转 PDF（铁律 6 落地）
+
+新建 `features/reader/layered/RoundContentWithSource.tsx`：
+
+- 输入：Round 2/3 内容 + sourcePage + sourceLocation
+- 渲染：内容文本 + 末尾 "📎 第 X 页 · {sourceLocation}" 标签
+- 标签可点击：触发 `props.onJumpToPage(sourcePage)` 回调
+- App.tsx 在 LayeredReadingPanel 渲染时传入 `onJumpToPage`，回调内容是滚动 PDF iframe 到指定页（**复用现有 PDF 跳转逻辑**——RECON 阶段确认 SkimPanel 已经有类似机制可参考，但**不要复用代码**，独立实现）
+
+#### 3.7 每 module chat 框（铁律 7 落地）
+
+新建 `features/reader/layered/ModuleChatBox.tsx`：
+
+**视觉行为**：
+- 每个 module 节点下面默认折叠的 "💬 提问" 按钮
+- 点开后展开 chat 框：输入框 + 历史消息列表
+- 历史消息列表**只显示** `globalChatHistory.filter(m => m.askedInModuleId === currentModuleId)` 
+- 切到其他 module → 这个 module 的 chat 框只显示该 module 的 Q&A
+
+**数据行为**：
+- 用户发送消息 → 加到 `globalChatHistory`，标记 `askedInModuleId: currentModuleId`
+- 调 `chatWithLayeredReadingTutor(docContent, fullGlobalChatHistory, newMessage)`：
+  - **关键**：发给 AI 的是**完整 globalChatHistory**（不过滤 askedInModuleId）
+  - AI 看到所有 module 的对话历史，跨 module 上下文连贯
+- AI 回复 → 加到 globalChatHistory，标 `askedInModuleId: currentModuleId`
+
+**System prompt 增强**：
+- `LAYERED_READING_SYSTEM_PROMPT` 增加一段说明："对话历史中每条消息的 `askedInModuleId` 标记了用户当时在看哪个 module。请在回答时考虑这个上下文——用户可能跨 module 问问题，你应该记得之前的对话。"
+
+#### 3.8 验收要点
 
 - 完整画面终审场景：见 INQUIRY §5"目标体验画面"
-- 关闭页面 → 重开 → 树状态 + 已展开节点 + 进度条全部恢复
+- 关闭页面 → 重开 → 树状态 + 已展开节点 + 进度条 + globalChatHistory 全部恢复
 - AI 不自动推进——用户不点按钮，AI 不会自己讲 Round 2 内容
+- **溯源准确性验证**（必跑）：抽样 3 个 Round 2/3 节点 → 跳转到对应页 → 核对页码和位置描述真实
+- **chat 上下文连贯性验证**（必跑）：
+  - 在 module 1 chat 框问"什么是 Top Hat？"→ AI 回答
+  - 切到 module 2 chat 框 → 视觉上**看不到** module 1 的对话
+  - 在 module 2 chat 框问"这跟 Top Hat 有关系吗？"→ AI **应该记得** module 1 问过 Top Hat
+- **chat 持久化**：关页面再开 → globalChatHistory 完整恢复，每 module chat 框正确显示自己的历史
 
-#### 3.6 阶段 3 commit message
+#### 3.9 阶段 3 commit message
 
 ```
-feat(layered-reading): 树状 UI + Round 2/3 + 进度条 + 主动推进
+feat(layered-reading): 树状 UI + Round 2/3 + 溯源 + 提问 + 进度条
 
 - 新建 LayeredReadingTree 组件，三轮共用同一棵树 zoom in
 - 顶部三条独立进度条（Round 1/2/3 各自 N/M）
-- generateLayeredRound2Branches / generateLayeredRound3Details
-- 用户必须点"展开到 Round X"按钮才推进；AI 不自动跑
+- generateLayeredRound2Branches / generateLayeredRound3Details (含溯源)
+- buildLayeredRound2Prompt / buildLayeredRound3Prompt (强制溯源 + 禁编造页码)
+- 新建 RoundContentWithSource 组件,溯源页码可点击跳转 PDF
+- 新建 ModuleChatBox 组件,视觉独立 + 数据全局共享 (globalChatHistory)
+- LayeredReadingChatMessage 加 askedInModuleId 字段
+- 用户必须点"展开到 Round X"按钮才推进;AI 不自动跑
+- 铁律 6 (溯源不取代 slides) + 铁律 7 (视觉独立数据全局) 全部落地
 - 阶段 3/4 of 递进阅读模式
 ```
 
@@ -396,16 +467,22 @@ feat(layered-reading): 分层题目 + 学习状态记忆 + 边界文档
 | LayeredReadingPanel.tsx 不出现 `chatWithSkimAdaptiveTutor` 或 `chatWithAdaptiveTutor` | 铁律 1 | 破坏 API 分离 |
 | LayeredReadingPanel.tsx / 相关代码不读 `FilePersistedState.studyMap` | 铁律 2 | 数据共享 = 概念分裂的反面 |
 | 新 prompt 不引用"学习地图"或"必须沿用"等术语 | 铁律 5 | 隐式继承全局约束 |
-| 不修改 `STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT` 内容 | 铁律 6 | 污染略读模式 |
-| 不修改 `SkimPanel.tsx` | 铁律 6 | 破坏现有略读 |
-| 不修改 `chatWithSkimAdaptiveTutor` / `chatWithAdaptiveTutor` | 铁律 6 | 污染既有 API |
+| **Round 2/3 内容必须含 sourcePage（非空、真实页码）+ sourceLocation（非空、有意义描述）** | 铁律 6 | 违反"AI 不取代原始 slides"哲学 |
+| **AI prompt 明文禁止编造页码——"如果 PDF 没有相关内容，宁可少给细节"** | 铁律 6 | 错误溯源比无溯源更糟 |
+| **每 module chat 框只渲染 `globalChatHistory.filter(m => m.askedInModuleId === currentModuleId)`** | 铁律 7 | 违反"视觉简洁"用户拍板 |
+| **`chatWithLayeredReadingTutor` 调用时 history 参数必须是完整 globalChatHistory（不过滤）** | 铁律 7 | AI 跨 module 失忆，违反用户拍板 |
+| **`globalChatHistory` 持久化到 `FilePersistedState.layeredReadingState`** | 铁律 7 | 关页面对话历史丢失 |
+| **每条 LayeredReadingChatMessage 必须有 askedInModuleId 字段** | 铁律 7 | 视觉过滤无法工作 |
+| 不修改 `STEM_SYSTEM_PROMPT` / `HUMANITIES_SYSTEM_PROMPT` 内容 | 铁律 8 | 污染略读模式 |
+| 不修改 `SkimPanel.tsx` | 铁律 8 | 破坏现有略读 |
+| 不修改 `chatWithSkimAdaptiveTutor` / `chatWithAdaptiveTutor` | 铁律 8 | 污染既有 API |
 | 递进阅读按钮显示条件不抄 `hasStudyMap` | INQUIRY 风险/RECON | 破坏"独立路径"画面 |
-| AI prompt 明文禁止"接下来我给你讲 Round X"自动推进语 | 铁律 7 | 破坏"用户主动推进"画面 |
+| AI prompt 明文禁止"接下来我给你讲 Round X"自动推进语 | 铁律 9 | 破坏"用户主动推进"画面 |
 | 不做 page-level coverage map / A-D 风险标签 / 自动补洞 | 铁律 3 | scope creep |
 | 不做 STEM/HUMANITIES 分流的递进阅读 prompt | 铁律 5 | 违反"轻盈起步" |
 | 不做 diagnosis/tutoring/quiz 三阶段前置门控 | 铁律 4 | 违反"轻盈直入" |
 | 不做右侧 panel 详情区 | 用户否决 (f) | 违反终审画面 |
-| 不动备考工作台 / KC / atom coverage / BKT | 铁律 6 | 越界 |
+| 不动备考工作台 / KC / atom coverage / BKT | 铁律 8 | 越界 |
 
 ---
 
@@ -584,3 +661,12 @@ module 拆分跑偏、Round 1 不够大白话、Round 3 细节归类错乱——
 ---
 
 *PLAN 完成于 INQUIRY 修订之后、Claude Code 实施之前。等你画面终审通过后开工。*
+
+*第二次修订（阶段 2 commit 完成后）：阶段 3 范围扩展。*
+*- 加入溯源（铁律 6）：Round 2/3 内容含 sourcePage + sourceLocation，可点击跳转 PDF*
+*- 加入提问（铁律 7）：每 module chat 框视觉独立，数据 globalChatHistory 全局共享*
+*- 铁律体系从 7 条扩展到 9 条（INQUIRY §5 七条 + PLAN §1 实施层 8/9 两条）*
+*- 阶段 3 工程量从 1.5-2.5h 调整到 5-7h（用户接受工程量翻倍以换产品完整度）*
+*- 阶段 3 内部分子步骤 3.1-3.9*
+*- 守卫规则汇总扩展到 16 条*
+*- 用户主动选择"阶段 3 一次做完"而非拆分（INQUIRY §5.5 节奏决策）*

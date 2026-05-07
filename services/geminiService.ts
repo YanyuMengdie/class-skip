@@ -1,10 +1,11 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk } from "@/types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail } from "@/types";
 import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProfiles";
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/lib/exam/scaffoldingClassifier";
 import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "@/lib/prompts/systemPrompts";
+import { LAYERED_READING_SYSTEM_PROMPT, buildLayeredModuleGenPrompt, buildLayeredRound1Prompt, buildLayeredRound2Prompt, buildLayeredRound3Prompt } from "@/lib/prompts/layeredReadingPrompts";
 
 // Ensure API Key exists or fail gracefully in logs (though process.env check is assumed handled elsewhere)
 const apiKey = process.env.API_KEY || "";
@@ -3097,5 +3098,314 @@ export const generateTurtleSoupHint = async (
     } catch (e) {
         console.error('generateTurtleSoupHint failed', e);
         return '再想想。';
+    }
+};
+
+// ─────────────────────────────────────────────────────────────────────────
+// 递进阅读模式（layered reading）—— 独立 API
+//
+// 设计原则（来自 LAYERED_READING_PLAN.md §1 七条铁律 / §3.2 阶段 2）：
+// - 铁律 1：不复用 chatWithSkimAdaptiveTutor / chatWithAdaptiveTutor 任何代码逻辑;
+//   不接收 scaffolding / KC / chunk / citations / docType 等任何附录参数
+// - 铁律 5：不分 STEM / HUMANITIES;统一一套 systemInstruction
+// - 铁律 7：prompt 层在 LAYERED_READING_SYSTEM_PROMPT 已禁止自动推进语
+//
+// 阶段 2 状态:
+//   - chatWithLayeredReadingTutor: 阶段 2 panel 不消费,为阶段 3 树状 UI 对话准备
+//   - generateLayeredReadingModules / generateLayeredRound1Content: 阶段 2 即被消费
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * 递进阅读对话 API。统一一套 prompt（LAYERED_READING_SYSTEM_PROMPT）,不分学科。
+ * 不接收 scaffolding / KC / chunk / citations / docType 任何附录参数。
+ */
+export const chatWithLayeredReadingTutor = async (
+    docContent: string,
+    history: ChatMessage[],
+    newMessage: string
+): Promise<string> => {
+    try {
+        const contentPart = getContentPart(docContent);
+        const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> }> = [];
+
+        // 首条 user 消息携带 DOCUMENT 内容
+        contents.push({
+            role: 'user',
+            parts: [contentPart, { text: 'Current Mode: Layered Reading' }]
+        });
+
+        // 历史对话
+        history.forEach(msg => {
+            contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+        });
+
+        // 本轮新消息（不附任何 scaffolding / 引用协议 / KC 锚定 appendix）
+        contents.push({ role: 'user', parts: [{ text: newMessage }] });
+
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents,
+            config: { systemInstruction: LAYERED_READING_SYSTEM_PROMPT }
+        });
+
+        return response.text || "Thinking...";
+    } catch (error) {
+        console.error('chatWithLayeredReadingTutor Error:', error);
+        return "通信中断,请重试。";
+    }
+};
+
+/**
+ * 生成本模式独立的 module 列表（与 SkimPanel 的 studyMap 完全无关,铁律 2）。
+ * AI 只输出 storyTitle + pageRange,前端补 id / index。
+ *
+ * @param fullText PDF 全文(或 dataURL)
+ * @param options.moduleCount 用户指定的 module 数(2-7)
+ * @returns LayeredReadingModule[] 或失败时 null
+ */
+export const generateLayeredReadingModules = async (
+    fullText: string,
+    options: { moduleCount: number }
+): Promise<LayeredReadingModule[] | null> => {
+    const { moduleCount } = options;
+    if (moduleCount < 2 || moduleCount > 7) {
+        console.error('generateLayeredReadingModules: moduleCount out of range [2, 7]', moduleCount);
+        return null;
+    }
+    try {
+        const contentPart = getContentPart(fullText);
+        const prompt = buildLayeredModuleGenPrompt(moduleCount);
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        modules: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    storyTitle: { type: Type.STRING },
+                                    pageRange: { type: Type.STRING },
+                                },
+                                required: ['storyTitle', 'pageRange'],
+                            },
+                        },
+                    },
+                    required: ['modules'],
+                },
+            },
+        });
+        if (!response.text) return null;
+        const parsed = JSON.parse(response.text) as {
+            modules?: Array<{ storyTitle?: string; pageRange?: string }>;
+        };
+        const rawModules = Array.isArray(parsed.modules) ? parsed.modules : [];
+        if (rawModules.length === 0) return null;
+
+        // 前端补 id / index;只取前 moduleCount 个,防 AI 越界
+        const modules: LayeredReadingModule[] = rawModules
+            .slice(0, moduleCount)
+            .map((m, i) => ({
+                id: `module-${i + 1}`,
+                index: i + 1,
+                storyTitle: (m.storyTitle ?? '').trim() || `Module ${i + 1}`,
+                pageRange: (m.pageRange ?? '').trim() || undefined,
+            }));
+        return modules;
+    } catch (e) {
+        console.error('generateLayeredReadingModules Error:', e);
+        return null;
+    }
+};
+
+/**
+ * 为指定 module 生成 Round 1 大白话故事内容。
+ * 输出纯 markdown 文本(非 JSON);200-400 字。
+ *
+ * @param fullText PDF 全文(或 dataURL)
+ * @param layeredModule 待生成内容的 module(读 storyTitle + pageRange)
+ * @returns markdown 文本,或失败时 null
+ */
+export const generateLayeredRound1Content = async (
+    fullText: string,
+    layeredModule: LayeredReadingModule
+): Promise<string | null> => {
+    try {
+        const contentPart = getContentPart(fullText);
+        const prompt = buildLayeredRound1Prompt(layeredModule);
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+            config: { systemInstruction: LAYERED_READING_SYSTEM_PROMPT },
+        });
+        const text = response.text?.trim();
+        if (!text) return null;
+        return text;
+    } catch (e) {
+        console.error('generateLayeredRound1Content Error:', e);
+        return null;
+    }
+};
+
+/**
+ * 阶段 3：生成 module 的 Round 2 子枝干列表 + 内容 + 溯源(铁律 6)。
+ * 每个 branch 必须含 sourcePage(真实页码)+ sourceLocation(有意义位置描述)。
+ *
+ * @returns 2-5 个 branch 的数组(已补 id/index);失败时 null
+ */
+export const generateLayeredRound2Branches = async (
+    fullText: string,
+    layeredModule: LayeredReadingModule
+): Promise<LayeredReadingRound2Branch[] | null> => {
+    try {
+        const contentPart = getContentPart(fullText);
+        const prompt = buildLayeredRound2Prompt(layeredModule);
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        branches: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    title: { type: Type.STRING },
+                                    content: { type: Type.STRING },
+                                    sourcePage: { type: Type.NUMBER },
+                                    sourceLocation: { type: Type.STRING },
+                                },
+                                required: ['title', 'content', 'sourcePage', 'sourceLocation'],
+                            },
+                        },
+                    },
+                    required: ['branches'],
+                },
+            },
+        });
+        if (!response.text) return null;
+        const parsed = JSON.parse(response.text) as {
+            branches?: Array<{
+                title?: string;
+                content?: string;
+                sourcePage?: number;
+                sourceLocation?: string;
+            }>;
+        };
+        const rawBranches = Array.isArray(parsed.branches) ? parsed.branches : [];
+        if (rawBranches.length === 0) return null;
+
+        // 前端补 id / index;限定 2-5
+        const branches: LayeredReadingRound2Branch[] = rawBranches.slice(0, 5).map((b, i) => {
+            const branch: LayeredReadingRound2Branch = {
+                id: `${layeredModule.id}.${i + 1}`,
+                index: i + 1,
+                title: (b.title ?? '').trim() || `子枝干 ${i + 1}`,
+                content: (b.content ?? '').trim() || null,
+            };
+            // 只保留 AI 给出的合法 sourcePage(>= 1 的整数);否则不写,防 0 / 负数 / 字符串等异常
+            if (typeof b.sourcePage === 'number' && Number.isFinite(b.sourcePage) && b.sourcePage >= 1) {
+                branch.sourcePage = Math.floor(b.sourcePage);
+            }
+            const loc = (b.sourceLocation ?? '').trim();
+            if (loc) branch.sourceLocation = loc;
+            return branch;
+        });
+        return branches;
+    } catch (e) {
+        console.error('generateLayeredRound2Branches Error:', e);
+        return null;
+    }
+};
+
+/**
+ * 阶段 3：生成某个子枝干的 Round 3 细节挂载 + 溯源(铁律 6)。
+ * 每个 detail 必填 sourcePage(真实页码)+ sourceLocation;label 用讲义原词。
+ *
+ * @returns 2-6 个 detail 的数组(已补 id);AI 倾向少给但准的细节;失败时 null
+ */
+export const generateLayeredRound3Details = async (
+    fullText: string,
+    parentModule: LayeredReadingModule,
+    branch: LayeredReadingRound2Branch
+): Promise<LayeredReadingRound3Detail[] | null> => {
+    try {
+        const contentPart = getContentPart(fullText);
+        const prompt = buildLayeredRound3Prompt(parentModule, branch);
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        details: {
+                            type: Type.ARRAY,
+                            items: {
+                                type: Type.OBJECT,
+                                properties: {
+                                    kind: { type: Type.STRING },
+                                    label: { type: Type.STRING },
+                                    description: { type: Type.STRING },
+                                    sourcePage: { type: Type.NUMBER },
+                                    sourceLocation: { type: Type.STRING },
+                                },
+                                required: ['kind', 'label', 'description', 'sourcePage', 'sourceLocation'],
+                            },
+                        },
+                    },
+                    required: ['details'],
+                },
+            },
+        });
+        if (!response.text) return null;
+        const parsed = JSON.parse(response.text) as {
+            details?: Array<{
+                kind?: string;
+                label?: string;
+                description?: string;
+                sourcePage?: number;
+                sourceLocation?: string;
+            }>;
+        };
+        const rawDetails = Array.isArray(parsed.details) ? parsed.details : [];
+        // 客户端二次过滤:丢弃 sourcePage 不合法的 detail(铁律 6 防御层——
+        // 即使 AI 偶尔违反 prompt,前端也不展示编造页码)
+        const allowedKinds = new Set(['term', 'experiment', 'figure', 'evidence', 'comparison']);
+        const valid = rawDetails.filter((d) => {
+            const sp = typeof d.sourcePage === 'number' ? d.sourcePage : -1;
+            const sl = (d.sourceLocation ?? '').trim();
+            const lbl = (d.label ?? '').trim();
+            return (
+                Number.isFinite(sp) &&
+                sp >= 1 &&
+                sl.length > 0 &&
+                lbl.length > 0 &&
+                typeof d.kind === 'string'
+            );
+        });
+        if (valid.length === 0) return null;
+
+        // 前端补 id;限定 2-6
+        const details: LayeredReadingRound3Detail[] = valid.slice(0, 6).map((d, i) => ({
+            id: `${branch.id}.d${i + 1}`,
+            kind: allowedKinds.has(d.kind!) ? d.kind! : 'term',
+            label: (d.label ?? '').trim(),
+            description: (d.description ?? '').trim(),
+            sourcePage: Math.floor(d.sourcePage!),
+            sourceLocation: (d.sourceLocation ?? '').trim(),
+        }));
+        return details;
+    } catch (e) {
+        console.error('generateLayeredRound3Details Error:', e);
+        return null;
     }
 };

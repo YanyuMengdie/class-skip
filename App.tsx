@@ -2109,6 +2109,11 @@ const App: React.FC = () => {
       fileName={fileName}
       layeredReadingState={layeredReadingState}
       setLayeredReadingState={setLayeredReadingState}
+      onJumpToPage={(page1Based: number) => {
+        if (slides.length === 0) return;
+        const idx = Math.max(0, Math.min(page1Based - 1, slides.length - 1));
+        setCurrentIndex(idx);
+      }}
     />
   ) : (
     <ExplanationPanel

@@ -298,6 +298,10 @@ export interface LayeredReadingRound2Branch {
   index: number;
   title: string;
   content?: string | null;
+  /** 阶段 3 新增：溯源页码（铁律 6）。子枝干可能跨页，故为可选；若 AI 生成时给出则按"最关键页"填。 */
+  sourcePage?: number;
+  /** 阶段 3 新增：位置描述（铁律 6）。 */
+  sourceLocation?: string;
   /** Round 3 细节挂载 */
   round3Details?: LayeredReadingRound3Detail[];
 }
@@ -308,6 +312,26 @@ export interface LayeredReadingRound3Detail {
   kind: string;
   label: string;
   description: string;
+  /** 阶段 3 新增：溯源页码（铁律 6，必填——细节就是钉到具体一页一处） */
+  sourcePage: number;
+  /** 阶段 3 新增：位置描述（铁律 6，必填） */
+  sourceLocation: string;
+}
+
+/**
+ * 阶段 3 新增：递进阅读模式独立的对话消息类型（铁律 7：视觉独立、数据全局）。
+ *
+ * - 视觉过滤：每 module chat 框只渲染 askedInModuleId === currentModuleId 的消息
+ * - 数据全局：调用 chatWithLayeredReadingTutor 时传完整 globalChatHistory(不过滤)
+ *   所有消息标记 askedInModuleId 让 AI 看到跨 module 的对话脉络
+ */
+export interface LayeredReadingChatMessage {
+  id: string;
+  role: 'user' | 'model';
+  content: string;
+  /** 用户提问时所在的 module id；视觉过滤的关键字段 */
+  askedInModuleId: string;
+  timestamp: number;
 }
 
 export interface LayeredReadingQuestion {
@@ -332,6 +356,8 @@ export interface LayeredReadingState {
   lastVisited?: { moduleId: string; round: 1 | 2 | 3; branchId?: string };
   /** 题目作答记录 */
   questions: LayeredReadingQuestion[];
+  /** 阶段 3 新增：全局对话历史（铁律 7：视觉独立、数据全局） */
+  globalChatHistory?: LayeredReadingChatMessage[];
   /** 进度统计快照 */
   progressSnapshot?: {
     round1: { done: number; total: number };
