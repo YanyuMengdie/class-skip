@@ -770,6 +770,50 @@ module 拆分跑偏、Round 1 不够大白话、Round 3 细节归类错乱——
 
 ---
 
+## 阶段 4.5 持久化收尾补丁
+
+> 阶段 4 commit 后、用户产品自查时发现并立即补上的小补丁。单独一节是为了把"为什么 4 个钉死铁律的人会漏掉 4 行"这个教训留在档案里。
+
+### 发现时间与发现方式
+
+- **发现时间**：2026-05-08（阶段 4 commit `ea0e5b1` 之后约一天）。
+- **发现方式**：**产品自查触发,不是测试触发**。用户在确认阶段 4 已 commit 后,自问"换设备登入,这些题目数据还在吗?"——这是一个产品承诺级的检查("换设备数据保存"),而不是功能测试级的检查。研究者按 5 段式逐层 grep,在快照构造层 ✓ / 类型层 ✓ / 本地恢复层 ✓ / 云恢复层 ✓ 全部通过的情况下,在**写入层**(IndexedDB 保存对象 + 云 Firestore 保存 patch)发现两处都是手工列字段 + 都漏掉 `layeredReadingState`。
+
+### 漏了哪 4 行 + 为什么阶段 4 钉死类型却没钉死写入
+
+具体 4 行(详见 commit `aad85cf` diff):
+
+| # | 文件:行号 | 改动 |
+|---|---|---|
+| 1 | App.tsx:643(IndexedDB 保存 `item.state` 对象) | `+ layeredReadingState,` |
+| 2 | App.tsx:650(IndexedDB useEffect deps) | `+ layeredReadingState,` |
+| 3 | App.tsx:656(`updateCloudSessionState(...)` 的 patch 对象) | `+ layeredReadingState: layeredReadingState ? JSON.parse(JSON.stringify(layeredReadingState)) : null,`(对齐 studyMap 的深克隆 pattern) |
+| 4 | App.tsx:660(云 useEffect deps) | `+ layeredReadingState,` |
+
+为什么阶段 4 钉死了类型层却漏了写入层?**因为本仓库的写入层不是从类型自动派生的,而是手工列字段。**具体地:
+
+- `FilePersistedState` 类型加 `layeredReadingState?` 字段 → **不会自动**让 IndexedDB 保存 useEffect 的 `item.state = { ... }` 对象长出该字段——那个对象是手工列出来的(App.tsx:617-643),漏一个就漏一个。
+- `CloudSession` 类型加 `layeredReadingState?` 字段 → **不会自动**让 `updateCloudSessionState(currentSessionId, { ... })` 的 patch 长出该字段——那个 patch 也是手工列出来的(App.tsx:656)。
+- 类型层和写入层之间没有编译期约束(因为 `Partial<...>` 让所有字段可选)。所以加类型时 tsc 不会报"你忘了在写入处列上"。
+- 阶段 4 自检报告(commit `ea0e5b1` 留)的 A-G 七段验收 **没有"持久化端到端"那一项**——A 编译 / B 守约束 / C 文件改动 / D 验收 / E 风险 / F 用户手动确认 / G AI 输出验证,全是单次会话内的功能验收,跨会话的换设备恢复完全没列。
+- 用户的产品承诺(换设备数据保存)对研究者隐性持有,但研究者把它当成了"已经被类型层覆盖"——这是**第三次"概念→数据翻译层"误读**(类型≠写入)。
+
+### 关联 INQUIRY §8.G 翻译层警觉
+
+INQUIRY §8.G 的原始教训是:**概念抽象层的"相同"和数据具象层的"共享"是两件事**——研究者把"两者概念上相同"误读为"两者数据上共享"。
+
+这次的误读是同一类型在更深层的复发:**类型层"钉死"和写入层"接通"是两件事**。研究者的画面是"我把 layeredReadingState 加到 FilePersistedState / CloudSession 里 = 持久化已落地",但 React 应用的真实数据流是 `state → 手工 snapshot 对象 → storage.put / firestore.update`,中间任何一段断了都会让类型层的承诺只是文档而不是行为。
+
+沿用 §8.G + §8.H 的方向,这条沉淀进一步细化"概念→数据翻译层警觉":**单是写类型不够,要去具体 grep 写入路径上每一个手工列字段的对象/数组,确认新字段也在。** 阶段 4 自检报告应该新增一条 H 项("跨会话恢复:本地 IndexedDB 字段表 + 云 Firestore patch 字段表 + 各自的 deps 数组各 grep 一次,新加字段必须在四处全部出现"),作为今后所有"加字段"任务的强制清单。
+
+### 4 处改动的 commit hash
+
+- 修复 commit:**`aad85cf`**(`fix(layered-reading): 接通 layeredReadingState 的本地+云端持久化(4 处写入字段)`)。
+- 阶段 4 主体 commit:`ea0e5b1`(类型 + UI + AI + 文档,但漏写入)。
+- 阶段 4 + 4.5 合起来才是"递进阅读模式 阶段 4 真正完成"。
+
+---
+
 *PLAN 完成于 INQUIRY 修订之后、Claude Code 实施之前。等你画面终审通过后开工。*
 
 *第二次修订（阶段 2 commit 完成后）：阶段 3 范围扩展。*
