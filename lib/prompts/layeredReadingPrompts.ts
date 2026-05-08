@@ -117,6 +117,10 @@ export function buildLayeredRound1Prompt(layeredModule: LayeredReadingModule): s
 - 它为什么重要、为什么作者要写这段?
 - 如果用一个生活化的类比/比喻,这段在讲的事相当于什么?
 
+═══════════════════════════════════════════════════════
+${BILINGUAL_TERMINOLOGY_RULE}
+═══════════════════════════════════════════════════════
+
 【严格禁令】
 1. **绝不在末尾说"接下来我给你讲 Round 2"、"让我们看看结构"、"下一步我会展开..."等任何自动推进语**——三轮推进权完全在用户手里。你只讲完 Round 1 的故事,讲完即止。
 2. 不要给学生出题(故事题由系统另行管理)。
@@ -168,6 +172,10 @@ export function buildLayeredRound2Prompt(layeredModule: LayeredReadingModule): s
    - ✅ sourcePage: 23, sourceLocation: "T 细胞激活流程图下方的红色箭头"
    - ❌ sourcePage: 999, sourceLocation: "某处"      ← 编造页码 + 无意义位置
    - ❌ sourcePage: 1, sourceLocation: "第一段"     ← 偷懒,可能根本不是第 1 页
+
+═══════════════════════════════════════════════════════
+${BILINGUAL_TERMINOLOGY_RULE}
+═══════════════════════════════════════════════════════
 
 【严格禁令】
 1. **绝不在末尾说"接下来我给你讲 Round 3""下一步看细节""让我们深入..."等任何自动推进语**(铁律 9)。三轮推进权完全在用户手里。
