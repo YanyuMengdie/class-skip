@@ -3437,12 +3437,12 @@ export const generateLayeredRound3Unit = async (
   branch: LayeredReadingRound2Branch
 ): Promise<LayeredReadingRound3Unit | null> => {
   try {
+    const contentPart = getContentPart(fullText);
     const prompt = buildLayeredRound3UnitPrompt(parentModule, branch);
-    const fullPrompt = `${prompt}\n\n讲义全文如下:\n\n${fullText}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: fullPrompt,
+      model: 'gemini-3-pro-preview',
+      contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
         responseSchema: {
