@@ -637,6 +637,7 @@ const App: React.FC = () => {
             pageMarks,
             studyGuide,
             savedArtifacts,
+            layeredReadingState,
             ...(lsapContentMap?.sourceKey === examSummaryContentKey && lsapContentMap && lsapState
               ? { lsapContentMap, lsapState }
               : {})
@@ -647,17 +648,17 @@ const App: React.FC = () => {
       } catch (e) { console.warn('Auto-save failed:', e); }
     }, 2000);
     return () => clearTimeout(saveTimeout);
-  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, studyMap, skimStage, quizData, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState, examSummaryContentKey]);
+  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, studyMap, skimStage, quizData, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, layeredReadingState, lsapContentMap, lsapState, examSummaryContentKey]);
 
   useEffect(() => {
     if (!currentSessionId || !user) return;
     const cloudSaveTimeout = setTimeout(() => {
       updateCloudSessionState(currentSessionId, {
-        explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
+        explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, layeredReadingState: layeredReadingState ? JSON.parse(JSON.stringify(layeredReadingState)) : null, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
       });
     }, 3000);
     return () => clearTimeout(cloudSaveTimeout);
-  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
+  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, layeredReadingState, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
 
 
   const addArtifact = useCallback((artifact: SavedArtifact) => {
