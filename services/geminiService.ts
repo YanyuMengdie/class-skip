@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail, LayeredReadingQuestion, LayeredReadingQuestionGrade } from "@/types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail, LayeredReadingRound3Unit, LayeredReadingQuestion, LayeredReadingQuestionGrade } from "@/types";
 import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProfiles";
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/lib/exam/scaffoldingClassifier";
@@ -11,6 +11,7 @@ import {
   buildLayeredRound1Prompt,
   buildLayeredRound2Prompt,
   buildLayeredRound3Prompt,
+  buildLayeredRound3UnitPrompt,
   buildLayeredQuestionRound1Prompt,
   buildLayeredQuestionRound2Prompt,
   buildLayeredQuestionRound3Prompt,
@@ -3418,6 +3419,96 @@ export const generateLayeredRound3Details = async (
         console.error('generateLayeredRound3Details Error:', e);
         return null;
     }
+};
+
+/**
+ * 阶段 5 新增:为指定 branch 生成 Round 3 结构化学习单元。
+ *
+ * 与 generateLayeredRound3Details 完全独立函数,不共享代码。
+ *
+ * 客户端校验铁律(对齐铁律 6):
+ * - 7 块必填字段缺一返回 null(figureGuide 不参与校验)
+ * - sourcePage 必须 >= 1
+ * - 所有字符串字段 trim 后长度 > 0
+ */
+export const generateLayeredRound3Unit = async (
+  fullText: string,
+  parentModule: LayeredReadingModule,
+  branch: LayeredReadingRound2Branch
+): Promise<LayeredReadingRound3Unit | null> => {
+  try {
+    const prompt = buildLayeredRound3UnitPrompt(parentModule, branch);
+    const fullPrompt = `${prompt}\n\n讲义全文如下:\n\n${fullText}`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: fullPrompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            coreQuestion: { type: Type.STRING },
+            mechanismChain: { type: Type.STRING },
+            keyTerms: { type: Type.STRING },
+            figureGuide: { type: Type.STRING },
+            answerSkeleton: { type: Type.STRING },
+            confusionPoints: { type: Type.STRING },
+            miniQuestion: { type: Type.STRING },
+            sourcePage: { type: Type.NUMBER },
+            sourceLocation: { type: Type.STRING },
+          },
+          required: [
+            'coreQuestion',
+            'mechanismChain',
+            'keyTerms',
+            'answerSkeleton',
+            'confusionPoints',
+            'miniQuestion',
+            'sourcePage',
+            'sourceLocation',
+          ],
+        },
+      },
+    });
+
+    const text = response.text;
+    if (!text) return null;
+
+    const parsed = JSON.parse(text);
+
+    // 客户端校验:7 必填块 + 溯源
+    const valid =
+      typeof parsed.coreQuestion === 'string' && parsed.coreQuestion.trim().length > 0 &&
+      typeof parsed.mechanismChain === 'string' && parsed.mechanismChain.trim().length > 0 &&
+      typeof parsed.keyTerms === 'string' && parsed.keyTerms.trim().length > 0 &&
+      typeof parsed.answerSkeleton === 'string' && parsed.answerSkeleton.trim().length > 0 &&
+      typeof parsed.confusionPoints === 'string' && parsed.confusionPoints.trim().length > 0 &&
+      typeof parsed.miniQuestion === 'string' && parsed.miniQuestion.trim().length > 0 &&
+      typeof parsed.sourcePage === 'number' && parsed.sourcePage >= 1 &&
+      typeof parsed.sourceLocation === 'string' && parsed.sourceLocation.trim().length > 0;
+
+    if (!valid) return null;
+
+    return {
+      coreQuestion: parsed.coreQuestion,
+      mechanismChain: parsed.mechanismChain,
+      keyTerms: parsed.keyTerms,
+      figureGuide:
+        typeof parsed.figureGuide === 'string' && parsed.figureGuide.trim().length > 0
+          ? parsed.figureGuide
+          : undefined,
+      answerSkeleton: parsed.answerSkeleton,
+      confusionPoints: parsed.confusionPoints,
+      miniQuestion: parsed.miniQuestion,
+      sourcePage: parsed.sourcePage,
+      sourceLocation: parsed.sourceLocation,
+      generatedAt: Date.now(),
+    };
+  } catch (e) {
+    console.error('[generateLayeredRound3Unit] failed:', e);
+    return null;
+  }
 };
 
 // ─────────────────────────────────────────────────────────────────────────

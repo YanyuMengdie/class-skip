@@ -304,6 +304,8 @@ export interface LayeredReadingRound2Branch {
   sourceLocation?: string;
   /** Round 3 细节挂载 */
   round3Details?: LayeredReadingRound3Detail[];
+  /** Round 3 新数据:结构化 7 块学习单元(阶段 5 新增,优先级高于 round3Details) */
+  round3Unit?: LayeredReadingRound3Unit;
 }
 
 export interface LayeredReadingRound3Detail {
@@ -316,6 +318,43 @@ export interface LayeredReadingRound3Detail {
   sourcePage: number;
   /** 阶段 3 新增：位置描述（铁律 6，必填） */
   sourceLocation: string;
+}
+
+/**
+ * 阶段 5 新增:Round 3 结构化学习单元(7 块固定结构)。
+ *
+ * 与旧 LayeredReadingRound3Detail[] 共存:
+ * - 旧数据(round3Details)保留显示,不强制迁移
+ * - 新生成的 branch 走 round3Unit
+ * - 渲染层根据 branch 上哪个字段有值决定走哪条路径(round3Unit 优先)
+ *
+ * 7 块顺序固定不可重排,与 buildLayeredRound3UnitPrompt 输出顺序一致。
+ * 第 4 块(figureGuide)按需省略——讲义无图时 AI 不输出该字段。
+ *
+ * 第 7 块 miniQuestion 是纯展示文本,不进 LayeredReadingState.questions[]。
+ * 阶段 4 的 application 题独立保留,与本 unit 无任何耦合。
+ */
+export interface LayeredReadingRound3Unit {
+  /** 块 1:这一小节在回答什么问题(一句话,问句形式) */
+  coreQuestion: string;
+  /** 块 2:机制 / 逻辑链条(step-by-step,markdown 编号列表) */
+  mechanismChain: string;
+  /** 块 3:关键术语挂载(每条说明在机制中的角色,markdown 列表) */
+  keyTerms: string;
+  /** 块 4:图 / 表 / 实验怎么读(可选——讲义无图时省略) */
+  figureGuide?: string;
+  /** 块 5:考试最低答案骨架(中英对照) */
+  answerSkeleton: string;
+  /** 块 6:易混点("不要把 A 理解成 B" 格式) */
+  confusionPoints: string;
+  /** 块 7:小题(题面 + 参考答案,纯展示文本) */
+  miniQuestion: string;
+  /** 阶段 3 溯源延续:整块 unit 的主要溯源页码(>= 1) */
+  sourcePage: number;
+  /** 阶段 3 溯源延续:位置描述(如"第 12 页中部图示") */
+  sourceLocation: string;
+  /** 生成时间(Unix ms) */
+  generatedAt: number;
 }
 
 /**
