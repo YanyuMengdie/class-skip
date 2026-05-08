@@ -32,10 +32,13 @@ import type {
 import {
   generateLayeredRound2Branches,
   generateLayeredRound3Details,
+  generateLayeredRound3Unit,
 } from '@/services/geminiService';
 import { RoundContentWithSource } from '@/features/reader/layered/RoundContentWithSource';
 import { ModuleChatBox } from '@/features/reader/layered/ModuleChatBox';
 import { LayeredReadingQuestionBox } from '@/features/reader/layered/LayeredReadingQuestionBox';
+import Round3UnitView from '@/features/reader/layered/Round3UnitView';
+import LegacyRound3DetailsView from '@/features/reader/layered/LegacyRound3DetailsView';
 
 export interface LayeredReadingTreeProps {
   modules: LayeredReadingModule[];
@@ -252,18 +255,18 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
         return next;
       });
       try {
-        const details = await generateLayeredRound3Details(docSource, parentModule, branch);
-        if (!details || details.length === 0) {
+        const unit = await generateLayeredRound3Unit(docSource, parentModule, branch);
+        if (!unit) {
           setRound3Errors((prev) => ({
             ...prev,
-            [branch.id]: 'AI 生成 Round 3 失败,或讲义中无明确细节(铁律 6:AI 选择不编造)。',
+            [branch.id]: 'AI 生成 Round 3 失败,或讲义中无足够内容(铁律 6:AI 选择不凑数)。',
           }));
           return;
         }
         onUpdateModule(parentModule.id, (mod) => ({
           ...mod,
           round2Branches: (mod.round2Branches ?? []).map((b) =>
-            b.id === branch.id ? { ...b, round3Details: details } : b
+            b.id === branch.id ? { ...b, round3Unit: unit } : b
           ),
         }));
         setExpandedBranchIds((prev) => new Set(prev).add(branch.id));
@@ -386,7 +389,7 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
                         const isBranchExpanded = expandedBranchIds.has(b.id);
                         const round3Generating = generatingRound3For.has(b.id);
                         const round3Error = round3Errors[b.id];
-                        const hasDetails = (b.round3Details?.length ?? 0) > 0;
+                        const hasRound3 = Boolean(b.round3Unit) || (b.round3Details?.length ?? 0) > 0;
                         const structureQuestion = findQuestion(questions, b.id, 'structure');
                         const structureQuestionId = `${b.id}-structure`;
                         const applicationQuestion = findQuestion(questions, b.id, 'application');
@@ -437,7 +440,7 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
                                 />
 
                                 {/* === Round 3 操作 === */}
-                                {!hasDetails && !round3Generating && !round3Error && (
+                                {!hasRound3 && !round3Generating && !round3Error && (
                                   <button
                                     type="button"
                                     onClick={() => void handleExpandToRound3(m, b)}
@@ -450,7 +453,7 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
                                 {round3Generating && (
                                   <div className="text-[11px] text-stone-500 inline-flex items-center gap-1.5">
                                     <Loader2 className="w-3 h-3 animate-spin" />
-                                    AI 正在挂载细节…
+                                    AI 正在生成 Round 3 学习单元…
                                   </div>
                                 )}
                                 {round3Error && (
@@ -466,30 +469,24 @@ export const LayeredReadingTree: React.FC<LayeredReadingTreeProps> = ({
                                   </div>
                                 )}
 
-                                {/* Round 3 细节列表 */}
-                                {hasDetails && (
-                                  <div className="space-y-1.5 ml-2 border-l-2 border-stone-100 pl-2.5">
-                                    {(b.round3Details ?? []).map((d: LayeredReadingRound3Detail) => (
-                                      <div key={d.id} className="text-xs text-slate-700 space-y-1">
-                                        <div className="inline-flex items-center gap-1.5">
-                                          <span className="text-[10px] px-1 py-0.5 rounded bg-stone-100 text-stone-600 border border-stone-200">
-                                            {KIND_LABELS[d.kind] ?? d.kind}
-                                          </span>
-                                          <span className="font-bold text-slate-800">{d.label}</span>
-                                        </div>
-                                        <RoundContentWithSource
-                                          content={d.description}
-                                          sourcePage={d.sourcePage}
-                                          sourceLocation={d.sourceLocation}
-                                          onJumpToPage={onJumpToPage}
-                                        />
-                                      </div>
-                                    ))}
-                                  </div>
+                                {/* 优先渲染新 7 块 unit */}
+                                {b.round3Unit && (
+                                  <Round3UnitView
+                                    unit={b.round3Unit}
+                                    onJumpToPage={onJumpToPage}
+                                  />
                                 )}
 
-                                {/* === Round 3 末细节应用题(详情列表后,不是每 detail 一道) === */}
-                                {hasDetails && (
+                                {/* fallback:旧扁平 details(仅当无 unit 但有 details 时) */}
+                                {!b.round3Unit && b.round3Details && b.round3Details.length > 0 && (
+                                  <LegacyRound3DetailsView
+                                    details={b.round3Details}
+                                    onJumpToPage={onJumpToPage}
+                                  />
+                                )}
+
+                                {/* === Round 3 末细节应用题(unit / details 任一存在时显示) === */}
+                                {hasRound3 && (
                                   <LayeredReadingQuestionBox
                                     questionType="application"
                                     question={applicationQuestion}
