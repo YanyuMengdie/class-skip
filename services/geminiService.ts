@@ -2007,12 +2007,14 @@ export function appendReadingModeUserMessageSuffix(
 
   let out = newMessage;
 
+  // 方案 A:moduleCount 与 brief 同时注入,先放硬数字约束,再放地图作为参考清单
+  if (hasModuleCount) {
+    out += `\n\n【领读模块数·硬约束】目标模块数 = ${n} 个。请严格按此数量拆解文档,禁止擅自合并为更少或拆成更多;若同时存在下方学习地图,以本数字为准,地图作为标题与页码范围的参考。`;
+  }
   if (brief) {
     out +=
       "\n\n【必须一致】模块数量、标题与页码范围以紧接其下的学习地图为准。深度领读时必须与该地图保持一致，禁止擅自合并、删减模块或另起一套块数不同的大模块列表：\n\n" +
       brief;
-  } else if (hasModuleCount) {
-    out += `\n\n【领读模块数】请将文档拆解为 ${n} 个大模块后再输出逻辑路线图与带读。本次要求：${n} 个模块。`;
   }
   if (!hasModuleCount && !brief && readingOptions.skimGranularity) {
     out +=
