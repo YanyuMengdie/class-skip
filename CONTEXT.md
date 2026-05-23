@@ -1,3 +1,6 @@
+本项目所有更新遵循 docs/DEV_SOP.md 定义的四档开发流程
+  （Think First / Playground / Quick Fix / Core）。
+  开始任何改动前先判断档位。
 # class-skip 项目状态文档（CONTEXT.md）
 
 此文档记录 class-skip 项目的当前状态、决策、流程。
