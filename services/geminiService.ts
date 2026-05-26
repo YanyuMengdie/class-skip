@@ -302,7 +302,7 @@ export const generateSlideExplanation = async (imageBase64: string, fullContext?
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: {
         parts: [
           { inlineData: { mimeType: mimeType, data: base64Data } },
@@ -474,7 +474,7 @@ export const chatWithSlide = async (
     };
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: contents,
       config: config
     });
@@ -605,7 +605,7 @@ export const generatePersonaStoryScript = async (fullText: string, images?: stri
         parts.push({ text: prompt });
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: [
                 { role: 'user', parts: parts }
             ],
@@ -644,7 +644,7 @@ export const generateRemStoryScript = (t: string, i?: string[], p?: PersonaSetti
 export const runTaskHugAgent = async (userGoal: string): Promise<TaskHugResponse> => {
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: userGoal,
       config: {
         systemInstruction: `Task decomposition agent. Output JSON only.`,
@@ -772,7 +772,7 @@ export const runChatHugAgent = async (
     });
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: contents,
       config: {
         systemInstruction: systemPrompt,
@@ -833,7 +833,7 @@ export const performPreFlightDiagnosis = async (
     const basePrompt = '执行【预飞检查】。识别文档的主题领域，并提取 3-5 个读懂该文档必须具备的基础概念（前置知识）。';
     const fullPrompt = `${basePrompt} ${moduleInstruction}`;
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
           { role: 'user', parts: [contentPart, { text: fullPrompt }] }
       ],
@@ -884,7 +884,7 @@ export const generateGatekeeperQuiz = async (docContent: string, topic: string):
   try {
     const contentPart = getContentPart(docContent);
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         { 
             role: 'user', 
@@ -928,7 +928,7 @@ export const generateModuleTakeaways = async (
     if (!convoText.trim()) return [];
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -974,7 +974,7 @@ export const generateModuleQuiz = async (
     if (!convoText.trim() && !takeawaysText) return [];
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1028,7 +1028,7 @@ export const generateQuizSet = async (
       ? `\n\n【重要】以下题目已经出过，请勿重复出相同或高度相似的问题：\n${options.existingQuestionTexts!.slice(-50).join('\n')}`
       : '';
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1077,7 +1077,7 @@ export const estimateFlashCardCount = async (docContent: string): Promise<number
   try {
     const contentPart = getContentPart(docContent);
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1119,7 +1119,7 @@ export const generateFlashCards = async (
       ? `\n\n【重要】以下正面内容已经存在，请勿重复：\n${options.existingFronts!.slice(-80).join('\n')}`
       : '';
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1212,7 +1212,7 @@ export const generateMaintenanceFlashCards = async (
       console.debug('[generateMaintenanceFlashCards] P1 prompt context', metaLine);
     }
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1268,7 +1268,7 @@ export const generateFeynmanExplanation = async (docContent: string): Promise<st
   try {
     const contentPart = getContentPart(docContent.slice(0, 40000));
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1300,7 +1300,7 @@ export const generateFeynmanExplanationForTopics = async (
   try {
     const contentPart = getContentPart(docContent.slice(0, 40000));
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1344,7 +1344,7 @@ export const generateFeynmanQuestion = async (
           ? '考查综合、辨析或易混点，需要联系多处内容或区分相似概念。'
           : '考查理解与简单应用，难度适中。';
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1386,7 +1386,7 @@ export const evaluateFeynmanAnswer = async (
 ): Promise<FeynmanAnswerFeedback> => {
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1425,7 +1425,7 @@ export const generateExamSummary = async (docContent: string): Promise<string> =
   try {
     const contentPart = getContentPart(docContent.slice(0, 50000));
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1467,7 +1467,7 @@ export const generateFiveMinGuide = async (docContent: string): Promise<string> 
 请直接以 Markdown 列表或小标题形式输出（例如以 - 开头的列表，或以 ## / ### 开头的简短标题），不要返回 JSON。`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1494,7 +1494,7 @@ export const updateExamSummary = async (
   try {
     const contentPart = getContentPart(docContent.slice(0, 30000));
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1533,7 +1533,7 @@ export const generateExamTraps = async (docContent: string): Promise<string> => 
   try {
     const contentPart = getContentPart(docContent.slice(0, 50000));
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1570,7 +1570,7 @@ export const generateMindMap = async (docContent: string): Promise<MindMapNode |
   try {
     const contentPart = getContentPart(docContent.slice(0, 40000));
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1607,7 +1607,7 @@ export const generateMindMapMulti = async (
     if (fileNames.length === 0) return null;
     const contentPart = getContentPart(mergedContent.slice(0, 60000));
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1653,7 +1653,7 @@ export const evaluateAndSupplementMindMap = async (
     const contentPart = getContentPart(docContent.slice(0, 40000));
     const treeJson = JSON.stringify(userTree, null, 0);
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1719,7 +1719,7 @@ ${userInstruction}
       contentParts.push({ text: '\n若修改需参考文档内容，请结合上文。' });
     }
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [{ role: 'user', parts: contentParts }]
     });
     const raw = response.text?.trim() || '';
@@ -1744,7 +1744,7 @@ export const extractTerminology = async (docContent: string): Promise<Terminolog
   try {
     const contentPart = getContentPart(docContent.slice(0, 50000));
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -1777,7 +1777,7 @@ export const generateTrickyQuestions = async (docContent: string, weakPoints?: s
       ? `\n用户特别说明的薄弱点或易错点：${weakPoints}\n请针对这些地方多出刁钻题。`
       : '';
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -2096,7 +2096,7 @@ export const chatWithAdaptiveTutor = async (
         contents.push({ role: 'user', parts: [{ text: finalMessage }] });
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: contents,
             config: { systemInstruction: adaptiveSystemPrompt }
         });
@@ -2159,7 +2159,7 @@ export async function chatWithSkimAdaptiveTutor(
     contents.push({ role: 'user', parts: [{ text: finalMessage }] });
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents,
       config: {
         systemInstruction,
@@ -2244,7 +2244,7 @@ export const generateStudyGuide = async (
 请用中文输出，内容要简洁、清晰、重点突出。`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [
         {
           role: 'user',
@@ -2397,7 +2397,7 @@ createdAt 请填当前时间戳（毫秒）。`
 请覆盖文档中的核心考点，数量 5-15 个。输出 JSON：{ "id": "content-map-xxx", "sourceKey": "doc", "kcs": [ ... ], "createdAt": 0 }
 createdAt 请填当前时间戳（毫秒）。`;
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -2480,7 +2480,7 @@ KC 列表：
 ${kcSummaries}`;
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -2798,7 +2798,7 @@ ${singleScope}
 请生成一道开放式问答题（不要选择题），让学生用自己的话解释或应用该考点。题目必须与讲义内容直接相关，且能根据讲义判断对错。
 输出 JSON：{ "question": "题目内容", "sourceRef": "对应讲义页码或原文摘要，用于证据链" }`;
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -2860,7 +2860,7 @@ ${singleNote}
 
 输出 JSON，键名与上述一致。`;
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -2921,7 +2921,7 @@ ${singleScope}
 
 直接输出讲解正文（Markdown 可选），不要输出 JSON。`;
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }]
     });
     return response.text?.trim() || `请查看讲义第 ${pages} 页复习「${kc.concept}」。`;
@@ -2960,7 +2960,7 @@ ${historyText ? `此前对话：\n${historyText}\n\n` : ''}学生问：${userQue
       { role: 'user', parts: [contentPart, { text: `针对性讲解摘要：\n${teachingContent.slice(0, 2000)}\n\n---\n\n${prompt}` }] }
     ];
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: parts
     });
     return response.text?.trim() || '请对照讲义再想想，或点击「查看讲义」看具体页码。';
@@ -3008,7 +3008,7 @@ export const runSideQuestAgent = async (
         contents.push({ role: 'user', parts: [{ text: newMessage }] });
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: contents,
             config: { systemInstruction: SIDE_QUEST_SYSTEM_PROMPT }
         });
@@ -3156,7 +3156,7 @@ export const chatWithLayeredReadingTutor = async (
         contents.push({ role: 'user', parts: [{ text: newMessage }] });
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents,
             config: { systemInstruction: LAYERED_READING_SYSTEM_PROMPT }
         });
@@ -3189,7 +3189,7 @@ export const generateLayeredReadingModules = async (
         const contentPart = getContentPart(fullText);
         const prompt = buildLayeredModuleGenPrompt(moduleCount);
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
             config: {
                 responseMimeType: 'application/json',
@@ -3251,7 +3251,7 @@ export const generateLayeredRound1Content = async (
         const contentPart = getContentPart(fullText);
         const prompt = buildLayeredRound1Prompt(layeredModule);
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
             config: { systemInstruction: LAYERED_READING_SYSTEM_PROMPT },
         });
@@ -3278,7 +3278,7 @@ export const generateLayeredRound2Branches = async (
         const contentPart = getContentPart(fullText);
         const prompt = buildLayeredRound2Prompt(layeredModule);
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
             config: {
                 responseMimeType: 'application/json',
@@ -3353,7 +3353,7 @@ export const generateLayeredRound3Details = async (
         const contentPart = getContentPart(fullText);
         const prompt = buildLayeredRound3Prompt(parentModule, branch);
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
             config: {
                 responseMimeType: 'application/json',
@@ -3443,7 +3443,7 @@ export const generateLayeredRound3Unit = async (
     const prompt = buildLayeredRound3UnitPrompt(parentModule, branch);
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview',
+      model: 'gemini-3.1-pro-preview',
       contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
       config: {
         responseMimeType: 'application/json',
@@ -3538,7 +3538,7 @@ export const generateLayeredQuestionForRound1 = async (
         const contentPart = getContentPart(fullText);
         const prompt = buildLayeredQuestionRound1Prompt(layeredModule);
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
             config: {
                 responseMimeType: 'application/json',
@@ -3579,7 +3579,7 @@ export const generateLayeredQuestionForRound2 = async (
         const contentPart = getContentPart(fullText);
         const prompt = buildLayeredQuestionRound2Prompt(parentModule, branch);
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
             config: {
                 responseMimeType: 'application/json',
@@ -3622,7 +3622,7 @@ export const generateLayeredQuestionForRound3 = async (
         const contentPart = getContentPart(fullText);
         const prompt = buildLayeredQuestionRound3Prompt(parentModule, branch, details);
         const response = await ai.models.generateContent({
-            model: 'gemini-3-pro-preview',
+            model: 'gemini-3.1-pro-preview',
             contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
             config: {
                 responseMimeType: 'application/json',
