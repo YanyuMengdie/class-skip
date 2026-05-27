@@ -181,7 +181,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const skimAbortControllerRef = useRef<AbortController | null>(null);
   /** SDK 偶发在 abort 后仍 resolve 时，与 `signal.aborted` 双保险，避免误追加助手气泡 */
   const skimGenerationCancelledRef = useRef(false);
-  const chatInputRef = useRef<HTMLInputElement>(null);
+  const chatInputRef = useRef<HTMLTextAreaElement>(null);
 
   // Text Selection State
   const [selectionRect, setSelectionRect] = useState<{top: number, left: number} | null>(null);
@@ -1260,14 +1260,18 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 </button>
             )}
             <div className="flex items-center space-x-2 bg-stone-50 p-1.5 rounded-full border border-stone-100 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
-                <input
+                <textarea
                     ref={chatInputRef}
-                    type="text"
+                    rows={1}
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
+                    onChange={(e) => {
+                        setInput(e.target.value);
+                        e.target.style.height = 'auto';
+                        e.target.style.height = e.target.scrollHeight + 'px';
+                    }}
                     onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                     placeholder={stage === 'tutoring' ? "回答 AI 的追问或说‘我不懂’..." : "与导读 AI 交流..."}
-                    className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm focus:ring-0 focus:outline-none text-slate-700 placeholder:text-stone-400"
+                    className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm focus:ring-0 focus:outline-none text-slate-700 placeholder:text-stone-400 resize-none overflow-y-auto max-h-[120px]"
                     disabled={isChatLoading || stage === 'diagnosis'}
                 />
                 {isChatLoading ? (
