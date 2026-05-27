@@ -152,6 +152,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const [isRegeneratingMap, setIsRegeneratingMap] = useState(false);
   const [showGranularityModal, setShowGranularityModal] = useState(false);
   const [selectedModuleCount, setSelectedModuleCount] = useState<number>(4);
+  const [skimPace, setSkimPace] = useState<'module' | 'part'>('module');
   const MODULE_OPTIONS = [2, 3, 4, 5, 6, 7];
 
   // 本模块要点 & 模块小题（reading 阶段）
@@ -349,10 +350,10 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
   const startFormalReading = async () => {
       setStage('reading');
-      await handleSend(docType === 'STEM' 
+      await handleSend(docType === 'STEM'
           ? "前置知识已确认，请输出本文的【逻辑路线图】与【核心结构】，并开始正式带读。"
-          : "请生成深度略读报告 (Deep Skim Report)。", 
-      'reading', { moduleCount: selectedModuleCount, studyMapBriefing: studyMap?.initialBriefing });
+          : "请生成深度略读报告 (Deep Skim Report)。",
+      'reading', { moduleCount: selectedModuleCount, studyMapBriefing: studyMap?.initialBriefing, skimPace });
   };
 
   const needRegenerate = onRegenerateStudyMap && (studyMapModuleCount == null || studyMapModuleCount !== selectedModuleCount);
@@ -422,7 +423,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const handleSend = async (
       textOverride?: string,
       forceMode?: 'tutoring' | 'reading',
-      readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number },
+      readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number; skimPace?: 'module' | 'part' },
       sendOpts?: { appendUserWhenOverride?: boolean; tutorUserText?: string }
   ) => {
       const raw = textOverride ?? input;
@@ -861,6 +862,33 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                                                 <option key={n} value={n}>{n} 个模块</option>
                                                             ))}
                                                         </select>
+                                                        <div className="flex flex-col gap-2">
+                                                            <label className="text-xs text-stone-500">节奏</label>
+                                                            <div className="flex gap-4">
+                                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                                    <input
+                                                                        type="radio"
+                                                                        name="skim-pace-quiz"
+                                                                        value="module"
+                                                                        checked={skimPace === 'module'}
+                                                                        onChange={() => setSkimPace('module')}
+                                                                        className="accent-indigo-600"
+                                                                    />
+                                                                    <span className="text-sm text-slate-700">一次一个 module</span>
+                                                                </label>
+                                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                                    <input
+                                                                        type="radio"
+                                                                        name="skim-pace-quiz"
+                                                                        value="part"
+                                                                        checked={skimPace === 'part'}
+                                                                        onChange={() => setSkimPace('part')}
+                                                                        className="accent-indigo-600"
+                                                                    />
+                                                                    <span className="text-sm text-slate-700">一次一个 part</span>
+                                                                </label>
+                                                            </div>
+                                                        </div>
                                                         <button
                                                             onClick={handleStartWithModuleCount}
                                                             className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all flex items-center justify-center space-x-2 shadow-xl"
@@ -1284,6 +1312,33 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                   <option key={n} value={n}>{n} 个模块</option>
                 ))}
               </select>
+              <div className="flex flex-col gap-2">
+                <label className="text-xs text-stone-500">节奏</label>
+                <div className="flex gap-4">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="skim-pace-modal"
+                      value="module"
+                      checked={skimPace === 'module'}
+                      onChange={() => setSkimPace('module')}
+                      className="accent-indigo-600"
+                    />
+                    <span className="text-sm text-slate-700">一次一个 module</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="skim-pace-modal"
+                      value="part"
+                      checked={skimPace === 'part'}
+                      onChange={() => setSkimPace('part')}
+                      className="accent-indigo-600"
+                    />
+                    <span className="text-sm text-slate-700">一次一个 part</span>
+                  </label>
+                </div>
+              </div>
               <button
                 onClick={handleStartWithModuleCount}
                 className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all"

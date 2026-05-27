@@ -1994,9 +1994,10 @@ ${kcBlocks}
  * - 该函数由 `chatWithSkimAdaptiveTutor` 与 `chatWithAdaptiveTutor` 的 reading 分支共用；
  *   备考 reading 若未来传入 options，同样遵循本规则。
  */
+// 注:`skimPace` 仅由略读路径(`chatWithSkimAdaptiveTutor` / `SkimPanel`)使用;备考路径(`chatWithAdaptiveTutor`)不传该字段,if 条件永不触发。
 export function appendReadingModeUserMessageSuffix(
   newMessage: string,
-  readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number }
+  readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number; skimPace?: 'module' | 'part' }
 ): string {
   if (!readingOptions) {
     return newMessage;
@@ -2021,6 +2022,9 @@ export function appendReadingModeUserMessageSuffix(
       "\n\n【领读模块数】请将文档拆解为以下数量的大模块后再输出逻辑路线图与带读：fine 为 5-7 个，standard 为 3-5 个，coarse 为 2-3 个。本次要求：" +
       readingOptions.skimGranularity +
       "。";
+  }
+  if (readingOptions.skimPace === 'part') {
+    out += "\n\n【节奏要求】我需要你一次只生成一个 part，从 module1 开始。不需要你按照既定的格式，目的是讲的很详细就好。";
   }
   return out;
 }
@@ -2131,7 +2135,7 @@ export async function chatWithSkimAdaptiveTutor(
   newMessage: string,
   mode: 'tutoring' | 'reading',
   docType: DocType = 'STEM',
-  readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number },
+  readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number; skimPace?: 'module' | 'part' },
   abortSignal?: AbortSignal
 ): Promise<string> {
   try {
