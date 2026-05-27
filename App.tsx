@@ -180,7 +180,7 @@ const App: React.FC = () => {
   // --- Studio 已生成条目（NotebookLM 式右侧持久化）---
   const [savedArtifacts, setSavedArtifacts] = useState<SavedArtifact[]>([]);
   const [studioExpandedId, setStudioExpandedId] = useState<string | null>(null);
-  const [studioCollapsed, setStudioCollapsed] = useState(false);
+  const [studioCollapsed, setStudioCollapsed] = useState(true);
 
   // --- 一起复习：多选合并内容与方式选择 ---
   const [combinedReviewContent, setCombinedReviewContent] = useState<string | null>(null);
