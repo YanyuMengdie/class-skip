@@ -976,7 +976,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                         <div
                             className={`relative max-w-[90%] px-4 py-3 text-sm shadow-sm transition-all ${
                             msg.role === 'user'
-                            ? 'group bg-amber-700 text-white rounded-2xl rounded-tr-none shadow-amber-100'
+                            ? 'group bg-amber-100 text-amber-900 rounded-2xl rounded-tr-none shadow-sm'
                             : 'bg-stone-50 text-slate-700 border border-stone-100 rounded-2xl rounded-tl-none'
                         }`}
                         >
