@@ -331,6 +331,7 @@ const App: React.FC = () => {
   const applyDailySegRef = useRef<(seg: DailySegment) => void>(() => {});
   const pendingExamPredictionAfterHashRef = useRef<string | null>(null);
   const skipMoodOnNextFileLoadRef = useRef(false);
+  const moodDialogShownThisSessionRef = useRef(false);
   const selectionTimeoutRef = useRef<number | null>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
   
@@ -745,7 +746,8 @@ const App: React.FC = () => {
       setNotesPanelCollapsed(true);
       if (skipMoodOnNextFileLoadRef.current) {
         skipMoodOnNextFileLoadRef.current = false;
-      } else {
+      } else if (!moodDialogShownThisSessionRef.current) {
+        moodDialogShownThisSessionRef.current = true;
         setMoodDialogOpen(true);
       }
     } catch (error) {
