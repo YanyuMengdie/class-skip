@@ -228,7 +228,8 @@ export const createCloudSession = async (user: User, fileName: string, fileUrl: 
       docType: 'STEM',
       currentIndex: 0,
       skimTopHeight: 60,
-      personaSettings: null 
+      skimFocusMode: false,
+      personaSettings: null
     };
 
     const heavyRef = doc(db, "sessions", sessionId, "data", "main");

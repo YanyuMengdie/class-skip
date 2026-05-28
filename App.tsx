@@ -101,6 +101,7 @@ const App: React.FC = () => {
   const [pageComments, setPageComments] = useState<PageCommentsCache>({});
   const [skimMessages, setSkimMessages] = useState<ChatMessage[]>([]);
   const [skimTopHeight, setSkimTopHeight] = useState(60);
+  const [skimFocusMode, setSkimFocusMode] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('deep');
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileHash, setFileHash] = useState<string | null>(null);
@@ -624,6 +625,7 @@ const App: React.FC = () => {
             currentIndex,
             viewMode,
             skimTopHeight,
+            skimFocusMode,
             studyMap,
             skimStage,
             quizData,
@@ -648,17 +650,17 @@ const App: React.FC = () => {
       } catch (e) { console.warn('Auto-save failed:', e); }
     }, 2000);
     return () => clearTimeout(saveTimeout);
-  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, studyMap, skimStage, quizData, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, layeredReadingState, lsapContentMap, lsapState, examSummaryContentKey]);
+  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, layeredReadingState, lsapContentMap, lsapState, examSummaryContentKey]);
 
   useEffect(() => {
     if (!currentSessionId || !user) return;
     const cloudSaveTimeout = setTimeout(() => {
       updateCloudSessionState(currentSessionId, {
-        explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, layeredReadingState: layeredReadingState ? JSON.parse(JSON.stringify(layeredReadingState)) : null, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
+        explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, layeredReadingState: layeredReadingState ? JSON.parse(JSON.stringify(layeredReadingState)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
       });
     }, 3000);
     return () => clearTimeout(cloudSaveTimeout);
-  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, layeredReadingState, skimStage, quizData, docType, skimTopHeight, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
+  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, layeredReadingState, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
 
 
   const addArtifact = useCallback((artifact: SavedArtifact) => {
@@ -698,7 +700,7 @@ const App: React.FC = () => {
       const stateToRestore = restoreData || (existingRecord ? existingRecord.state : null);
       if (stateToRestore) {
         setExplanations(stateToRestore.explanations || {}); setChatCache(stateToRestore.chatCache || {}); setSkimMessages(stateToRestore.skimMessages || []); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
-        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setSkimTopHeight(stateToRestore.skimTopHeight || 60); setStudyMap(stateToRestore.studyMap || null); setStudyMapModuleCount(null); setLayeredReadingState(stateToRestore.layeredReadingState ?? null); setSkimStage(stateToRestore.skimStage || 'diagnosis'); setQuizData(stateToRestore.quizData || null); setDocType(stateToRestore.docType || 'STEM');
+        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setSkimTopHeight(stateToRestore.skimTopHeight || 60); setSkimFocusMode(stateToRestore.skimFocusMode ?? false); setStudyMap(stateToRestore.studyMap || null); setStudyMapModuleCount(null); setLayeredReadingState(stateToRestore.layeredReadingState ?? null); setSkimStage(stateToRestore.skimStage || 'diagnosis'); setQuizData(stateToRestore.quizData || null); setDocType(stateToRestore.docType || 'STEM');
         setReviewQuizRounds(stateToRestore.reviewQuizRounds || []); setReviewFlashCards(stateToRestore.reviewFlashCards || []); setFlashCardEstimate(stateToRestore.flashCardEstimate);
         setPageMarks(stateToRestore.pageMarks || {});
         setStudyGuide(stateToRestore.studyGuide || null);
@@ -708,7 +710,7 @@ const App: React.FC = () => {
         if (restoredBg) setCustomBackgroundUrl(restoredBg); else if (stateToRestore.galgameBackgroundUrl) setCustomBackgroundUrl(stateToRestore.galgameBackgroundUrl);
         if (stateToRestore.personaSettings) setPersonaSettings(stateToRestore.personaSettings);
       } else {
-        setExplanations({}); setChatCache({}); setSkimMessages([]); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('deep'); setSkimTopHeight(60); setStudyMap(null); setStudyMapModuleCount(null); setLayeredReadingState(null); setSkimStage('diagnosis'); setQuizData(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
+        setExplanations({}); setChatCache({}); setSkimMessages([]); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('deep'); setSkimTopHeight(60); setSkimFocusMode(false); setStudyMap(null); setStudyMapModuleCount(null); setLayeredReadingState(null); setSkimStage('diagnosis'); setQuizData(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
       }
       if (!stateToRestore?.studyMap) {
         setIsStudyMapLoading(true); const diagnosisContent = rawPdfData || fullText;
@@ -805,6 +807,7 @@ const App: React.FC = () => {
         quizData: fullData.quizData,
         docType: fullData.docType,
         skimTopHeight: fullData.skimTopHeight,
+        skimFocusMode: fullData.skimFocusMode,
         currentIndex: fullData.currentIndex,
         personaSettings: fullData.personaSettings,
         reviewQuizRounds: fullData.reviewQuizRounds,
@@ -1683,6 +1686,7 @@ const App: React.FC = () => {
       currentIndex,
       viewMode,
       skimTopHeight,
+      skimFocusMode,
       studyMap,
       layeredReadingState,
       skimStage,
@@ -1711,6 +1715,7 @@ const App: React.FC = () => {
     currentIndex,
     viewMode,
     skimTopHeight,
+    skimFocusMode,
     studyMap,
     layeredReadingState,
     skimStage,
@@ -2093,6 +2098,8 @@ const App: React.FC = () => {
       setMessages={setSkimMessages}
       topHeight={skimTopHeight}
       setTopHeight={setSkimTopHeight}
+      focusMode={skimFocusMode}
+      setFocusMode={setSkimFocusMode}
       stage={skimStage}
       setStage={setSkimStage}
       quizData={quizData}

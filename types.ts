@@ -584,6 +584,8 @@ export interface FilePersistedState {
   currentIndex: number;
   viewMode: ViewMode;
   skimTopHeight: number;
+  /** 略读「专注模式」:隐藏上半块 + splitter,对话占满整个面板 */
+  skimFocusMode?: boolean;
   studyMap: StudyMap | null;
   /** 递进阅读模式独立 state；与 studyMap 完全独立（铁律 2） */
   layeredReadingState?: LayeredReadingState | null;
@@ -650,6 +652,8 @@ export interface CloudSession {
   quizData?: QuizData | null;
   docType?: DocType;
   skimTopHeight?: number;
+  /** 略读「专注模式」:与 FilePersistedState.skimFocusMode 同步 */
+  skimFocusMode?: boolean;
   currentIndex?: number;
   reviewQuizRounds?: QuizRound[];
   reviewFlashCards?: FlashCard[];

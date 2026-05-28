@@ -13,7 +13,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType } from '@/types';
-import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X } from 'lucide-react';
+import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X, Maximize2, Minimize2 } from 'lucide-react';
 import { chatWithSkimAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '@/services/geminiService';
 import { readFileAsDataURL } from '@/lib/pdf/pdfUtils';
 import { getMessageImages } from '@/lib/chat/messageUtils';
@@ -28,6 +28,8 @@ interface SkimPanelProps {
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   topHeight: number;
   setTopHeight: React.Dispatch<React.SetStateAction<number>>;
+  focusMode: boolean;
+  setFocusMode: React.Dispatch<React.SetStateAction<boolean>>;
   
   // Persisted state props
   stage: SkimStage;
@@ -134,6 +136,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   setMessages,
   topHeight,
   setTopHeight,
+  focusMode,
+  setFocusMode,
   stage,
   setStage,
   quizData,
@@ -672,7 +676,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         </div>
       )}
 
-      {/* 1. TOP HALF: Diagnosis / Status / Quiz / Structure */}
+      {/* 1. TOP HALF: Diagnosis / Status / Quiz / Structure(focusMode 下不渲染,但 quiz 阶段始终保留) */}
+      {(stage === 'quiz' || !focusMode) && (
       <div style={{ height: stage === 'quiz' ? '100%' : `${topHeight}%` }} className={`overflow-y-auto custom-scrollbar relative bg-stone-50/30 flex flex-col transition-all duration-500`}>
         <div className="p-4 sticky top-0 bg-white/95 backdrop-blur-sm z-10 border-b border-stone-100 flex items-center justify-between shrink-0 shadow-sm">
             <div className="flex items-center space-x-2">
@@ -991,9 +996,10 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             )}
         </div>
       </div>
+      )}
 
-      {/* DRAGGABLE SPLITTER (Hidden in Quiz Mode) */}
-      {stage !== 'quiz' && (
+      {/* DRAGGABLE SPLITTER (Hidden in Quiz Mode + Focus Mode) */}
+      {stage !== 'quiz' && !focusMode && (
           <div 
             onMouseDown={startResize}
             className="h-2 bg-stone-100 border-y border-stone-200 cursor-row-resize flex items-center justify-center hover:bg-indigo-50 transition-colors z-40 shrink-0 select-none group"
@@ -1014,6 +1020,17 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     {stage === 'tutoring' ? 'AI 补习助手' : '🧠 深度领读'}
                 </span>
             </div>
+            {stage === 'reading' && (
+                <button
+                    type="button"
+                    onClick={() => setFocusMode((v) => !v)}
+                    title={focusMode ? '退出专注模式' : '专注模式(隐藏学习地图,对话占满)'}
+                    aria-label={focusMode ? '退出专注模式' : '专注模式'}
+                    className="p-1.5 text-stone-500 hover:text-indigo-600 hover:bg-stone-100 rounded-md transition-colors"
+                >
+                    {focusMode ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                </button>
+            )}
         </div>
 
         <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-white">
