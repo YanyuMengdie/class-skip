@@ -16,6 +16,7 @@ import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType } fro
 import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X } from 'lucide-react';
 import { chatWithSkimAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '@/services/geminiService';
 import { readFileAsDataURL } from '@/lib/pdf/pdfUtils';
+import { getMessageImages } from '@/lib/chat/messageUtils';
 
 interface SkimPanelProps {
   studyMap: StudyMap | null;
@@ -184,7 +185,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const skimGenerationCancelledRef = useRef(false);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
 
   // Text Selection State
   const [selectionRect, setSelectionRect] = useState<{top: number, left: number} | null>(null);
@@ -424,15 +425,15 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   };
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+      const files = e.target.files;
+      if (!files || files.length === 0) return;
       try {
-          const dataURL = await readFileAsDataURL(file);
-          setPendingImage(dataURL);
+          const dataURLs = await Promise.all(Array.from(files).map((file) => readFileAsDataURL(file)));
+          setPendingImages((prev) => [...prev, ...dataURLs]);
       } catch (err) {
-          console.error('Failed to read image:', err);
+          console.error('Failed to read image(s):', err);
       } finally {
-          // 清空 input.value,否则同一张图选第二次不会触发 onChange
+          // 清空 input.value,否则同一批文件选第二次不会触发 onChange
           e.target.value = '';
       }
   };
@@ -440,22 +441,24 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       const items = e.clipboardData?.items;
       if (!items) return;
+      // 先收集所有 image/* 文件(剪贴板理论上可同时含多图)
+      const imageFiles: File[] = [];
       for (let i = 0; i < items.length; i++) {
           const item = items[i];
           if (item.type.startsWith('image/')) {
-              e.preventDefault();
               const file = item.getAsFile();
-              if (file) {
-                  // 复用 readFileAsDataURL → setPendingImage 通路,与 handleImageSelect 一致
-                  readFileAsDataURL(file)
-                      .then((dataUrl) => setPendingImage(dataUrl))
-                      .catch((err) => console.error('Failed to read pasted image:', err));
-              }
-              // 找到图就走人,后面即使还有文字也忽略(避免 OCR 工具的图+文字副产物)
-              return;
+              if (file) imageFiles.push(file);
           }
       }
-      // 没有图,不 preventDefault,浏览器走默认文字粘贴
+      if (imageFiles.length === 0) {
+          // 没有图,不 preventDefault,浏览器走默认文字粘贴
+          return;
+      }
+      // 找到至少一张图就吃掉粘贴事件,忽略附带文字(避免 OCR 工具的图+文字副产物)
+      e.preventDefault();
+      Promise.all(imageFiles.map((file) => readFileAsDataURL(file)))
+          .then((dataUrls) => setPendingImages((prev) => [...prev, ...dataUrls]))
+          .catch((err) => console.error('Failed to read pasted image(s):', err));
   };
 
   const handleSend = async (
@@ -469,7 +472,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       // CRITICAL: Prioritize PDF Vision Data over Text to avoid hallucination on scanned docs
       const content = pdfDataUrl || fullText;
 
-      if ((!trimmed && !pendingImage) || !content || isChatLoading) return;
+      if ((!trimmed && pendingImages.length === 0) || !content || isChatLoading) return;
 
       const payloadForTutor = sendOpts?.tutorUserText ?? trimmed;
 
@@ -478,12 +481,15 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         // 仅正式领读开场（携带整块 readingOptions）时重置
         resetReadingModuleArtifacts();
       }
-      
+
+      // 本轮发送给 AI 的当前图(仅用户主动 send 路径填充,textOverride 路径保持空)
+      let imagesToSend: string[] = [];
+
       if (!textOverride) {
           const userMsg: ChatMessage = {
               role: 'user',
               text: trimmed,
-              ...(pendingImage ? { image: pendingImage } : {}),
+              ...(pendingImages.length > 0 ? { images: pendingImages } : {}),
               timestamp: Date.now(),
           };
           setMessages(prev => [...prev, userMsg]);
@@ -491,7 +497,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           if (chatInputRef.current) {
               chatInputRef.current.style.height = 'auto';
           }
-          setPendingImage(null);
+          imagesToSend = pendingImages; // 快照"清空前"的图,确保本轮 AI 看得到
+          setPendingImages([]);
       } else if (sendOpts?.appendUserWhenOverride) {
           const userMsg: ChatMessage = { role: 'user', text: trimmed, timestamp: Date.now() };
           setMessages((prev) => [...prev, userMsg]);
@@ -514,7 +521,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             modeToUse,
             docType,
             skimReadingOpts,
-            abortController.signal
+            abortController.signal,
+            imagesToSend
           );
           if (abortController.signal.aborted || skimGenerationCancelledRef.current) return;
           const aiMsg: ChatMessage = { role: 'model', text: response, timestamp: Date.now() };
@@ -1038,13 +1046,14 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                     <PencilLine className="w-3.5 h-3.5" aria-hidden />
                                 </button>
                             )}
-                            {msg.image && (
+                            {getMessageImages(msg).map((img, imgIdx) => (
                                 <img
-                                    src={msg.image}
+                                    key={imgIdx}
+                                    src={img}
                                     alt="用户上传"
                                     className="max-w-full rounded-lg mb-2"
                                 />
-                            )}
+                            ))}
                             <ReactMarkdown
                                 components={MarkdownComponents}
                                 remarkPlugins={[remarkMath, remarkGfm]}
@@ -1307,6 +1316,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                multiple
                 style={{ display: 'none' }}
                 onChange={handleImageSelect}
             />
@@ -1321,19 +1331,23 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     <span>本模块读完了，看要点</span>
                 </button>
             )}
-            {/* 图片预览(选了图但还没发) */}
-            {pendingImage && (
-                <div className="relative inline-block">
-                    <img src={pendingImage} alt="待发送图片" className="max-h-32 rounded-lg border border-stone-200" />
-                    <button
-                        type="button"
-                        onClick={() => setPendingImage(null)}
-                        className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
-                        title="移除图片"
-                        aria-label="移除图片"
-                    >
-                        <X className="w-3 h-3" />
-                    </button>
+            {/* 图片预览(选了图但还没发);多图横向 flex,每张独立 × */}
+            {pendingImages.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                    {pendingImages.map((img, idx) => (
+                        <div key={idx} className="relative">
+                            <img src={img} alt={`待发送图片 ${idx + 1}`} className="max-h-24 rounded-lg border border-stone-200" />
+                            <button
+                                type="button"
+                                onClick={() => setPendingImages((prev) => prev.filter((_, i) => i !== idx))}
+                                className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+                                title="移除图片"
+                                aria-label="移除图片"
+                            >
+                                <X className="w-3 h-3" />
+                            </button>
+                        </div>
+                    ))}
                 </div>
             )}
             <div className="flex items-center space-x-2 bg-stone-50 p-1.5 rounded-full border border-stone-100 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">

@@ -1888,10 +1888,10 @@ const App: React.FC = () => {
       fetchExplanation(currentIndex, slides, fullPdfText); 
   }, [slides, currentIndex, fetchExplanation, fullPdfText]);
 
-  const handleSendChat = async (text: string, image?: string) => {
-    if (!slides[currentIndex]) return; const slide = slides[currentIndex]; const slideId = slide.id; const userMessage: ChatMessage = { role: 'user', text, image, timestamp: Date.now() };
+  const handleSendChat = async (text: string, images?: string[]) => {
+    if (!slides[currentIndex]) return; const slide = slides[currentIndex]; const slideId = slide.id; const userMessage: ChatMessage = { role: 'user', text, ...(images && images.length > 0 ? { images } : {}), timestamp: Date.now() };
     setChatCache(prev => { const newState = { ...prev, [slideId]: [...(prev[slideId] || []), userMessage] }; return newState; }); setIsChatLoading(true);
-    try { const currentHistory = chatCache[slideId] || []; const replyText = await chatWithSlide(slide.imageUrl, currentHistory, text, image, 'standard', undefined); const replyMessage: ChatMessage = { role: 'model', text: replyText, timestamp: Date.now() }; setChatCache(prev => { const newState = { ...prev, [slideId]: [...(prev[slideId] || []), replyMessage] }; return newState; }); } catch (error) { console.error(error); } finally { setIsChatLoading(false); }
+    try { const currentHistory = chatCache[slideId] || []; const replyText = await chatWithSlide(slide.imageUrl, currentHistory, text, images, 'standard', undefined); const replyMessage: ChatMessage = { role: 'model', text: replyText, timestamp: Date.now() }; setChatCache(prev => { const newState = { ...prev, [slideId]: [...(prev[slideId] || []), replyMessage] }; return newState; }); } catch (error) { console.error(error); } finally { setIsChatLoading(false); }
   };
 
   const handleSendGalgameChat = async (text: string) => { if (!slides[currentIndex]) return; };

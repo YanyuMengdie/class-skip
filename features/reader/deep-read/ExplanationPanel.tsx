@@ -6,6 +6,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { Sparkles, RefreshCw, Send, Image as ImageIcon, MessageSquare, X, Heart, HelpCircle, Highlighter, Plus, GripHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ChatMessage } from '@/types';
+import { getMessageImages } from '@/lib/chat/messageUtils';
 import { plainTextToHtmlWithSupSub, normalizeSelectionText, dedupeHtml } from '@/features/reader/lib/textUtils';
 import { LoadingInteractiveContent } from '@/features/reader/deep-read/LoadingInteractiveContent';
 
@@ -14,7 +15,7 @@ interface ExplanationPanelProps {
   isLoadingExplanation: boolean;
   onRetryExplanation: () => void;
   chatMessages: ChatMessage[];
-  onSendChat: (text: string, image?: string) => void;
+  onSendChat: (text: string, images?: string[]) => void;
   isChatLoading: boolean;
   onNotebookAdd?: (text: string) => void;
   isImmersive?: boolean;
@@ -451,7 +452,7 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
 
   const handleSend = () => {
     if ((!inputText.trim() && !pastedImage) || isChatLoading) return;
-    onSendChat(inputText, pastedImage || undefined);
+    onSendChat(inputText, pastedImage ? [pastedImage] : undefined);
     setInputText('');
     setPastedImage(null);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -600,9 +601,9 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
                             ? 'bg-gradient-to-br from-indigo-500 to-violet-500 text-white rounded-2xl rounded-tr-none' 
                             : 'bg-white text-slate-600 border border-stone-100 rounded-2xl rounded-tl-none shadow-stone-100'
                         }`}>
-                            {msg.image && (
-                                <img src={msg.image} alt="User upload" className="max-w-full h-auto rounded-xl mb-2 border-2 border-white/20" />
-                            )}
+                            {getMessageImages(msg).map((img, imgIdx) => (
+                                <img key={imgIdx} src={img} alt="User upload" className="max-w-full h-auto rounded-xl mb-2 border-2 border-white/20" />
+                            ))}
                             <ReactMarkdown 
                                 className="prose prose-sm max-w-none prose-invert:text-white prose-p:my-0"
                                 remarkPlugins={[remarkMath, remarkGfm]}

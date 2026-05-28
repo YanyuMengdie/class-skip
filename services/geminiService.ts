@@ -5,6 +5,7 @@ import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProf
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/lib/exam/scaffoldingClassifier";
 import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "@/lib/prompts/systemPrompts";
+import { getMessageImages } from "@/lib/chat/messageUtils";
 import {
   LAYERED_READING_SYSTEM_PROMPT,
   buildLayeredModuleGenPrompt,
@@ -392,7 +393,7 @@ export const chatWithSlide = async (
   slideImageBase64: string,
   history: ChatMessage[],
   newMessage: string,
-  userImageBase64?: string,
+  userImagesBase64?: string[],
   mode: 'standard' | 'galgame' = 'standard',
   persona?: PersonaSettings,
   disciplineBand: DisciplineBand = 'unspecified',
@@ -424,11 +425,14 @@ export const chatWithSlide = async (
 
     history.forEach(msg => {
       const parts: any[] = [{ text: msg.text }];
-      if (msg.image && msg.role === 'user') {
-        const imgP = msg.image.split(',');
-        const imgData = imgP[1];
-        const imgMime = imgP[0].split(';')[0].split(':')[1] || 'image/png';
-        parts.push({ inlineData: { mimeType: imgMime, data: imgData } });
+      if (msg.role === 'user') {
+        const imgs = getMessageImages(msg);
+        imgs.forEach((img) => {
+          const imgP = img.split(',');
+          const imgData = imgP[1];
+          const imgMime = imgP[0].split(';')[0].split(':')[1] || 'image/png';
+          parts.push({ inlineData: { mimeType: imgMime, data: imgData } });
+        });
       }
       contents.push({ role: msg.role, parts: parts });
     });
@@ -439,12 +443,12 @@ export const chatWithSlide = async (
     }
 
     const currentParts: any[] = [{ text: messageForModel }];
-    if (userImageBase64) {
-      const uParts = userImageBase64.split(',');
+    (userImagesBase64 ?? []).forEach((img) => {
+      const uParts = img.split(',');
       const uImgData = uParts[1];
       const uImgMime = uParts[0].split(';')[0].split(':')[1] || 'image/png';
       currentParts.push({ inlineData: { mimeType: uImgMime, data: uImgData } });
-    }
+    });
     contents.push({ role: 'user', parts: currentParts });
 
     let systemPrompt = "";
@@ -2136,7 +2140,9 @@ export async function chatWithSkimAdaptiveTutor(
   mode: 'tutoring' | 'reading',
   docType: DocType = 'STEM',
   readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number; skimPace?: 'module' | 'part' },
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  /** 当前轮用户图片(数组,语义对齐 chatWithSlide 的 userImagesBase64;放末尾以避免 TS 必填参数顺序错误) */
+  userImagesBase64?: string[]
 ): Promise<string> {
   try {
     const contentPart = getContentPart(docContent);
@@ -2152,7 +2158,17 @@ export async function chatWithSkimAdaptiveTutor(
     });
 
     history.forEach((msg) => {
-      contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+      const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: msg.text }];
+      if (msg.role === 'user') {
+        const imgs = getMessageImages(msg);
+        imgs.forEach((img) => {
+          const imgP = img.split(',');
+          const imgData = imgP[1];
+          const imgMime = imgP[0].split(';')[0].split(':')[1] || 'image/png';
+          parts.push({ inlineData: { mimeType: imgMime, data: imgData } });
+        });
+      }
+      contents.push({ role: msg.role, parts });
     });
 
     let finalMessage = newMessage;
@@ -2160,7 +2176,14 @@ export async function chatWithSkimAdaptiveTutor(
       finalMessage = appendReadingModeUserMessageSuffix(newMessage, readingOptions);
     }
 
-    contents.push({ role: 'user', parts: [{ text: finalMessage }] });
+    const currentParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: finalMessage }];
+    (userImagesBase64 ?? []).forEach((img) => {
+      const uParts = img.split(',');
+      const uImgData = uParts[1];
+      const uImgMime = uParts[0].split(';')[0].split(':')[1] || 'image/png';
+      currentParts.push({ inlineData: { mimeType: uImgMime, data: uImgData } });
+    });
+    contents.push({ role: 'user', parts: currentParts });
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.1-pro-preview',

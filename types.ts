@@ -17,7 +17,10 @@ export interface ExamChunkCitationSnapshot {
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
+  /** @deprecated 用 images 数组,本字段仅为历史数据兼容保留;读取请走 getMessageImages() */
   image?: string;
+  /** 新写入路径只填这个字段;读取请走 getMessageImages() 兼容旧 image */
+  images?: string[];
   timestamp: number;
   isQuiz?: boolean; // Flag for Phase 2 intercepts
   /** 备考台：仅 model 消息；有快照时优先按 chunk 协议解析链钮 */
