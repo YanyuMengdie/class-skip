@@ -448,7 +448,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       // CRITICAL: Prioritize PDF Vision Data over Text to avoid hallucination on scanned docs
       const content = pdfDataUrl || fullText;
 
-      if (!trimmed || !content || isChatLoading) return;
+      if ((!trimmed && !pendingImage) || !content || isChatLoading) return;
 
       const payloadForTutor = sendOpts?.tutorUserText ?? trimmed;
 
@@ -467,6 +467,9 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           };
           setMessages(prev => [...prev, userMsg]);
           setInput('');
+          if (chatInputRef.current) {
+              chatInputRef.current.style.height = 'auto';
+          }
           setPendingImage(null);
       } else if (sendOpts?.appendUserWhenOverride) {
           const userMsg: ChatMessage = { role: 'user', text: trimmed, timestamp: Date.now() };
