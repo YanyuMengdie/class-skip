@@ -13,8 +13,9 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType } from '@/types';
-import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2 } from 'lucide-react';
+import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X } from 'lucide-react';
 import { chatWithSkimAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '@/services/geminiService';
+import { readFileAsDataURL } from '@/lib/pdf/pdfUtils';
 
 interface SkimPanelProps {
   studyMap: StudyMap | null;
@@ -182,6 +183,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   /** SDK 偶发在 abort 后仍 resolve 时，与 `signal.aborted` 双保险，避免误追加助手气泡 */
   const skimGenerationCancelledRef = useRef(false);
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
 
   // Text Selection State
   const [selectionRect, setSelectionRect] = useState<{top: number, left: number} | null>(null);
@@ -420,6 +423,20 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       });
   };
 
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+          const dataURL = await readFileAsDataURL(file);
+          setPendingImage(dataURL);
+      } catch (err) {
+          console.error('Failed to read image:', err);
+      } finally {
+          // 清空 input.value,否则同一张图选第二次不会触发 onChange
+          e.target.value = '';
+      }
+  };
+
   const handleSend = async (
       textOverride?: string,
       forceMode?: 'tutoring' | 'reading',
@@ -442,9 +459,15 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       }
       
       if (!textOverride) {
-          const userMsg: ChatMessage = { role: 'user', text: trimmed, timestamp: Date.now() };
+          const userMsg: ChatMessage = {
+              role: 'user',
+              text: trimmed,
+              ...(pendingImage ? { image: pendingImage } : {}),
+              timestamp: Date.now(),
+          };
           setMessages(prev => [...prev, userMsg]);
           setInput('');
+          setPendingImage(null);
       } else if (sendOpts?.appendUserWhenOverride) {
           const userMsg: ChatMessage = { role: 'user', text: trimmed, timestamp: Date.now() };
           setMessages((prev) => [...prev, userMsg]);
@@ -991,7 +1014,14 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                     <PencilLine className="w-3.5 h-3.5" aria-hidden />
                                 </button>
                             )}
-                            <ReactMarkdown 
+                            {msg.image && (
+                                <img
+                                    src={msg.image}
+                                    alt="用户上传"
+                                    className="max-w-full rounded-lg mb-2"
+                                />
+                            )}
+                            <ReactMarkdown
                                 components={MarkdownComponents}
                                 remarkPlugins={[remarkMath, remarkGfm]}
                                 rehypePlugins={[rehypeKatex]}
@@ -1248,6 +1278,14 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         </div>
 
         <div className="p-4 border-t border-stone-50 bg-white shrink-0 space-y-2">
+            {/* 隐藏的文件选择器:由"图片"按钮触发 */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                style={{ display: 'none' }}
+                onChange={handleImageSelect}
+            />
             {stage === 'reading' && messages.length > 0 && (
                 <button
                     type="button"
@@ -1258,6 +1296,21 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     {takeawaysLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <ListChecks className="w-4 h-4" />}
                     <span>本模块读完了，看要点</span>
                 </button>
+            )}
+            {/* 图片预览(选了图但还没发) */}
+            {pendingImage && (
+                <div className="relative inline-block">
+                    <img src={pendingImage} alt="待发送图片" className="max-h-32 rounded-lg border border-stone-200" />
+                    <button
+                        type="button"
+                        onClick={() => setPendingImage(null)}
+                        className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+                        title="移除图片"
+                        aria-label="移除图片"
+                    >
+                        <X className="w-3 h-3" />
+                    </button>
+                </div>
             )}
             <div className="flex items-center space-x-2 bg-stone-50 p-1.5 rounded-full border border-stone-100 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
                 <textarea
@@ -1279,6 +1332,16 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm focus:ring-0 focus:outline-none text-slate-700 placeholder:text-stone-400 resize-none overflow-y-auto max-h-[120px]"
                     disabled={isChatLoading || stage === 'diagnosis'}
                 />
+                <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isChatLoading || stage === 'diagnosis'}
+                    title="添加图片"
+                    aria-label="添加图片"
+                    className="p-2 text-stone-500 hover:text-amber-700 hover:bg-stone-100 disabled:opacity-40 rounded-full transition-colors shrink-0"
+                >
+                    <ImagePlus className="w-4 h-4" />
+                </button>
                 {isChatLoading ? (
                     <button
                         type="button"
