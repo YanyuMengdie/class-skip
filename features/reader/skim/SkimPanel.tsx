@@ -437,6 +437,27 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       }
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (let i = 0; i < items.length; i++) {
+          const item = items[i];
+          if (item.type.startsWith('image/')) {
+              e.preventDefault();
+              const file = item.getAsFile();
+              if (file) {
+                  // 复用 readFileAsDataURL → setPendingImage 通路,与 handleImageSelect 一致
+                  readFileAsDataURL(file)
+                      .then((dataUrl) => setPendingImage(dataUrl))
+                      .catch((err) => console.error('Failed to read pasted image:', err));
+              }
+              // 找到图就走人,后面即使还有文字也忽略(避免 OCR 工具的图+文字副产物)
+              return;
+          }
+      }
+      // 没有图,不 preventDefault,浏览器走默认文字粘贴
+  };
+
   const handleSend = async (
       textOverride?: string,
       forceMode?: 'tutoring' | 'reading',
@@ -1331,6 +1352,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             handleSend();
                         }
                     }}
+                    onPaste={handlePaste}
                     placeholder={stage === 'tutoring' ? "回答 AI 的追问或说‘我不懂’..." : "与导读 AI 交流..."}
                     className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm focus:ring-0 focus:outline-none text-slate-700 placeholder:text-stone-400 resize-none overflow-y-auto max-h-[120px]"
                     disabled={isChatLoading || stage === 'diagnosis'}
