@@ -57,7 +57,7 @@ import {
 } from '@/features/exam/lib/examWorkspaceLsapKey';
 import { computePredictedScore } from '@/features/exam/lib/lsapScore';
 import { normalizeTermKey } from '@/lib/text/extractBoldTermsFromMarkdown';
-import { Sparkles, X, ChevronDown, Loader2, Wand2 } from 'lucide-react';
+import { Sparkles, X, ChevronDown, Loader2, Wand2, Plus } from 'lucide-react';
 
 /** P0 备考工作台：当前考试 ID 存 localStorage */
 const EXAM_WORKSPACE_ACTIVE_EXAM_LS = 'examWorkspace_activeExamId';
@@ -89,6 +89,49 @@ const DEFAULT_PERSONA: PersonaSettings = {
     personality: '温柔体贴'
 };
 
+/**
+ * 略读「一段会话」的内存模型（阶段一：纯前端内存，刷新即丢，不进任何持久化结构）。
+ * 把原本散落的略读 App 单值（studyMap / skimMessages / skimStage / quizData）+ UI 态
+ * （topHeight / focusMode）+ 原 SkimPanel 内部态（moduleCount / skimPace / pageRange）
+ * 全部收进一段，按 id 隔离，避免多段串台。**刻意不写进 types.ts 的持久化类型。**
+ */
+interface SkimSession {
+  id: string;
+  studyMap: StudyMap | null;
+  messages: ChatMessage[];
+  stage: SkimStage;
+  quizData: QuizData | null;
+  moduleCount: number;
+  skimPace: 'module' | 'part';
+  pageRangeStart: number | null;
+  pageRangeEnd: number | null;
+  studyMapModuleCount: number | null;
+  topHeight: number;
+  focusMode: boolean;
+  /** 方案 A：true = 跳过诊断开场，直接进配置区（仅「+」新建段）；首段/恢复段为 false，走完整诊断 */
+  skipDiagnosis: boolean;
+}
+
+/** 新建一段干净的空白略读会话（id 沿用本仓库现有 `${Date.now()}-${random}` 风格） */
+const createEmptySkimSession = (): SkimSession => ({
+  id: `skim-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  studyMap: null,
+  messages: [],
+  stage: 'diagnosis',
+  quizData: null,
+  moduleCount: 4,
+  skimPace: 'module',
+  pageRangeStart: null,
+  pageRangeEnd: null,
+  studyMapModuleCount: null,
+  topHeight: 60,
+  focusMode: false,
+  skipDiagnosis: false,
+});
+
+/** 略读会话数量上限（阶段一） */
+const MAX_SKIM_SESSIONS = 10;
+
 const App: React.FC = () => {
   // --- STATE DECLARATIONS ---
   const [hasStarted, setHasStarted] = useState(false);
@@ -99,17 +142,56 @@ const App: React.FC = () => {
   const [chatCache, setChatCache] = useState<ChatCache>({});
   const [annotations, setAnnotations] = useState<AnnotationCache>({});
   const [pageComments, setPageComments] = useState<PageCommentsCache>({});
-  const [skimMessages, setSkimMessages] = useState<ChatMessage[]>([]);
-  const [skimTopHeight, setSkimTopHeight] = useState(60);
-  const [skimFocusMode, setSkimFocusMode] = useState(false);
+  // === 略读多会话（阶段一：纯内存）===
+  // 原 4 个略读单值 + 2 个 UI 单值 + 原 SkimPanel 内部态，统一提升进「会话列表 + 激活索引」。
+  const [skimSessions, setSkimSessions] = useState<SkimSession[]>(() => [createEmptySkimSession()]);
+  const [activeSkimIndex, setActiveSkimIndex] = useState(0);
+  /** SkimPanel 内部 isChatLoading 上抛（onLoadingChange），用于标签栏「生成中锁切换」 */
+  const [skimActiveLoading, setSkimActiveLoading] = useState(false);
+  /** 始终指向当前激活会话 id；所有包装 setter 按此 id 定位，绝不用 activeSkimIndex 闭包，异步回包也只写自己那段 */
+  const activeIdRef = useRef<string | null>(null);
+  // 派生当前激活会话切片：喂给 SkimPanel 的「单份」props 全部从这里取，SkimPanel 的 props 形状保持不变。
+  const activeSkim = skimSessions[activeSkimIndex] ?? skimSessions[0];
+  activeIdRef.current = activeSkim?.id ?? null;
+  const skimMessages = activeSkim.messages;
+  const skimTopHeight = activeSkim.topHeight;
+  const skimFocusMode = activeSkim.focusMode;
+  const skimStage = activeSkim.stage;
+  const quizData = activeSkim.quizData;
+  const studyMap = activeSkim.studyMap;
+  const studyMapModuleCount = activeSkim.studyMapModuleCount;
+  /** 包装 setter 统一入口：按「调用时」的 activeIdRef.current 定位单段更新（生成中已锁切换，故必落在发起段） */
+  const updateActiveSkimSession = useCallback((updater: (s: SkimSession) => SkimSession) => {
+    const id = activeIdRef.current;
+    if (id == null) return;
+    setSkimSessions(prev => prev.map(s => (s.id === id ? updater(s) : s)));
+  }, []);
+  // ↓↓↓ 与原单值 setter 同名同形（含函数式更新），故所有既有调用点无需改动，只是改为写进激活会话。
+  const setSkimMessages = useCallback<React.Dispatch<React.SetStateAction<ChatMessage[]>>>(
+    value => updateActiveSkimSession(s => ({ ...s, messages: typeof value === 'function' ? (value as (p: ChatMessage[]) => ChatMessage[])(s.messages) : value })),
+    [updateActiveSkimSession]
+  );
+  const setSkimTopHeight = useCallback<React.Dispatch<React.SetStateAction<number>>>(
+    value => updateActiveSkimSession(s => ({ ...s, topHeight: typeof value === 'function' ? (value as (p: number) => number)(s.topHeight) : value })),
+    [updateActiveSkimSession]
+  );
+  const setSkimFocusMode = useCallback<React.Dispatch<React.SetStateAction<boolean>>>(
+    value => updateActiveSkimSession(s => ({ ...s, focusMode: typeof value === 'function' ? (value as (p: boolean) => boolean)(s.focusMode) : value })),
+    [updateActiveSkimSession]
+  );
+  const setSkimStage = useCallback((stage: SkimStage) => updateActiveSkimSession(s => ({ ...s, stage })), [updateActiveSkimSession]);
+  const setQuizData = useCallback((data: QuizData | null) => updateActiveSkimSession(s => ({ ...s, quizData: data })), [updateActiveSkimSession]);
+  // 原 SkimPanel 内部态（模块数 / 节奏 / 页码范围）提升到会话后的写入器（均为值式，与 SkimPanel 用法一致）
+  const setSkimModuleCount = useCallback((count: number) => updateActiveSkimSession(s => ({ ...s, moduleCount: count })), [updateActiveSkimSession]);
+  const setSkimPaceValue = useCallback((pace: 'module' | 'part') => updateActiveSkimSession(s => ({ ...s, skimPace: pace })), [updateActiveSkimSession]);
+  const setSkimPageRangeStart = useCallback((v: number | null) => updateActiveSkimSession(s => ({ ...s, pageRangeStart: v })), [updateActiveSkimSession]);
+  const setSkimPageRangeEnd = useCallback((v: number | null) => updateActiveSkimSession(s => ({ ...s, pageRangeEnd: v })), [updateActiveSkimSession]);
   const [viewMode, setViewMode] = useState<ViewMode>('deep');
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileHash, setFileHash] = useState<string | null>(null);
   const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null); 
   
   const [docType, setDocType] = useState<DocType>('STEM');
-  const [skimStage, setSkimStage] = useState<SkimStage>('diagnosis');
-  const [quizData, setQuizData] = useState<QuizData | null>(null);
 
   const [isGalgameMode, setIsGalgameMode] = useState(false);
   const [galgameChatCache, setGalgameChatCache] = useState<ChatCache>({});
@@ -123,8 +205,6 @@ const App: React.FC = () => {
   const [isProcessingFile, setIsProcessingFile] = useState<boolean>(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
-  const [studyMap, setStudyMap] = useState<StudyMap | null>(null);
-  const [studyMapModuleCount, setStudyMapModuleCount] = useState<number | null>(null);
   /** 递进阅读模式独立 state，与 studyMap 完全无关（铁律 2，详见 docs/inquiries/LAYERED_READING_INQUIRY.md §8.G） */
   const [layeredReadingState, setLayeredReadingState] = useState<LayeredReadingState | null>(null);
   const [fullPdfText, setFullPdfText] = useState<string | null>(null); 
@@ -700,8 +780,19 @@ const App: React.FC = () => {
       const existingRecord = await storageService.getFileState(hash);
       const stateToRestore = restoreData || (existingRecord ? existingRecord.state : null);
       if (stateToRestore) {
-        setExplanations(stateToRestore.explanations || {}); setChatCache(stateToRestore.chatCache || {}); setSkimMessages(stateToRestore.skimMessages || []); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
-        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setSkimTopHeight(stateToRestore.skimTopHeight || 60); setSkimFocusMode(stateToRestore.skimFocusMode ?? false); setStudyMap(stateToRestore.studyMap || null); setStudyMapModuleCount(null); setLayeredReadingState(stateToRestore.layeredReadingState ?? null); setSkimStage(stateToRestore.skimStage || 'diagnosis'); setQuizData(stateToRestore.quizData || null); setDocType(stateToRestore.docType || 'STEM');
+        setExplanations(stateToRestore.explanations || {}); setChatCache(stateToRestore.chatCache || {}); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
+        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setLayeredReadingState(stateToRestore.layeredReadingState ?? null); setDocType(stateToRestore.docType || 'STEM');
+        // 旧持久化是「扁平单份」略读态：就地包成「列表第一段」（阶段一仍单段，多段不持久化）。
+        const restoredSkimSession: SkimSession = {
+          ...createEmptySkimSession(),
+          studyMap: stateToRestore.studyMap || null,
+          messages: stateToRestore.skimMessages || [],
+          stage: stateToRestore.skimStage || 'diagnosis',
+          quizData: stateToRestore.quizData || null,
+          topHeight: stateToRestore.skimTopHeight || 60,
+          focusMode: stateToRestore.skimFocusMode ?? false,
+        };
+        setSkimSessions([restoredSkimSession]); setActiveSkimIndex(0); activeIdRef.current = restoredSkimSession.id;
         setReviewQuizRounds(stateToRestore.reviewQuizRounds || []); setReviewFlashCards(stateToRestore.reviewFlashCards || []); setFlashCardEstimate(stateToRestore.flashCardEstimate);
         setPageMarks(stateToRestore.pageMarks || {});
         setStudyGuide(stateToRestore.studyGuide || null);
@@ -711,8 +802,13 @@ const App: React.FC = () => {
         if (restoredBg) setCustomBackgroundUrl(restoredBg); else if (stateToRestore.galgameBackgroundUrl) setCustomBackgroundUrl(stateToRestore.galgameBackgroundUrl);
         if (stateToRestore.personaSettings) setPersonaSettings(stateToRestore.personaSettings);
       } else {
-        setExplanations({}); setChatCache({}); setSkimMessages([]); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('deep'); setSkimTopHeight(60); setSkimFocusMode(false); setStudyMap(null); setStudyMapModuleCount(null); setLayeredReadingState(null); setSkimStage('diagnosis'); setQuizData(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
+        setExplanations({}); setChatCache({}); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('deep'); setLayeredReadingState(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
+        // 全新文件：略读回到单段空白。
+        const blankSkimSession = createEmptySkimSession();
+        setSkimSessions([blankSkimSession]); setActiveSkimIndex(0); activeIdRef.current = blankSkimSession.id;
       }
+      // 后台诊断只写「本次打开时的那一段」（restore 段或空白段），按 id 锁定，绝不串到别段。
+      const diagTargetSkimId = activeIdRef.current;
       if (!stateToRestore?.studyMap) {
         setIsStudyMapLoading(true); const diagnosisContent = rawPdfData || fullText;
         // #region agent log
@@ -724,7 +820,7 @@ const App: React.FC = () => {
         Promise.race([diagnosisPromise, timeoutPromise])
           .then(([map, type]) => {
             _debugLog('App.tsx:processFile', 'after Promise.all diagnosis', { hasMap: !!map });
-            if (map) { setStudyMap(map); setStudyMapModuleCount(4); }
+            if (map) setSkimSessions(prev => prev.map(s => (s.id === diagTargetSkimId ? { ...s, studyMap: map, studyMapModuleCount: 4 } : s)));
             if (!existingRecord && !restoreData) setDocType(type);
           })
           .catch(() => {})
@@ -1876,13 +1972,26 @@ const App: React.FC = () => {
   };
 
   const handleRegenerateStudyMap = async (moduleCount: number, contentOverride?: string) => {
+    // 写进「发起重算的那一段」（按 id 锁定，多段并存各自重算不互相覆盖，见 RECON Q5）。
+    const targetSkimId = activeIdRef.current;
     // 方案 A：设了页码范围时，地图也只覆盖选中页（contentOverride 优先），否则回退整本
     const content = contentOverride || pdfDataUrl || fullPdfText;
     if (!content) return null;
     const map = await performPreFlightDiagnosis(content, { moduleCount });
-    if (map) { setStudyMap(map); setStudyMapModuleCount(moduleCount); }
+    if (map) setSkimSessions(prev => prev.map(s => (s.id === targetSkimId ? { ...s, studyMap: map, studyMapModuleCount: moduleCount } : s)));
     return map; // 返回新 map，供 SkimPanel 直接用，绕开 setState 后的旧闭包
   };
+
+  /** 新建一段空白略读会话并切过去；满 10 段或生成中则忽略（按钮亦已禁用，此处双保险）。
+   *  方案 A：新建段 **不跑诊断开场**（skipDiagnosis=true），建出来即 studyMap=null、直接进配置区；
+   *  studyMap 留到用户在配置区点「开始领读」时按所选页码范围 + 模块数生成（复用 onRegenerateStudyMap）。 */
+  const handleAddSkimSession = useCallback(() => {
+    if (skimActiveLoading || skimSessions.length >= MAX_SKIM_SESSIONS) return;
+    const newSession: SkimSession = { ...createEmptySkimSession(), skipDiagnosis: true };
+    const newIndex = skimSessions.length;
+    setSkimSessions(prev => (prev.length >= MAX_SKIM_SESSIONS ? prev : [...prev, newSession]));
+    setActiveSkimIndex(newIndex);
+  }, [skimActiveLoading, skimSessions.length]);
 
   const handleRetryExplanation = useCallback(() => { 
       if (!slides.length || !slides[currentIndex]) return;
@@ -2092,29 +2201,82 @@ const App: React.FC = () => {
       transcriptLive={transcriptLive}
     />
   ) : viewMode === 'skim' ? (
-    <SkimPanel 
-      studyMap={studyMap} 
-      isLoading={isStudyMapLoading} 
-      onSwitchToDeep={() => setViewMode('deep')} 
-      fullText={fullPdfText}
-      pdfDataUrl={pdfDataUrl} 
-      messages={skimMessages}
-      setMessages={setSkimMessages}
-      topHeight={skimTopHeight}
-      setTopHeight={setSkimTopHeight}
-      focusMode={skimFocusMode}
-      setFocusMode={setSkimFocusMode}
-      stage={skimStage}
-      setStage={setSkimStage}
-      quizData={quizData}
-      setQuizData={setQuizData}
-      docType={docType}
-      onToggleDocType={() => setDocType(prev => prev === 'STEM' ? 'HUMANITIES' : 'STEM')}
-      onNotebookAdd={handleAddNote}
-      onRegenerateStudyMap={handleRegenerateStudyMap}
-      studyMapModuleCount={studyMapModuleCount}
-      totalPages={slides.length}
-    />
+    // 标签栏 + SkimPanel 同框：SkimPanel 始终挂载，切换标签只换喂进去的「激活会话切片」，绝不卸载重挂。
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-stone-100 bg-white shrink-0 overflow-x-auto custom-scrollbar">
+        {skimSessions.map((s, i) => (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => { if (!skimActiveLoading && i !== activeSkimIndex) setActiveSkimIndex(i); }}
+            disabled={skimActiveLoading}
+            title={skimActiveLoading ? '生成中，请等转圈结束再切换' : `略读 ${i + 1}`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
+              i === activeSkimIndex
+                ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                : 'bg-stone-50 text-stone-500 border-transparent hover:bg-stone-100'
+            } ${skimActiveLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            略读 {i + 1}
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={handleAddSkimSession}
+          disabled={skimActiveLoading || skimSessions.length >= MAX_SKIM_SESSIONS}
+          title={
+            skimSessions.length >= MAX_SKIM_SESSIONS
+              ? `最多 ${MAX_SKIM_SESSIONS} 段`
+              : skimActiveLoading
+                ? '生成中，请等转圈结束再新建'
+                : '新建一段空白略读'
+          }
+          className={`shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
+            skimActiveLoading || skimSessions.length >= MAX_SKIM_SESSIONS
+              ? 'bg-stone-50 text-stone-300 border-transparent cursor-not-allowed'
+              : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'
+          }`}
+          aria-label="新建略读会话"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
+      <div className="flex-1 min-h-0">
+        <SkimPanel
+          studyMap={studyMap}
+          isLoading={isStudyMapLoading}
+          onSwitchToDeep={() => setViewMode('deep')}
+          fullText={fullPdfText}
+          pdfDataUrl={pdfDataUrl}
+          messages={skimMessages}
+          setMessages={setSkimMessages}
+          topHeight={skimTopHeight}
+          setTopHeight={setSkimTopHeight}
+          focusMode={skimFocusMode}
+          setFocusMode={setSkimFocusMode}
+          stage={skimStage}
+          setStage={setSkimStage}
+          quizData={quizData}
+          setQuizData={setQuizData}
+          docType={docType}
+          onToggleDocType={() => setDocType(prev => prev === 'STEM' ? 'HUMANITIES' : 'STEM')}
+          onNotebookAdd={handleAddNote}
+          onRegenerateStudyMap={handleRegenerateStudyMap}
+          studyMapModuleCount={studyMapModuleCount}
+          totalPages={slides.length}
+          moduleCount={activeSkim.moduleCount}
+          setModuleCount={setSkimModuleCount}
+          skimPace={activeSkim.skimPace}
+          setSkimPace={setSkimPaceValue}
+          pageRangeStart={activeSkim.pageRangeStart}
+          setPageRangeStart={setSkimPageRangeStart}
+          pageRangeEnd={activeSkim.pageRangeEnd}
+          setPageRangeEnd={setSkimPageRangeEnd}
+          onLoadingChange={setSkimActiveLoading}
+          skipDiagnosis={activeSkim.skipDiagnosis}
+        />
+      </div>
+    </div>
   ) : viewMode === 'layered' ? (
     <LayeredReadingPanel
       fullText={fullPdfText}

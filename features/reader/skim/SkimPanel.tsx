@@ -51,6 +51,21 @@ interface SkimPanelProps {
   studyMapModuleCount?: number | null;
   /** 文档总页数（= slides.length），用于页码范围上限校验；拿不到时不做上限校验 */
   totalPages?: number;
+
+  // 略读多会话（阶段一）：原 SkimPanel 内部态（模块数/节奏/页码范围）提升到 App 的「激活会话」，按 props 喂入，
+  // 这样切换标签时 SkimPanel 不卸载、各段也各记各的。
+  moduleCount: number;
+  setModuleCount: (count: number) => void;
+  skimPace: 'module' | 'part';
+  setSkimPace: (pace: 'module' | 'part') => void;
+  pageRangeStart: number | null;
+  setPageRangeStart: (v: number | null) => void;
+  pageRangeEnd: number | null;
+  setPageRangeEnd: (v: number | null) => void;
+  /** 内部 isChatLoading 上抛给 App，让标签栏在「生成中」锁住切换 + 新建 */
+  onLoadingChange?: (loading: boolean) => void;
+  /** 方案 A：true = 本段为「+」新建段，跳过诊断开场，studyMap=null 时也直接显示配置区 */
+  skipDiagnosis?: boolean;
 }
 
 /** 略读「页码范围」校验：返回错误文案，无错返回 null（含「全本」即两端皆空的情况） */
@@ -224,21 +239,27 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   onRegenerateStudyMap,
   studyMapModuleCount = null,
   totalPages,
+  // 略读多会话（阶段一）：以下原内部态改为受控 props。别名回旧内部名，使既有用法零改动。
+  moduleCount: selectedModuleCount,
+  setModuleCount: setSelectedModuleCount,
+  skimPace,
+  setSkimPace,
+  pageRangeStart,
+  setPageRangeStart,
+  pageRangeEnd,
+  setPageRangeEnd,
+  onLoadingChange,
+  skipDiagnosis = false,
 }) => {
   const [input, setInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [localPrereqs, setLocalPrereqs] = useState<Prerequisite[]>([]);
-  
+
   // Quiz State
   const [quizSelectedOption, setQuizSelectedOption] = useState<number | null>(null);
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [isRegeneratingMap, setIsRegeneratingMap] = useState(false);
   const [showGranularityModal, setShowGranularityModal] = useState(false);
-  const [selectedModuleCount, setSelectedModuleCount] = useState<number>(4);
-  const [skimPace, setSkimPace] = useState<'module' | 'part'>('module');
-  // 页码范围（1-based，含两端）：null/null = 全本；不持久化，与 selectedModuleCount/skimPace 同待遇
-  const [pageRangeStart, setPageRangeStart] = useState<number | null>(null);
-  const [pageRangeEnd, setPageRangeEnd] = useState<number | null>(null);
   const MODULE_OPTIONS = [2, 3, 4, 5, 6, 7];
   const pageRangeError = getPageRangeError(pageRangeStart, pageRangeEnd, totalPages);
 
@@ -288,6 +309,13 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [messages, isChatLoading]);
+
+  // 把「生成中」上抛给 App：标签栏据此锁切换 + 新建（阶段一并发策略）。
+  // 含 isRegeneratingMap：因「开始领读」会先重算地图(数秒)再发首条消息，这段窗口若被切走，
+  // 后续 setStage/setMessages 会落到切换后的会话 → 串台。一并锁住才真正「切换不串台」。
+  useEffect(() => {
+    onLoadingChange?.(isChatLoading || isRegeneratingMap);
+  }, [isChatLoading, isRegeneratingMap, onLoadingChange]);
 
   useEffect(() => {
     return () => {
@@ -814,7 +842,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                         stage === 'tutoring' ? 'bg-rose-50 text-rose-600' :
                         stage === 'quiz' ? 'bg-violet-50 text-violet-600' : 'bg-emerald-50 text-emerald-600'
                       }`}>
-                          {stage === 'diagnosis' && "全书扫描中..."}
+                          {stage === 'diagnosis' && (skipDiagnosis && !studyMap ? "待配置" : "全书扫描中...")}
                           {stage === 'tutoring' && "AI 补习中"}
                           {stage === 'quiz' && "知识点确认"}
                           {stage === 'reading' && "正在领读"}
@@ -841,6 +869,76 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         </div>
         
         <div className="p-6 space-y-6 flex-1">
+            {/* STAGE: DIAGNOSIS — 方案 A：新建段（skipDiagnosis 且尚无 studyMap）跳过诊断，直接进配置区。
+                map 留到点「开始领读」时由 handleStartWithModuleCount→onRegenerateStudyMap 按所选范围生成。 */}
+            {stage === 'diagnosis' && !studyMap && skipDiagnosis && onRegenerateStudyMap && (
+                <div className="animate-in fade-in slide-in-from-top-4 duration-500">
+                    <div className="bg-white rounded-2xl border border-stone-100 p-5 shadow-sm space-y-4">
+                        <div className="flex items-start space-x-3">
+                            <Rocket className="w-5 h-5 text-indigo-400 mt-0.5" />
+                            <div>
+                                <p className="text-sm font-bold text-slate-700">配置这段略读</p>
+                                <p className="text-xs text-slate-400 mt-0.5">选模块数、节奏与页码范围，点「开始领读」即按所选范围生成本段学习地图并开始。</p>
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            <label className="text-xs text-stone-500 mb-1">用几个模块解读本文（2～7）</label>
+                            <select
+                                value={selectedModuleCount}
+                                onChange={(e) => setSelectedModuleCount(Number(e.target.value))}
+                                className="w-full py-2.5 rounded-xl border-2 border-stone-200 focus:border-indigo-300 px-4 text-slate-700 text-sm font-medium bg-white"
+                            >
+                                {MODULE_OPTIONS.map((n) => (
+                                    <option key={n} value={n}>{n} 个模块</option>
+                                ))}
+                            </select>
+                            <div className="flex flex-col gap-2">
+                                <label className="text-xs text-stone-500">节奏</label>
+                                <div className="flex gap-4">
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="skim-pace-fresh"
+                                            value="module"
+                                            checked={skimPace === 'module'}
+                                            onChange={() => setSkimPace('module')}
+                                            className="accent-indigo-600"
+                                        />
+                                        <span className="text-sm text-slate-700">一次一个 module</span>
+                                    </label>
+                                    <label className="flex items-center gap-2 cursor-pointer">
+                                        <input
+                                            type="radio"
+                                            name="skim-pace-fresh"
+                                            value="part"
+                                            checked={skimPace === 'part'}
+                                            onChange={() => setSkimPace('part')}
+                                            className="accent-indigo-600"
+                                        />
+                                        <span className="text-sm text-slate-700">一次一个 part</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <PageRangeInput
+                                start={pageRangeStart}
+                                end={pageRangeEnd}
+                                onStartChange={setPageRangeStart}
+                                onEndChange={setPageRangeEnd}
+                                totalPages={totalPages}
+                                idPrefix="skim-fresh"
+                            />
+                            <button
+                                onClick={handleStartWithModuleCount}
+                                disabled={!!pageRangeError}
+                                className="w-full py-3 mt-1 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                开始领读
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* STAGE: DIAGNOSIS (Checklist) */}
             {stage === 'diagnosis' && studyMap && (
                 <div className="animate-in fade-in slide-in-from-top-4 duration-500">
