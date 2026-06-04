@@ -542,3 +542,55 @@ aff6f3e 迁移到 Windows，准备开始屎山重构
 本文档应在每次重大进度后更新。
 当前阶段：P2 阶段 3 + 阶段 4 主体全部完工（utils/ 已清空、components/ 仅余 galgame 2 文件），待用户验证 + commit。
 ================================================================
+
+## 略读功能演进（页码范围 + 多会话）—— 关键架构与踩坑记录
+
+### 1. 页码范围裁剪：studyMap 双轨陷阱（必读）
+略读支持「只读第 X–Y 页」，走 PDF 原件路：用 pdf-lib 把选中页抽成小 PDF
+（`extractPdfPageRange`，在 `lib/pdf/pdfUtils.ts`），替代整本喂给 AI。
+
+**核心教训 —— 裁剪内容必须同时贯通两条线，缺一条就自相矛盾：**
+- 「领读对话」：`startFormalReading` 把裁剪后的小 PDF 作 `contentOverride` 喂给 AI。
+- 「study map 重算」：`onRegenerateStudyMap(moduleCount, contentOverride)` 也必须收到裁剪内容
+  （`handleRegenerateStudyMap` 在 App.tsx，content 优先用 contentOverride，否则回退整本）。
+- 早期 bug：只接了「领读对话」一条，study map 仍按整本/旧 module 数生成，又被当作
+  「【必须一致】以学习地图为准」硬注入 prompt，**压过了 moduleCount 和裁剪内容** →
+  表现为「填了页码和模块数全被无视」。
+- 另一坑：`startFormalReading` 早期读的是 `setState` 之前的旧闭包 studyMap。修法是
+  `onRegenerateStudyMap` 返回新 map，由调用方显式传入 `startFormalReading(contentOverride, freshMap)`，
+  不依赖闭包。
+- 调用点对齐提醒：`startFormalReading` 第一参改为 contentOverride 后，
+  `onClick={startFormalReading}` 必须包成 `onClick={() => startFormalReading()}`，
+  否则 MouseEvent 会被当裁剪内容传进去。
+
+### 2. 略读多会话（一文件多段并存 + 切换 + 云同步）
+三阶段落地：阶段一纯内存（列表+激活索引+标签栏+按id隔离），方案A（新建段跳过诊断直进配置区），
+阶段二本地 IndexedDB 多段持久化 + 旧数据迁移，阶段三云端 Firestore 多段同步 + 云端旧数据迁移。
+
+**数据模型：** 原「一文件=一份略读状态」（4 个散落 App 单值 studyMap/skimMessages/skimStage/quizData）
+改为「一文件=SkimSession 列表 + activeSkimIndex」。SkimSession 把原 SkimPanel 内部态
+（moduleCount/skimPace/pageRange）也提升进来，做到每段真正独立。SkimPanel 始终挂载、props 形状不变，
+App 派生激活切片 + 包装 setter（按 `activeIdRef.current` 的 id 定位更新，**不靠 activeSkimIndex 闭包**——
+这是防异步回包写错段的命门）。
+
+**「读旧不毁旧」迁移机制（动持久化前必读）：**
+- 本地与云端**复用同一套判断** `isUntouchedSkimMigration()`（migratedSkimBaselineRef）——
+  绝不可本地一套云端一套，否则判断漂移会打架。
+- 读到旧格式（无 skimSessions 字段）时：在内存包成「略读1」单段并打 baseline 标记，
+  **不立刻改写硬盘/云端旧记录**；只有用户真改动（新增/修改段，导致 skimSessions 引用变化）后，
+  才以新格式完整落盘。光浏览不操作 → 旧数据原封不动。
+- **恢复优先级（直接关系到一个已修复的覆盖 bug）：** 恢复时一律「有 skimSessions 就读多段，
+  完全没有才回退到旧扁平字段包成单段」。本地/云端恢复都汇入同一个 `processFile` restore 分流，
+  不要另写恢复逻辑。早期 bug：云端恢复仍走单段逻辑，用「上次激活段」覆盖整个列表（略读2顶替略读1）—
+  根因就是云端没走统一分流 + 没带 skimSessions。
+- 无 schema version 字段，新旧只能靠「skimSessions 字段是否存在」区分。旧扁平字段
+  （skimMessages/studyMap/skimStage/quizData/skimTopHeight/skimFocusMode）在 FilePersistedState 和
+  CloudSession 里都**保留不删**，作旧格式兼容。
+
+**冲突策略：** 多设备走「后写覆盖」（整包覆盖，未做按段合并）——单人使用、不同时多设备改同一本书即安全。
+
+### 3. 已知风险（未处理，记录在案）
+**Firestore 单文档 1MB 上限：** 多段略读把每段的 messages + studyMap 都塞进同一个
+`sessions/{id}/data/main` heavy 文档，多段重度阅读有撑爆 1MB 风险（单段时代已存在，多段放大）。
+当前按策略 A 整包写、未做分片。**症状预警：** 某本书保存报错 / 云同步失败时，优先怀疑此上限。
+未来若需根治 → 云端按段分片存储（动云端结构的大改，届时单独立项）。
