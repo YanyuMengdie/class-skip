@@ -190,6 +190,12 @@ const App: React.FC = () => {
   const setSkimPaceValue = useCallback((pace: 'module' | 'part') => updateActiveSkimSession(s => ({ ...s, skimPace: pace })), [updateActiveSkimSession]);
   const setSkimPageRangeStart = useCallback((v: number | null) => updateActiveSkimSession(s => ({ ...s, pageRangeStart: v })), [updateActiveSkimSession]);
   const setSkimPageRangeEnd = useCallback((v: number | null) => updateActiveSkimSession(s => ({ ...s, pageRangeEnd: v })), [updateActiveSkimSession]);
+  /** 「读旧不毁旧」抑制判断（阶段二/三）：本地 + 云端两条保存 effect **共用这一套**，避免漂移。
+   *  仍是迁移产出的同一份内存列表（用户没动过略读）⇒ 不写新格式 skimSessions，只续写旧扁平字段。 */
+  const isUntouchedSkimMigration = useCallback(
+    () => migratedSkimBaselineRef.current !== null && skimSessions === migratedSkimBaselineRef.current,
+    [skimSessions]
+  );
   const [viewMode, setViewMode] = useState<ViewMode>('deep');
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileHash, setFileHash] = useState<string | null>(null);
@@ -697,7 +703,7 @@ const App: React.FC = () => {
     const saveTimeout = setTimeout(async () => {
       try {
         // 「读旧不毁旧」：仍是迁移产出的同一份内存列表（用户没动过略读）⇒ 这次不写新格式，只续写旧扁平字段。
-        const isUntouchedMigration = migratedSkimBaselineRef.current !== null && skimSessions === migratedSkimBaselineRef.current;
+        const isUntouchedMigration = isUntouchedSkimMigration();
         const item: FileHistoryItem = {
           hash: fileHash,
           name: fileName,
@@ -739,17 +745,20 @@ const App: React.FC = () => {
       } catch (e) { console.warn('Auto-save failed:', e); }
     }, 2000);
     return () => clearTimeout(saveTimeout);
-  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, layeredReadingState, lsapContentMap, lsapState, examSummaryContentKey]);
+  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, layeredReadingState, lsapContentMap, lsapState, examSummaryContentKey]);
 
   useEffect(() => {
     if (!currentSessionId || !user) return;
     const cloudSaveTimeout = setTimeout(() => {
       updateCloudSessionState(currentSessionId, {
+        // 阶段三：把完整 skimSessions + activeSkimIndex 一并写云端（整包覆盖，冲突走「后写覆盖」策略 A）。
+        // 「读旧不毁旧」复用本地同一套抑制：迁移未触碰前不写新字段、只续写旧扁平字段，不改写云端旧记录。
+        ...(isUntouchedSkimMigration() ? {} : { skimSessions, activeSkimIndex }),
         explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, layeredReadingState: layeredReadingState ? JSON.parse(JSON.stringify(layeredReadingState)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
       });
     }, 3000);
     return () => clearTimeout(cloudSaveTimeout);
-  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, layeredReadingState, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
+  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, layeredReadingState, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
 
 
   const addArtifact = useCallback((artifact: SavedArtifact) => {
@@ -926,6 +935,9 @@ const App: React.FC = () => {
         layeredReadingState: fullData.layeredReadingState,
         skimStage: fullData.skimStage,
         quizData: fullData.quizData,
+        // 阶段三：带上云端多会话列表 + 激活索引，交给 processFile 统一分流（有 ⇒ 多段；无 ⇒ 旧格式迁移成单段并打 baseline）。
+        skimSessions: fullData.skimSessions,
+        activeSkimIndex: fullData.activeSkimIndex,
         docType: fullData.docType,
         skimTopHeight: fullData.skimTopHeight,
         skimFocusMode: fullData.skimFocusMode,

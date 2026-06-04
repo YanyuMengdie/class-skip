@@ -287,3 +287,70 @@ setSkimSessions([restoredSkimSession]); setActiveSkimIndex(0); activeIdRef.curre
 
 ## 完成后
 - **未 commit、未做任何 git 操作**，等你测试通过后手动 commit。
+
+---
+
+# 阶段三 · 云端 Firestore 支持多段 + 云端旧数据迁移
+
+> 把阶段二在本地做成的「多段持久化 + 读旧不毁旧 + 恢复优先级」在云端 Firestore 完整对齐。
+> 冲突策略 **A：后写覆盖（整包覆盖式）**，不做按段合并。`npx tsc --noEmit` 维持基线 **10**，零新增。
+> **未 commit**（git 全由你手动）。
+
+## 修的 bug（阶段二排查结论）
+登录状态刷新 / 从云端打开 → 云端恢复仍走单段逻辑 → 用上次激活段（略读2）包成单段覆盖列表
+（略读2 顶替略读1）。根因：云保存只写激活段扁平字段、不写 skimSessions；云恢复 restoreData 不带 skimSessions。
+
+## 开工前的只读确认（与 RECON 一致，无需停下报告）
+- **两条恢复路汇入同一处**：`handleRestoreCloudSession`（App.tsx:909）组装 `restoreData` 后
+  `await processFile(file, restoreData, ...)`（App.tsx:943）——云端恢复**完全走** processFile 的统一 restore 分流，
+  没有绕过。其它云恢复入口（navigateToSegment、备考流）也都调 `handleRestoreCloudSession`，同样汇入。
+- **firebase.ts 分流无需改**：`updateCloudSessionState` 用 `splitUpdateData` 按 `META_KEYS` 分流，
+  `skimSessions`/`activeSkimIndex` 非 META_KEY → 自动落 heavy `data/main`；`updateDoc` 按字段 merge、
+  数组字段整体替换 → 正好是策略 A 的「整包覆盖」。**未改 splitUpdateData / META_KEYS。**
+
+## 改了哪些文件（仍只 types.ts + App.tsx + firebase.ts 的数据初值）
+
+| 文件 | 改动 |
+|---|---|
+| `types.ts` | `CloudSession` 新增可选 `skimSessions?: PersistedSkimSession[]` + `activeSkimIndex?`（**复用**阶段二的 `PersistedSkimSession`，未重定义）。旧扁平云字段保留不删。 |
+| `App.tsx` | 云保存 effect 写入完整 `skimSessions + activeSkimIndex`（带抑制）；`handleRestoreCloudSession` 的 `restoreData` 带上 `skimSessions/activeSkimIndex`；新增**共享**抑制判断 `isUntouchedSkimMigration()`，本地 + 云端两条 effect 共用。 |
+| `firebase.ts` | 仅 `createCloudSession` 的 heavy 初值加 `skimSessions: []`（数据初值，非分流逻辑）。 |
+
+## 「读旧不毁旧」如何复用阶段二同一套判断（关键）
+- 把阶段二内联在本地 effect 的抑制条件抽成**唯一**一处：
+  `const isUntouchedSkimMigration = useCallback(() => migratedSkimBaselineRef.current !== null && skimSessions === migratedSkimBaselineRef.current, [skimSessions])`。
+- **本地 effect 改为调用它**（替换原内联表达式），**云端 effect 也调用同一个**——本地 / 云端绝不会有两套判断、不会漂移。
+- 语义不变：迁移恢复后用户未触碰（skimSessions 仍是迁移列表那个引用）⇒ 两条 effect 都**只写旧扁平字段、
+  不写 skimSessions**，云端旧记录原样不动；用户一改（引用变化）⇒ 两条都以新格式写完整列表。
+
+## 本地 / 云端汇入同一 processFile 分流（迁移统一）
+- 云端恢复把 `skimSessions/activeSkimIndex` 放进 restoreData 后交给 processFile，与本地恢复**走同一分支**：
+  - 有 skimSessions（云新格式）→ 直接恢复多段 + 激活索引（越界回 0）；
+  - 无 skimSessions（云旧格式）→ 扁平字段包成「略读1」单段，并 `migratedSkimBaselineRef.current = migratedList`
+    打迁移标记 → 「读旧不毁旧」对**云端旧数据**同样生效。
+- 文件级后台诊断门槛 `!skimSessions && !studyMap` 同样适用于云恢复（云新格式各段自带 map/skipDiagnosis，不再被覆盖）。
+
+## createCloudSession 初值取舍
+- 选**加 `skimSessions: []`**（与既有 `skimMessages: []` 对称、显式）。读取端 `skimSessions && length > 0`
+  把 `[]` 与「缺失」同等当作「无多段」→ 全新 session 走旧格式 / 空白单段分支，**不会**因空数组误判出多段。
+- `activeSkimIndex` 不加初值：旧格式分支本就用 0、不读它，加了反而冗余。
+
+## 岔路 / 决策 / 已知风险
+1. **冲突走策略 A（后写覆盖）**：云保存把当前完整 skimSessions 整体写 heavy，`updateDoc` 整体替换数组字段，
+   后保存设备覆盖先前——符合用户单人多设备、不并发改同一本书的前提。未做按段合并。
+2. **未改 firebase.ts 分流**：已确认 skimSessions 自动落 heavy，无需碰 splitUpdateData / META_KEYS（符合「若需改则停下报告」——结论是不需改）。
+3. **未发现云恢复绕过 processFile**：所有云恢复入口最终汇入 `handleRestoreCloudSession → processFile`，无单独恢复逻辑。
+4. **已知风险（未处理，记录在案）**：Firestore 单文档 1MB 上限。多段把每段的 messages + studyMap 都塞进同一
+   heavy `data/main`，重度阅读多段时**有超 1MB 风险**（单段时代每会话也有同类风险，只是多段放大）。本阶段按
+   策略 A 整包写、未做分片 / 按段子文档。**若你担心，可作为后续阶段单独处理**——此处不擅自改结构。
+
+## 阶段三自测（请逐条跑，重点：云端迁移别毁云端历史 + 修好覆盖 bug）
+1. **修复验证**：登录，从云端打开一本书 → 建略读2读几句 → 刷新 → 略读1、略读2 都在、各自内容正确，略读2 不再覆盖略读1。✅
+2. **云端旧数据迁移（最关键）**：登录，从云端打开一本**阶段三之前就在云上、旧格式**的书 → 作为「略读1」正常恢复，云端历史对话/进度都在，不报错不空白不错乱。
+3. **读旧不毁旧（云端版）**：接第 2 条，旧书恢复后**先别操作** → 切走 / 刷新再开 → 云端旧数据仍完好；再加一段新略读读几句 → 刷新 → 云端已存为多段（新格式）。
+4. **跨设备（条件允许）**：A 设备建多段保存 → B 设备（或清本地缓存后重登）打开同一本 → 看到完整多段（验证云端确实存了多段并能取回）。
+5. **回归**：单段不串 / 锁切换 / 新建段跳诊断 / 上限 10 / 本地持久化（阶段一/二）全不受影响。
+6. `npx tsc --noEmit` 维持基线 10，无新增（已核对：新增 0）。
+
+## 完成后
+- **未 commit、未做任何 git 操作**，等你测试通过后手动 commit。

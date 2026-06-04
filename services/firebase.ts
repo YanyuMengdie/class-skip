@@ -224,6 +224,8 @@ export const createCloudSession = async (user: User, fileName: string, fileUrl: 
       notebookData: {},
       pageComments: {},
       skimMessages: [],
+      // 阶段三：略读多会话列表初值（空数组；读取端把 [] 与缺失同等当作「无多段」→ 走旧格式 / 空白单段）
+      skimSessions: [],
       viewMode: 'deep',
       docType: 'STEM',
       currentIndex: 0,

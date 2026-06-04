@@ -676,6 +676,11 @@ export interface CloudSession {
   layeredReadingState?: LayeredReadingState | null;
   skimStage?: SkimStage;
   quizData?: QuizData | null;
+  /** 阶段三：略读多会话列表（云端 heavy 文档）。存在 ⇒ 新格式；不存在 ⇒ 旧格式（用扁平字段迁移成单段）。
+   *  上面的 skimMessages/studyMap/skimStage/quizData/skimTopHeight/skimFocusMode 旧扁平字段保留不删，作旧格式兼容。 */
+  skimSessions?: PersistedSkimSession[];
+  /** 阶段三：略读激活段索引（云端） */
+  activeSkimIndex?: number;
   docType?: DocType;
   skimTopHeight?: number;
   /** 略读「专注模式」:与 FilePersistedState.skimFocusMode 同步 */
