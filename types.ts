@@ -575,6 +575,27 @@ export interface LectureRecord {
 }
 
 // --- PERSISTENCE TYPES ---
+
+/**
+ * 略读「一段会话」的本地持久化形态（阶段二新增，仅本地 IndexedDB；云端 CloudSession 不动）。
+ * 与 App 运行时的 SkimSession 同形——独立列出，避免持久化层耦合 App 内部类型。
+ */
+export interface PersistedSkimSession {
+  id: string;
+  studyMap: StudyMap | null;
+  messages: ChatMessage[];
+  stage: SkimStage;
+  quizData: QuizData | null;
+  moduleCount: number;
+  skimPace: 'module' | 'part';
+  pageRangeStart: number | null;
+  pageRangeEnd: number | null;
+  studyMapModuleCount: number | null;
+  topHeight: number;
+  focusMode: boolean;
+  skipDiagnosis: boolean;
+}
+
 export interface FilePersistedState {
   explanations: ExplanationCache;
   chatCache: ChatCache;
@@ -591,6 +612,11 @@ export interface FilePersistedState {
   layeredReadingState?: LayeredReadingState | null;
   skimStage?: SkimStage;
   quizData?: QuizData | null;
+  /** 阶段二：略读多会话列表（本地持久化）。字段存在 ⇒ 新格式；不存在 ⇒ 旧格式（用上面扁平字段迁移成单段）。
+   *  上面的 skimMessages/studyMap/skimStage/quizData/skimTopHeight/skimFocusMode 旧扁平字段保留不删，作旧格式兼容。 */
+  skimSessions?: PersistedSkimSession[];
+  /** 阶段二：略读激活段索引 */
+  activeSkimIndex?: number;
   docType?: DocType;
   galgameBackgroundUrl?: string | null;
   /** 复习：多轮测验（继续出题不重复） */

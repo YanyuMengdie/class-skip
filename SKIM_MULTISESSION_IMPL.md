@@ -210,5 +210,80 @@ setSkimSessions([restoredSkimSession]); setActiveSkimIndex(0); activeIdRef.curre
 5. 略读 2 点开始领读、正在生成地图 / 回复时 → 标签切换 + 「+」锁住（阶段一回归）。
 6. `npx tsc --noEmit` 维持基线 10，无新增（已核对：新增 0）。
 
+---
+
+# 阶段二 · 本地 IndexedDB 持久化 + 老数据迁移（不碰云）
+
+> 在阶段一 + 方案 A 基础上的增量。**只动本地**：`types.ts`(FilePersistedState) + `App.tsx`(本地保存
+> effect / processFile 恢复)。**云端一律未动**（firebase.ts / 云保存 effect / createCloudSession /
+> 云读取都没碰）。`npx tsc --noEmit` 维持基线 **10**，零新增。**未 commit**（git 全由你手动）。
+
+## 目标
+1. 「略读会话列表 + 激活索引」持久化到本地 IndexedDB → 刷新 / 重开文件后多段都在、激活段恢复。
+2. 老数据迁移：以前读过的书（旧「单段扁平」格式）打开时，自动当作「列表里的略读 1」恢复，历史不丢。
+3. **云端仍是单段行为，是预期**（多段只落本地；云留给阶段三）。
+
+## 改了哪些文件
+
+| 文件 | 改动 |
+|---|---|
+| `types.ts` | 新增 `PersistedSkimSession`；`FilePersistedState` 新增可选 `skimSessions?` + `activeSkimIndex?`。**旧扁平字段全部保留不删**（旧格式兼容）。**CloudSession 未动。** |
+| `App.tsx` | 本地保存 effect 额外写 `skimSessions` + `activeSkimIndex`（迁移未触碰前抑制不写，见下）；`processFile` 恢复块按「skimSessions 是否存在」分新 / 旧格式；新增 `migratedSkimBaselineRef`；文件级诊断对新格式不再触发。 |
+
+## 持久化字段（types.ts，仅本地）
+- `PersistedSkimSession`：与运行时 `SkimSession` 同形（id / studyMap / messages / stage / quizData /
+  moduleCount / skimPace / pageRange* / studyMapModuleCount / topHeight / focusMode / skipDiagnosis）。
+- `FilePersistedState` 加 `skimSessions?: PersistedSkimSession[]` + `activeSkimIndex?: number`。
+  **旧扁平字段（skimMessages/studyMap/skimStage/quizData/skimTopHeight/skimFocusMode）保留**——
+  既作旧记录兼容，也在新格式记录里继续写「激活段」的值，万一回退旧代码仍能读到激活段（RECON Q4）。
+
+## 写入（本地保存 effect）
+- 在 `state:{...}` 里**额外**写 `...(isUntouchedMigration ? {} : { skimSessions, activeSkimIndex })`；
+  扁平字段照常写「激活段」值。防抖 2s、key=fileHash 不变。云保存 effect **未碰**。
+
+## 读取 / 恢复 + 迁移（processFile 恢复块，本地唯一汇聚点）
+- **新格式**（`stateToRestore.skimSessions` 存在且非空）→ `setSkimSessions(列表)` + `setActiveSkimIndex(越界回 0)`；
+  每段用 `{ ...createEmptySkimSession(), ...s }` 兜底，兼容未来字段。
+- **旧格式**（无 skimSessions、但有扁平 skimMessages/studyMap…）→ 用扁平字段在内存里包成
+  `[{ ...createEmptySkimSession(), studyMap, messages, stage, quizData, topHeight, focusMode }]`，单段、激活 0。
+  迁移段 `studyMapModuleCount` 保持 null（旧数据没存过 module 数，RECON Q4，不强行还原）。
+- 区分新旧只靠「skimSessions 字段是否存在」（无 version 字段，RECON Q4）。
+- 文件级后台诊断门槛从 `!studyMap` 改为 `!skimSessions && !studyMap`——新格式各段自带 map / skipDiagnosis，
+  不再被文件级诊断覆盖。
+
+## 「读旧不毁旧」具体怎么实现（最重要的安全点）
+痛点：本地保存 effect 在**任何**打开后约 2s 都会触发——若不拦，光是打开一本旧书就会立刻把它改写成新格式，
+违反「不立刻覆盖旧记录」。
+
+做法——**引用相等抑制**（`migratedSkimBaselineRef`）：
+- 迁移旧格式时，记下那份内存列表的**引用**：`migratedSkimBaselineRef.current = migratedList`。
+- 保存 effect 判断 `isUntouchedMigration = ref.current !== null && skimSessions === ref.current`：
+  为真（state 仍是迁移产出的同一个数组 = 用户没动过略读）⇒ **这次不写 skimSessions/activeSkimIndex**，
+  只续写旧扁平字段 ⇒ 硬盘上的旧记录（略读部分）保持原样、原封不动。
+- 用户一旦改动略读（任何包装 setter 都走 `setSkimSessions(prev => …新数组…)`）⇒ 引用变了 ⇒
+  `isUntouchedMigration` 转假 ⇒ 下次保存即按新格式落盘。
+- 新格式恢复 / 全新文件都把 ref 置 null（不抑制）。
+- **好处**：即便迁移逻辑有 bug，抑制期内根本不写 skimSessions（只写来自旧记录的扁平值，本就正确），
+  原始旧数据零改写；回滚代码即恢复。
+
+## 岔路 / 决策
+1. **抑制用「数组引用相等」而非「深比较 / 脏标记」**：包装 setter 一律产生新数组，引用相等天然区分
+   「迁移原样」与「用户已改」，零额外状态、最省。
+2. **已知小边界（已接受并记录）**：极少数旧记录「有 skimMessages 却无 studyMap」时，打开会触发文件级诊断
+   自动补 map → 列表引用改变 → 会以新格式落盘（非用户操作）。但这类记录本就没有 studyMap 可丢
+   （略读全流程依赖 map，无 map ≈ 没真正略读过），故无损。现实里「之前读过的书」都有 map，走抑制、不改写。
+3. **云端 / handleRestoreCloudSession 未动**：云无 skimSessions，恢复时自然走旧格式迁移成单段——
+   即本阶段「云端仍单段」的预期行为。
+
+## 阶段二自测（请逐条跑，重点：迁移别毁旧数据）
+1. **新功能**：开 PDF，建 2~3 段各填不同页码 / 模块、各读几句 → **刷新 / 重开该文件** → 多段都在、各自独立、激活段恢复。
+2. **老数据迁移（最关键）**：找一本**阶段二之前就读过、本地有旧记录**的书 → 打开 → 作为「略读 1」正常恢复，
+   旧对话 / 进度都在，不报错、不空白、不错乱。
+3. **迁移无损**：迁移恢复后**先别操作**，直接关掉 / 切走 → 重开 → 旧数据仍正常读（验证读旧没毁旧）；
+   再在其上加一段新略读、读几句 → 刷新 → 这本书现在以新格式存了多段。
+4. **回归**：单段不串 / 锁切换 / 新建段跳过诊断 / 上限 10 等阶段一 + 方案 A 行为不受影响。
+5. 云端不验（仍单段，预期）。
+6. `npx tsc --noEmit` 维持基线 10，无新增（已核对：新增 0）。
+
 ## 完成后
-- **未 commit**，等你测试通过后自行 commit。
+- **未 commit、未做任何 git 操作**，等你测试通过后手动 commit。

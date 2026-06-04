@@ -150,6 +150,10 @@ const App: React.FC = () => {
   const [skimActiveLoading, setSkimActiveLoading] = useState(false);
   /** 始终指向当前激活会话 id；所有包装 setter 按此 id 定位，绝不用 activeSkimIndex 闭包，异步回包也只写自己那段 */
   const activeIdRef = useRef<string | null>(null);
+  /** 阶段二「读旧不毁旧」：迁移旧格式时记下那份内存列表的引用。只要 skimSessions 仍是这同一引用
+   *  （= 用户尚未对略读做任何改动），本地保存就**不写新格式 skimSessions**、只续写旧扁平字段，
+   *  从而不覆盖硬盘上的旧记录；一旦任意包装 setter 产生新数组（引用变了），即按新格式落盘。 */
+  const migratedSkimBaselineRef = useRef<SkimSession[] | null>(null);
   // 派生当前激活会话切片：喂给 SkimPanel 的「单份」props 全部从这里取，SkimPanel 的 props 形状保持不变。
   const activeSkim = skimSessions[activeSkimIndex] ?? skimSessions[0];
   activeIdRef.current = activeSkim?.id ?? null;
@@ -692,6 +696,8 @@ const App: React.FC = () => {
     if (!fileHash || !fileName) return;
     const saveTimeout = setTimeout(async () => {
       try {
+        // 「读旧不毁旧」：仍是迁移产出的同一份内存列表（用户没动过略读）⇒ 这次不写新格式，只续写旧扁平字段。
+        const isUntouchedMigration = migratedSkimBaselineRef.current !== null && skimSessions === migratedSkimBaselineRef.current;
         const item: FileHistoryItem = {
           hash: fileHash,
           name: fileName,
@@ -710,6 +716,8 @@ const App: React.FC = () => {
             studyMap,
             skimStage,
             quizData,
+            // 阶段二：新格式多会话列表 + 激活索引。迁移未触碰前不写（保护旧记录）。
+            ...(isUntouchedMigration ? {} : { skimSessions, activeSkimIndex }),
             docType,
             galgameBackgroundUrl: customBackgroundUrl,
             customAvatarUrl: customAvatarUrl,
@@ -731,7 +739,7 @@ const App: React.FC = () => {
       } catch (e) { console.warn('Auto-save failed:', e); }
     }, 2000);
     return () => clearTimeout(saveTimeout);
-  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, layeredReadingState, lsapContentMap, lsapState, examSummaryContentKey]);
+  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, layeredReadingState, lsapContentMap, lsapState, examSummaryContentKey]);
 
   useEffect(() => {
     if (!currentSessionId || !user) return;
@@ -782,17 +790,30 @@ const App: React.FC = () => {
       if (stateToRestore) {
         setExplanations(stateToRestore.explanations || {}); setChatCache(stateToRestore.chatCache || {}); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
         setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setLayeredReadingState(stateToRestore.layeredReadingState ?? null); setDocType(stateToRestore.docType || 'STEM');
-        // 旧持久化是「扁平单份」略读态：就地包成「列表第一段」（阶段一仍单段，多段不持久化）。
-        const restoredSkimSession: SkimSession = {
-          ...createEmptySkimSession(),
-          studyMap: stateToRestore.studyMap || null,
-          messages: stateToRestore.skimMessages || [],
-          stage: stateToRestore.skimStage || 'diagnosis',
-          quizData: stateToRestore.quizData || null,
-          topHeight: stateToRestore.skimTopHeight || 60,
-          focusMode: stateToRestore.skimFocusMode ?? false,
-        };
-        setSkimSessions([restoredSkimSession]); setActiveSkimIndex(0); activeIdRef.current = restoredSkimSession.id;
+        // 阶段二：区分新旧格式。无 version 字段，只能靠「skimSessions 是否存在」判断（RECON Q4）。
+        if (stateToRestore.skimSessions && stateToRestore.skimSessions.length > 0) {
+          // 新格式：直接恢复多段列表 + 激活索引（越界回 0）。补 createEmptySkimSession 默认值，兼容未来新增字段。
+          const list: SkimSession[] = stateToRestore.skimSessions.map(s => ({ ...createEmptySkimSession(), ...s }));
+          const rawIdx = stateToRestore.activeSkimIndex ?? 0;
+          const idx = rawIdx >= 0 && rawIdx < list.length ? rawIdx : 0;
+          setSkimSessions(list); setActiveSkimIndex(idx); activeIdRef.current = list[idx].id;
+          migratedSkimBaselineRef.current = null; // 新格式，不需抑制
+        } else {
+          // 旧格式：扁平字段在内存里包成「列表第一段」。**读旧不毁旧**：记下这份列表引用，
+          // 保存 effect 据此抑制写新格式，直到用户真正改动略读（见 migratedSkimBaselineRef）。
+          const restoredSkimSession: SkimSession = {
+            ...createEmptySkimSession(),
+            studyMap: stateToRestore.studyMap || null,
+            messages: stateToRestore.skimMessages || [],
+            stage: stateToRestore.skimStage || 'diagnosis',
+            quizData: stateToRestore.quizData || null,
+            topHeight: stateToRestore.skimTopHeight || 60,
+            focusMode: stateToRestore.skimFocusMode ?? false,
+          };
+          const migratedList = [restoredSkimSession];
+          setSkimSessions(migratedList); setActiveSkimIndex(0); activeIdRef.current = restoredSkimSession.id;
+          migratedSkimBaselineRef.current = migratedList;
+        }
         setReviewQuizRounds(stateToRestore.reviewQuizRounds || []); setReviewFlashCards(stateToRestore.reviewFlashCards || []); setFlashCardEstimate(stateToRestore.flashCardEstimate);
         setPageMarks(stateToRestore.pageMarks || {});
         setStudyGuide(stateToRestore.studyGuide || null);
@@ -803,13 +824,15 @@ const App: React.FC = () => {
         if (stateToRestore.personaSettings) setPersonaSettings(stateToRestore.personaSettings);
       } else {
         setExplanations({}); setChatCache({}); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('deep'); setLayeredReadingState(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
-        // 全新文件：略读回到单段空白。
+        // 全新文件：略读回到单段空白（非迁移，不抑制保存）。
         const blankSkimSession = createEmptySkimSession();
         setSkimSessions([blankSkimSession]); setActiveSkimIndex(0); activeIdRef.current = blankSkimSession.id;
+        migratedSkimBaselineRef.current = null;
       }
-      // 后台诊断只写「本次打开时的那一段」（restore 段或空白段），按 id 锁定，绝不串到别段。
+      // 后台诊断只写「本次打开时的那一段」（旧格式迁移段或空白段），按 id 锁定，绝不串到别段。
+      // 新格式（skimSessions 存在）已自带各段 map / skipDiagnosis 状态，不跑文件级诊断。
       const diagTargetSkimId = activeIdRef.current;
-      if (!stateToRestore?.studyMap) {
+      if (!stateToRestore?.skimSessions && !stateToRestore?.studyMap) {
         setIsStudyMapLoading(true); const diagnosisContent = rawPdfData || fullText;
         // #region agent log
         _debugLog('App.tsx:processFile', 'before diagnosis (background)', {});
