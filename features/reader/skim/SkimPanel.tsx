@@ -15,7 +15,7 @@ import rehypeKatex from 'rehype-katex';
 import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType } from '@/types';
 import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X, Maximize2, Minimize2 } from 'lucide-react';
 import { chatWithSkimAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '@/services/geminiService';
-import { readFileAsDataURL } from '@/lib/pdf/pdfUtils';
+import { readFileAsDataURL, extractPdfPageRange } from '@/lib/pdf/pdfUtils';
 import { getMessageImages } from '@/lib/chat/messageUtils';
 
 interface SkimPanelProps {
@@ -44,11 +44,87 @@ interface SkimPanelProps {
   // Note Taking
   onNotebookAdd?: (text: string, category: 'skim') => void;
 
-  /** 按所选模块数重新生成 studyMap（知识检查通过后可选） */
-  onRegenerateStudyMap?: (moduleCount: number) => Promise<void>;
+  /** 按所选模块数重新生成 studyMap（知识检查通过后可选）；
+   *  contentOverride 为页码裁剪后的小 PDF（方案 A：地图只覆盖选中页）；返回新 map 供调用方直接用，绕开旧闭包 */
+  onRegenerateStudyMap?: (moduleCount: number, contentOverride?: string) => Promise<StudyMap | null>;
   /** 当前学习地图的模块数（用于判断是否需要重新生成） */
   studyMapModuleCount?: number | null;
+  /** 文档总页数（= slides.length），用于页码范围上限校验；拿不到时不做上限校验 */
+  totalPages?: number;
 }
+
+/** 略读「页码范围」校验：返回错误文案，无错返回 null（含「全本」即两端皆空的情况） */
+const getPageRangeError = (
+  start: number | null,
+  end: number | null,
+  totalPages?: number
+): string | null => {
+  // 两端皆空 = 全本，合法
+  if (start == null && end == null) return null;
+  // 只填了一个
+  if (start == null || end == null) return '请同时填写起始页和结束页（或都留空＝整本）';
+  if (!Number.isInteger(start) || !Number.isInteger(end)) return '页码需为整数';
+  if (start < 1 || end < 1) return '页码需 ≥ 1';
+  // 仅当能拿到总页数时才做上限校验
+  if (totalPages && totalPages > 0 && (start > totalPages || end > totalPages)) {
+    return `页码不能超过总页数（${totalPages}）`;
+  }
+  if (start > end) return '起始页不能大于结束页';
+  return null;
+};
+
+/** 略读配置区「页码范围」输入：Quiz 内联块与跳过弹窗两处共用，避免不一致 */
+const PageRangeInput: React.FC<{
+  start: number | null;
+  end: number | null;
+  onStartChange: (v: number | null) => void;
+  onEndChange: (v: number | null) => void;
+  totalPages?: number;
+  /** 两处复用时用于隔离 input id，避免重复 id */
+  idPrefix: string;
+}> = ({ start, end, onStartChange, onEndChange, totalPages, idPrefix }) => {
+  const error = getPageRangeError(start, end, totalPages);
+  const parse = (raw: string): number | null => {
+    const t = raw.trim();
+    if (t === '') return null;
+    const n = Number(t);
+    return Number.isFinite(n) ? Math.floor(n) : null;
+  };
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-xs text-stone-500">
+        页码范围（留空＝整本{totalPages ? `，共 ${totalPages} 页` : ''}）
+      </label>
+      <div className="flex items-center gap-2">
+        <input
+          id={`${idPrefix}-page-start`}
+          type="number"
+          min={1}
+          max={totalPages || undefined}
+          inputMode="numeric"
+          value={start ?? ''}
+          onChange={(e) => onStartChange(parse(e.target.value))}
+          placeholder="起"
+          className="w-20 py-2 rounded-lg border-2 border-stone-200 focus:border-indigo-300 px-3 text-slate-700 text-sm bg-white"
+        />
+        <span className="text-stone-400 text-sm">—</span>
+        <input
+          id={`${idPrefix}-page-end`}
+          type="number"
+          min={1}
+          max={totalPages || undefined}
+          inputMode="numeric"
+          value={end ?? ''}
+          onChange={(e) => onEndChange(parse(e.target.value))}
+          placeholder="止"
+          className="w-20 py-2 rounded-lg border-2 border-stone-200 focus:border-indigo-300 px-3 text-slate-700 text-sm bg-white"
+        />
+        <span className="text-xs text-stone-400">页</span>
+      </div>
+      {error && <p className="text-xs text-rose-500">{error}</p>}
+    </div>
+  );
+};
 
 const MarkdownComponents: Components = {
     h1: ({node, ...props}) => <h1 className="text-xl font-bold text-slate-900 mt-6 mb-4" {...props} />,
@@ -147,6 +223,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   onNotebookAdd,
   onRegenerateStudyMap,
   studyMapModuleCount = null,
+  totalPages,
 }) => {
   const [input, setInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -159,7 +236,11 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const [showGranularityModal, setShowGranularityModal] = useState(false);
   const [selectedModuleCount, setSelectedModuleCount] = useState<number>(4);
   const [skimPace, setSkimPace] = useState<'module' | 'part'>('module');
+  // 页码范围（1-based，含两端）：null/null = 全本；不持久化，与 selectedModuleCount/skimPace 同待遇
+  const [pageRangeStart, setPageRangeStart] = useState<number | null>(null);
+  const [pageRangeEnd, setPageRangeEnd] = useState<number | null>(null);
   const MODULE_OPTIONS = [2, 3, 4, 5, 6, 7];
+  const pageRangeError = getPageRangeError(pageRangeStart, pageRangeEnd, totalPages);
 
   // 本模块要点 & 模块小题（reading 阶段）
   const [moduleTakeaways, setModuleTakeaways] = useState<string[] | null>(null);
@@ -356,24 +437,54 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       setQuizSubmitted(true);
   };
 
-  const startFormalReading = async () => {
+  /**
+   * 正式领读开场。裁剪内容与「有效 map」均由调用方显式传入：
+   * - contentOverride：页码裁剪后的小 PDF（无则走全本）；
+   * - effectiveMap：本次略读真正使用的 map（重算后的新 map），不传则回退当前 studyMap 闭包。
+   * 这样 studyMapBriefing 与 moduleCount、裁剪内容三者一致，不再读到「重算前」的旧地图。
+   */
+  const startFormalReading = async (contentOverride?: string, effectiveMap?: StudyMap | null) => {
       setStage('reading');
+      const mapToUse = effectiveMap ?? studyMap;
       await handleSend(docType === 'STEM'
           ? "前置知识已确认，请输出本文的【逻辑路线图】与【核心结构】，并开始正式带读。"
           : "请生成深度略读报告 (Deep Skim Report)。",
-      'reading', { moduleCount: selectedModuleCount, studyMapBriefing: studyMap?.initialBriefing, skimPace });
+      'reading', { moduleCount: selectedModuleCount, studyMapBriefing: mapToUse?.initialBriefing, skimPace },
+      undefined, contentOverride);
   };
 
   const needRegenerate = onRegenerateStudyMap && (studyMapModuleCount == null || studyMapModuleCount !== selectedModuleCount);
 
   const handleStartWithModuleCount = async () => {
+      if (pageRangeError) return; // 页码范围非法时不启动（按钮也已 disabled，此处双保险）
       setShowGranularityModal(false);
+
+      // 先裁剪一次，得到这次略读的「唯一内容」（地图重算 + 领读对话共用同一份）
+      let contentOverride: string | undefined;
+      if (
+          pageRangeStart != null &&
+          pageRangeEnd != null &&
+          !pageRangeError &&
+          pdfDataUrl?.startsWith('data:application/pdf')
+      ) {
+          try {
+              contentOverride = await extractPdfPageRange(pdfDataUrl, pageRangeStart, pageRangeEnd);
+          } catch (e) {
+              // 裁剪失败时静默回退整本，不打断略读启动
+              console.error('页码裁剪失败，回退整本', e);
+              contentOverride = undefined;
+          }
+      }
+
+      let freshMap: StudyMap | null = studyMap; // 默认沿用现有
       if (needRegenerate) {
           setIsRegeneratingMap(true);
-          await onRegenerateStudyMap?.(selectedModuleCount);
+          // 把裁剪内容传给重算；拿回新 map 直接用，不依赖 setState 后的闭包
+          freshMap = (await onRegenerateStudyMap?.(selectedModuleCount, contentOverride)) ?? studyMap;
           setIsRegeneratingMap(false);
       }
-      startFormalReading();
+
+      startFormalReading(contentOverride, freshMap); // 裁剪内容 + 新 map 显式传下去
   };
 
   const handleSkipToReading = () => {
@@ -469,12 +580,14 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       textOverride?: string,
       forceMode?: 'tutoring' | 'reading',
       readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number; skimPace?: 'module' | 'part' },
-      sendOpts?: { appendUserWhenOverride?: boolean; tutorUserText?: string }
+      sendOpts?: { appendUserWhenOverride?: boolean; tutorUserText?: string },
+      /** 页码范围裁剪后的小 PDF；提供时替代整本（pdfDataUrl||fullText）喂给 AI */
+      contentOverride?: string
   ) => {
       const raw = textOverride ?? input;
       const trimmed = raw.trim();
       // CRITICAL: Prioritize PDF Vision Data over Text to avoid hallucination on scanned docs
-      const content = pdfDataUrl || fullText;
+      const content = contentOverride ?? (pdfDataUrl || fullText);
 
       if ((!trimmed && pendingImages.length === 0) || !content || isChatLoading) return;
 
@@ -949,9 +1062,18 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                                                 </label>
                                                             </div>
                                                         </div>
+                                                        <PageRangeInput
+                                                            start={pageRangeStart}
+                                                            end={pageRangeEnd}
+                                                            onStartChange={setPageRangeStart}
+                                                            onEndChange={setPageRangeEnd}
+                                                            totalPages={totalPages}
+                                                            idPrefix="skim-quiz"
+                                                        />
                                                         <button
                                                             onClick={handleStartWithModuleCount}
-                                                            className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all flex items-center justify-center space-x-2 shadow-xl"
+                                                            disabled={!!pageRangeError}
+                                                            className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all flex items-center justify-center space-x-2 shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
                                                         >
                                                             <span>{needRegenerate ? '按此模块数重新生成并开始领读' : '开始领读'}</span>
                                                         </button>
@@ -960,7 +1082,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                             </>
                                         ) : (
                                             <button
-                                                onClick={startFormalReading}
+                                                onClick={() => startFormalReading()}
                                                 className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all flex items-center justify-center space-x-2 shadow-xl"
                                             >
                                                 {quizSelectedOption === quizData.correctIndex ? <Lock className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
@@ -1467,9 +1589,18 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                   </label>
                 </div>
               </div>
+              <PageRangeInput
+                start={pageRangeStart}
+                end={pageRangeEnd}
+                onStartChange={setPageRangeStart}
+                onEndChange={setPageRangeEnd}
+                totalPages={totalPages}
+                idPrefix="skim-modal"
+              />
               <button
                 onClick={handleStartWithModuleCount}
-                className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all"
+                disabled={!!pageRangeError}
+                className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {needRegenerate ? '按此模块数重新生成并开始领读' : '开始领读'}
               </button>

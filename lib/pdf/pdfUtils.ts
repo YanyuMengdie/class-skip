@@ -1,6 +1,7 @@
 
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
+import { PDFDocument } from 'pdf-lib';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
@@ -97,6 +98,59 @@ export const extractPdfText = async (file: File): Promise<string[]> => {
   }
 
   return texts;
+};
+
+/**
+ * 从一份 PDF（base64 data URL 或纯 base64 字符串）中抽出 1-based、**含两端**的页码范围，
+ * 另存为一份新的小 PDF，返回与现有 `pdfDataUrl` **完全同格式**的
+ * `data:application/pdf;base64,...`（下游 `getContentPart` 的 PDF 分支无需改动）。
+ *
+ * 边界处理（全部静默规整，不抛错，避免打断略读启动）：
+ * - `startPage < 1` → 取 1；
+ * - `endPage > 总页数` → 取总页数；
+ * - `startPage > endPage` → **交换**两者（比抛错更宽容，用户填反了也能用）。
+ *
+ * @param input  PDF 的 base64 data URL（如 `pdfDataUrl`）或纯 base64 字符串
+ * @param startPage 起始页（1-based，含）
+ * @param endPage   结束页（1-based，含）
+ */
+export const extractPdfPageRange = async (
+  input: string,
+  startPage: number,
+  endPage: number
+): Promise<string> => {
+  // 容忍 data URL 前缀，取出纯 base64
+  const base64 = input.startsWith('data:') ? input.split(',')[1] ?? '' : input;
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+  const srcDoc = await PDFDocument.load(bytes);
+  const total = srcDoc.getPageCount();
+
+  // 规整边界（与 JSDoc 描述一致）
+  let start = Number.isFinite(startPage) ? Math.floor(startPage) : 1;
+  let end = Number.isFinite(endPage) ? Math.floor(endPage) : total;
+  if (start > end) [start, end] = [end, start]; // 填反则交换
+  start = Math.max(1, start);
+  end = Math.min(total, end);
+  if (start > total) start = total; // 起点也越界则收敛到末页
+
+  const outDoc = await PDFDocument.create();
+  const indices: number[] = [];
+  for (let p = start; p <= end; p++) indices.push(p - 1); // pdf-lib 用 0-based
+  const copied = await outDoc.copyPages(srcDoc, indices);
+  copied.forEach((page) => outDoc.addPage(page));
+
+  const outBytes = await outDoc.save();
+
+  // Uint8Array → base64（分块避免超长 spread 触发调用栈上限）
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < outBytes.length; i += chunk) {
+    bin += String.fromCharCode(...outBytes.subarray(i, i + chunk));
+  }
+  return `data:application/pdf;base64,${btoa(bin)}`;
 };
 
 export const readFileAsDataURL = (file: File): Promise<string> => {

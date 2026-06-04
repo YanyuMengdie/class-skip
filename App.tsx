@@ -1875,11 +1875,13 @@ const App: React.FC = () => {
     setPageComments(prev => ({ ...prev, [slideId]: (prev[slideId] || []).map(c => c.id === id ? { ...c, height } : c) }));
   };
 
-  const handleRegenerateStudyMap = async (moduleCount: number) => {
-    const content = pdfDataUrl || fullPdfText;
-    if (!content) return;
+  const handleRegenerateStudyMap = async (moduleCount: number, contentOverride?: string) => {
+    // 方案 A：设了页码范围时，地图也只覆盖选中页（contentOverride 优先），否则回退整本
+    const content = contentOverride || pdfDataUrl || fullPdfText;
+    if (!content) return null;
     const map = await performPreFlightDiagnosis(content, { moduleCount });
     if (map) { setStudyMap(map); setStudyMapModuleCount(moduleCount); }
+    return map; // 返回新 map，供 SkimPanel 直接用，绕开 setState 后的旧闭包
   };
 
   const handleRetryExplanation = useCallback(() => { 
@@ -2111,6 +2113,7 @@ const App: React.FC = () => {
       onNotebookAdd={handleAddNote}
       onRegenerateStudyMap={handleRegenerateStudyMap}
       studyMapModuleCount={studyMapModuleCount}
+      totalPages={slides.length}
     />
   ) : viewMode === 'layered' ? (
     <LayeredReadingPanel
