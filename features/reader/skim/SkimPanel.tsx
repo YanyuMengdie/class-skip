@@ -66,6 +66,8 @@ interface SkimPanelProps {
   onLoadingChange?: (loading: boolean) => void;
   /** 方案 A：true = 本段为「+」新建段，跳过诊断开场，studyMap=null 时也直接显示配置区 */
   skipDiagnosis?: boolean;
+  /** 私教模式入口：点击切到独立 tutor viewMode（数据/逻辑全在 App 层，SkimPanel 只负责通知） */
+  onStartTutorMode?: () => void;
 }
 
 /** 略读「页码范围」校验：返回错误文案，无错返回 null（含「全本」即两端皆空的情况） */
@@ -250,6 +252,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   setPageRangeEnd,
   onLoadingChange,
   skipDiagnosis = false,
+  onStartTutorMode,
 }) => {
   const [input, setInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -934,6 +937,17 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             >
                                 开始领读
                             </button>
+                            {/* 私教模式入口：不走略读那套（无地图/阶段/页码），切到 App 的独立 tutor viewMode */}
+                            {onStartTutorMode && (
+                                <button
+                                    type="button"
+                                    onClick={onStartTutorMode}
+                                    className="w-full py-3 bg-white text-indigo-700 border-2 border-indigo-200 rounded-xl font-bold hover:bg-indigo-50 transition-all flex items-center justify-center gap-2"
+                                >
+                                    <MessageCircle className="w-4 h-4" />
+                                    私教模式（纯对话）
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>

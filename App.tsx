@@ -6,8 +6,7 @@ import { SlideViewer } from '@/features/reader/slide-viewer/SlideViewer';
 import { SlidePageComments } from '@/features/reader/page-notes/SlidePageComments';
 import { ExplanationPanel } from '@/features/reader/deep-read/ExplanationPanel';
 import { SkimPanel } from '@/features/reader/skim/SkimPanel';
-// ⚠️ TEMP 阶段2预览 — 测完整段删除（含本行 import）
-import { TutorChat } from '@/features/tutor/TutorChat';
+import { TutorChat, TUTOR_OPENING_TEXT } from '@/features/tutor/TutorChat';
 import { Sidebar } from '@/shared/layout/Sidebar';
 import { TaskHug } from '@/features/energyRefuel/TaskHug';
 import { ChatHug } from '@/features/energyRefuel/ChatHug';
@@ -46,9 +45,9 @@ import { buildArtifactSourceLabel } from '@/shared/lib/artifactSourceLabel';
 import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap } from '@/services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from '@/services/transcriptionService';
 import { storageService } from '@/services/storageService';
-import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks } from '@/services/firebase';
+import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud } from '@/services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState } from '@/types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState, TutorSession } from '@/types';
 import {
   computeExamWorkspaceLsapKey,
   loadWorkspaceLsapBundle,
@@ -59,7 +58,7 @@ import {
 } from '@/features/exam/lib/examWorkspaceLsapKey';
 import { computePredictedScore } from '@/features/exam/lib/lsapScore';
 import { normalizeTermKey } from '@/lib/text/extractBoldTermsFromMarkdown';
-import { Sparkles, X, ChevronDown, Loader2, Wand2, Plus } from 'lucide-react';
+import { Sparkles, X, ChevronDown, Loader2, Wand2, Plus, MessageCircle } from 'lucide-react';
 
 /** P0 备考工作台：当前考试 ID 存 localStorage */
 const EXAM_WORKSPACE_ACTIVE_EXAM_LS = 'examWorkspace_activeExamId';
@@ -134,11 +133,31 @@ const createEmptySkimSession = (): SkimSession => ({
 /** 略读会话数量上限（阶段一） */
 const MAX_SKIM_SESSIONS = 10;
 
+/** 私教会话数量上限 */
+const MAX_TUTOR_SESSIONS = 10;
+
+/** 新建一条私教会话：含前端开场白 messages[0]，docType 默认 STEM；与略读 SkimSession 完全独立。
+ *  cloudSessionId：基于的云端文件会话 id（轻引用，仅存指针、不存 PDF），无则不写该字段。 */
+const createTutorSession = (seq: number, cloudSessionId?: string | null): TutorSession => ({
+  id: `tutor-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  title: `私教 ${seq}`,
+  createdAt: Date.now(),
+  messages: [{ role: 'model', text: TUTOR_OPENING_TEXT, timestamp: Date.now() }],
+  docType: 'STEM',
+  ...(cloudSessionId ? { cloudSessionId } : {}),
+});
+
+/** 私教多会话本地↔云合并：按 id 去重，云端在冲突时覆盖本地（跨设备源），按 createdAt 倒序 */
+const mergeTutorSessions = (local: TutorSession[], cloud: TutorSession[]): TutorSession[] => {
+  const map = new Map<string, TutorSession>();
+  for (const s of local) map.set(s.id, s);
+  for (const s of cloud) map.set(s.id, s); // 云端后写 → 冲突时云端胜
+  return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
+};
+
 const App: React.FC = () => {
   // --- STATE DECLARATIONS ---
   const [hasStarted, setHasStarted] = useState(false);
-  // ⚠️ TEMP 阶段2预览 — 测完整段删除
-  const [__tutorPreviewOpen, __setTutorPreviewOpen] = useState(false);
 
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
@@ -200,7 +219,32 @@ const App: React.FC = () => {
     () => migratedSkimBaselineRef.current !== null && skimSessions === migratedSkimBaselineRef.current,
     [skimSessions]
   );
+
   const [viewMode, setViewMode] = useState<ViewMode>('deep');
+
+  // === 私教多会话（阶段三）：与略读三件套平行、命名独立，绝不混进 skimSessions / 文件 hash 存储 ===
+  const [tutorSessions, setTutorSessions] = useState<TutorSession[]>([]);
+  const [activeTutorIndex, setActiveTutorIndex] = useState(0);
+  /** 私教 isChatLoading 上抛，用于标签栏「生成中锁切换」 */
+  const [tutorActiveLoading, setTutorActiveLoading] = useState(false);
+  /** 始终指向当前激活私教会话 id；所有写入按此 id 定位，绝不用 index 闭包（防跨 session 污染） */
+  const activeTutorIdRef = useRef<string | null>(null);
+  const activeTutor = tutorSessions[activeTutorIndex] ?? tutorSessions[0];
+  activeTutorIdRef.current = activeTutor?.id ?? null;
+  /** 按「调用时」激活 id 单段更新（生成中已锁切换，故必落在发起段） */
+  const updateActiveTutorSession = useCallback((updater: (s: TutorSession) => TutorSession) => {
+    const id = activeTutorIdRef.current;
+    if (id == null) return;
+    setTutorSessions(prev => prev.map(s => (s.id === id ? updater(s) : s)));
+  }, []);
+  const setTutorMessages = useCallback<React.Dispatch<React.SetStateAction<ChatMessage[]>>>(
+    value => updateActiveTutorSession(s => ({ ...s, messages: typeof value === 'function' ? (value as (p: ChatMessage[]) => ChatMessage[])(s.messages) : value })),
+    [updateActiveTutorSession]
+  );
+  /** 私教会话 id → 该会话对应 PDF 的 dataURL（运行时缓存，**不持久化**；持久化只存 cloudSessionId 轻引用）。
+   *  STOP-2 ①：每轮喂 AI 用这份 PDF（vision），与略读 content=pdfDataUrl 完全一致。 */
+  const [tutorMaterialMap, setTutorMaterialMap] = useState<Record<string, string>>({});
+
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileHash, setFileHash] = useState<string | null>(null);
   const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null); 
@@ -243,6 +287,50 @@ const App: React.FC = () => {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
+
+  // === 私教入口/新建（放在 pdfDataUrl + currentSessionId 之后：创建时即捕获「当前文件」的 PDF 与云引用）===
+  /** 新建一条私教会话并切过去（满上限 / 生成中则忽略）。
+   *  STOP-2：以当前 currentSessionId 作轻引用存进会话；以当前内存 pdfDataUrl 作本会话材料（直接复用，不再存一份）。 */
+  const handleAddTutorSession = useCallback(() => {
+    if (tutorActiveLoading || tutorSessions.length >= MAX_TUTOR_SESSIONS) return;
+    const newSession = createTutorSession(tutorSessions.length + 1, currentSessionId);
+    const newIndex = tutorSessions.length;
+    setTutorSessions(prev => (prev.length >= MAX_TUTOR_SESSIONS ? prev : [...prev, newSession]));
+    setActiveTutorIndex(newIndex);
+    activeTutorIdRef.current = newSession.id;
+    // 直接复用当前已加载 PDF（含未登录场景）；无文件则空串=纯对话
+    setTutorMaterialMap(m => ({ ...m, [newSession.id]: pdfDataUrl ?? '' }));
+  }, [tutorActiveLoading, tutorSessions.length, currentSessionId, pdfDataUrl]);
+  /** 略读配置卡「私教模式」入口：无会话则建一条，进入独立 tutor viewMode */
+  const handleStartTutorMode = useCallback(() => {
+    if (tutorSessions.length === 0) handleAddTutorSession();
+    setViewMode('tutor');
+  }, [tutorSessions.length, handleAddTutorSession]);
+  /** 恢复路径（刷新/重登）：进入某私教会话且其 PDF 尚未解析 → 凭 cloudSessionId 轻引用重取，
+   *  复用略读同款 getUserSessions→fetchFileFromUrl→readFileAsDataURL 通路。仅在 tutor viewMode 下触发。 */
+  useEffect(() => {
+    if (viewMode !== 'tutor' || !activeTutor) return;
+    const id = activeTutor.id;
+    if (tutorMaterialMap[id] !== undefined) return; // 已解析（含 '' ）→ 不重复
+    let cancelled = false;
+    (async () => {
+      const ref = activeTutor.cloudSessionId;
+      if (ref && user) {
+        try {
+          const sessions = await getUserSessions(user);
+          const s = sessions.find(x => x.id === ref && x.type === 'file' && x.fileUrl);
+          if (s?.fileUrl) {
+            const file = await fetchFileFromUrl(s.fileUrl, s.fileName);
+            const dataUrl = await readFileAsDataURL(file);
+            if (!cancelled) setTutorMaterialMap(m => ({ ...m, [id]: dataUrl }));
+            return;
+          }
+        } catch (e) { console.warn('私教材料重取失败，退化为纯对话', e); }
+      }
+      if (!cancelled) setTutorMaterialMap(m => ({ ...m, [id]: '' })); // 取不到 → 纯对话
+    })();
+    return () => { cancelled = true; };
+  }, [viewMode, activeTutor?.id, activeTutor?.cloudSessionId, tutorMaterialMap, user]);
 
   // --- ENERGY MODE STATE ---
   const [isEnergyMode, setIsEnergyMode] = useState(false);
@@ -672,6 +760,31 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  // --- 私教会话持久化（阶段三）：独立于略读 / 文件 hash，按用户全局存取 ---
+  // 1) 挂载即从本地 IndexedDB 恢复（仅当内存仍为空，避免覆盖用户已开的会话）
+  useEffect(() => {
+    storageService.getAllTutorSessions()
+      .then(local => { if (local.length > 0) setTutorSessions(prev => (prev.length === 0 ? local : prev)); })
+      .catch(() => {});
+  }, []);
+  // 2) 登录后拉云端，与内存（本地）按 id 合并、云端胜（跨设备恢复）。本地优先显示、云端到达再并入。
+  useEffect(() => {
+    if (!user) return;
+    getTutorSessionsFromCloud(user)
+      .then(cloud => { if (cloud.length > 0) setTutorSessions(prev => mergeTutorSessions(prev, cloud)); })
+      .catch(() => {});
+  }, [user?.uid]);
+  // 3) 激活会话变化（含新建 / 每次消息更新）→ 防抖写本地 + 云端（各自独立 try/catch，互不阻塞）
+  useEffect(() => {
+    if (!activeTutor) return;
+    const snapshot = activeTutor;
+    const t = setTimeout(() => {
+      storageService.saveTutorSession(snapshot).catch(() => {});
+      if (user) saveTutorSessionToCloud(user, snapshot).catch(() => {});
+    }, 1500);
+    return () => clearTimeout(t);
+  }, [activeTutor, user]);
+
   /** P0：备考工作台当前考试 — 登录后从 localStorage 恢复；登出则回到主界面 */
   useEffect(() => {
     if (!user) {
@@ -720,7 +833,8 @@ const App: React.FC = () => {
             notebookData,
             pageComments,
             currentIndex,
-            viewMode,
+            // 私教是独立 viewMode、不属于任何文件：落盘时 'tutor' 归一为 'deep'，避免重开文件误入私教
+            viewMode: viewMode === 'tutor' ? 'deep' : viewMode,
             skimTopHeight,
             skimFocusMode,
             studyMap,
@@ -758,7 +872,7 @@ const App: React.FC = () => {
         // 阶段三：把完整 skimSessions + activeSkimIndex 一并写云端（整包覆盖，冲突走「后写覆盖」策略 A）。
         // 「读旧不毁旧」复用本地同一套抑制：迁移未触碰前不写新字段、只续写旧扁平字段，不改写云端旧记录。
         ...(isUntouchedSkimMigration() ? {} : { skimSessions, activeSkimIndex }),
-        explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, layeredReadingState: layeredReadingState ? JSON.parse(JSON.stringify(layeredReadingState)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
+        explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode: viewMode === 'tutor' ? 'deep' : viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, layeredReadingState: layeredReadingState ? JSON.parse(JSON.stringify(layeredReadingState)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
       });
     }, 3000);
     return () => clearTimeout(cloudSaveTimeout);
@@ -2233,6 +2347,98 @@ const App: React.FC = () => {
     />
   );
   
+  // 略读 + 私教共用的同一排标签栏（数据仍两套独立；点标签同时切 viewMode + 该套 activeIndex）。
+  // 任一套生成中即锁全排，避免切走时打断在途生成。仅在 viewMode==='skim' / 'tutor' 两态渲染。
+  const tabsLocked = skimActiveLoading || tutorActiveLoading;
+  const sessionTabBar = (
+    <div className="flex items-center gap-1.5 px-3 py-2 border-b border-stone-100 bg-white shrink-0 overflow-x-auto custom-scrollbar">
+      {/* 略读标签（靛蓝系） */}
+      {skimSessions.map((s, i) => {
+        const active = viewMode === 'skim' && i === activeSkimIndex;
+        return (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => { if (!tabsLocked) { setViewMode('skim'); setActiveSkimIndex(i); } }}
+            disabled={tabsLocked}
+            title={tabsLocked ? '生成中，请等转圈结束再切换' : `略读 ${i + 1}`}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
+              active
+                ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
+                : 'bg-stone-50 text-stone-500 border-transparent hover:bg-stone-100'
+            } ${tabsLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            略读 {i + 1}
+          </button>
+        );
+      })}
+      {/* 私教标签（紫色系 + 对话图标，视觉区分于略读） */}
+      {tutorSessions.map((s, i) => {
+        const active = viewMode === 'tutor' && i === activeTutorIndex;
+        return (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => { if (!tabsLocked) { setViewMode('tutor'); setActiveTutorIndex(i); activeTutorIdRef.current = s.id; } }}
+            disabled={tabsLocked}
+            title={tabsLocked ? '生成中，请等转圈结束再切换' : s.title}
+            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
+              active
+                ? 'bg-violet-100 text-violet-700 border-violet-200'
+                : 'bg-stone-50 text-violet-400 border-transparent hover:bg-violet-50'
+            } ${tabsLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+          >
+            <MessageCircle className="w-3 h-3 shrink-0" />
+            {s.title}
+          </button>
+        );
+      })}
+      {/* 新建略读 */}
+      <button
+        type="button"
+        onClick={() => { handleAddSkimSession(); setViewMode('skim'); }}
+        disabled={tabsLocked || skimSessions.length >= MAX_SKIM_SESSIONS}
+        title={
+          skimSessions.length >= MAX_SKIM_SESSIONS
+            ? `最多 ${MAX_SKIM_SESSIONS} 段略读`
+            : tabsLocked
+              ? '生成中，请等转圈结束再新建'
+              : '新建一段空白略读'
+        }
+        className={`shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
+          tabsLocked || skimSessions.length >= MAX_SKIM_SESSIONS
+            ? 'bg-stone-50 text-stone-300 border-transparent cursor-not-allowed'
+            : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'
+        }`}
+        aria-label="新建略读会话"
+      >
+        <Plus className="w-4 h-4" />
+      </button>
+      {/* 新建私教（紫色 + 对话图标，区分于新建略读） */}
+      <button
+        type="button"
+        onClick={() => { handleAddTutorSession(); setViewMode('tutor'); }}
+        disabled={tabsLocked || tutorSessions.length >= MAX_TUTOR_SESSIONS}
+        title={
+          tutorSessions.length >= MAX_TUTOR_SESSIONS
+            ? `最多 ${MAX_TUTOR_SESSIONS} 段私教`
+            : tabsLocked
+              ? '生成中，请等转圈结束再新建'
+              : '新建一段私教'
+        }
+        className={`shrink-0 flex items-center justify-center gap-0.5 h-7 px-1.5 rounded-lg border transition-colors ${
+          tabsLocked || tutorSessions.length >= MAX_TUTOR_SESSIONS
+            ? 'bg-stone-50 text-stone-300 border-transparent cursor-not-allowed'
+            : 'bg-white text-violet-600 border-violet-200 hover:bg-violet-50'
+        }`}
+        aria-label="新建私教会话"
+      >
+        <MessageCircle className="w-3.5 h-3.5" />
+        <Plus className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
+
   const commonRightPanel = isClassroomMode && currentLecture ? (
     <ClassroomPanel
       currentLecture={currentLecture}
@@ -2240,46 +2446,9 @@ const App: React.FC = () => {
       transcriptLive={transcriptLive}
     />
   ) : viewMode === 'skim' ? (
-    // 标签栏 + SkimPanel 同框：SkimPanel 始终挂载，切换标签只换喂进去的「激活会话切片」，绝不卸载重挂。
+    // 标签栏（略读+私教同排，共享）+ SkimPanel 同框：SkimPanel 始终挂载，切换标签只换喂进去的「激活会话切片」。
     <div className="flex flex-col h-full">
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-stone-100 bg-white shrink-0 overflow-x-auto custom-scrollbar">
-        {skimSessions.map((s, i) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => { if (!skimActiveLoading && i !== activeSkimIndex) setActiveSkimIndex(i); }}
-            disabled={skimActiveLoading}
-            title={skimActiveLoading ? '生成中，请等转圈结束再切换' : `略读 ${i + 1}`}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
-              i === activeSkimIndex
-                ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
-                : 'bg-stone-50 text-stone-500 border-transparent hover:bg-stone-100'
-            } ${skimActiveLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-          >
-            略读 {i + 1}
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={handleAddSkimSession}
-          disabled={skimActiveLoading || skimSessions.length >= MAX_SKIM_SESSIONS}
-          title={
-            skimSessions.length >= MAX_SKIM_SESSIONS
-              ? `最多 ${MAX_SKIM_SESSIONS} 段`
-              : skimActiveLoading
-                ? '生成中，请等转圈结束再新建'
-                : '新建一段空白略读'
-          }
-          className={`shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
-            skimActiveLoading || skimSessions.length >= MAX_SKIM_SESSIONS
-              ? 'bg-stone-50 text-stone-300 border-transparent cursor-not-allowed'
-              : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'
-          }`}
-          aria-label="新建略读会话"
-        >
-          <Plus className="w-4 h-4" />
-        </button>
-      </div>
+      {sessionTabBar}
       <div className="flex-1 min-h-0">
         <SkimPanel
           studyMap={studyMap}
@@ -2313,7 +2482,24 @@ const App: React.FC = () => {
           setPageRangeEnd={setSkimPageRangeEnd}
           onLoadingChange={setSkimActiveLoading}
           skipDiagnosis={activeSkim.skipDiagnosis}
+          onStartTutorMode={handleStartTutorMode}
         />
+      </div>
+    </div>
+  ) : viewMode === 'tutor' ? (
+    // 私教 = 右栏内一种视图，与略读共用左侧 PDF 与同排标签栏；返回略读靠点略读标签。
+    <div className="flex flex-col h-full">
+      {sessionTabBar}
+      <div className="flex-1 min-h-0">
+        {activeTutor && (
+          <TutorChat
+            messages={activeTutor.messages}
+            setMessages={setTutorMessages}
+            docType={activeTutor.docType}
+            materialContent={tutorMaterialMap[activeTutor.id] ?? ''}
+            onLoadingChange={setTutorActiveLoading}
+          />
+        )}
       </div>
     </div>
   ) : viewMode === 'layered' ? (
@@ -2969,9 +3155,9 @@ const App: React.FC = () => {
             onDeleteSession={handleDeleteSession}
           />
           
-          <div 
+          <div
             ref={leftPanelRef}
-            className="relative flex flex-col border-r border-stone-200 bg-[#E5E7EB] transition-[width] duration-0 ease-linear h-full" 
+            className="relative flex flex-col border-r border-stone-200 bg-[#E5E7EB] transition-[width] duration-0 ease-linear h-full"
             style={{ width: isImmersive ? (isSidePanelCollapsed ? '98%' : `${leftPanelWidth}%`) : '60%' }}
           >
               <div className="flex-1 min-h-0 relative overflow-hidden flex flex-col">
@@ -3083,23 +3269,6 @@ const App: React.FC = () => {
       )}
         </>
       )}
-
-      {/* ⚠️⚠️ TEMP 阶段2预览 — 整段删除即可（悬浮按钮 + 全屏弹层挂载 <TutorChat/>）⚠️⚠️ */}
-      <button
-        type="button"
-        onClick={() => __setTutorPreviewOpen(true)}
-        className="fixed bottom-4 left-4 z-[3000] px-4 py-2 rounded-full bg-indigo-600 text-white text-xs font-bold shadow-lg hover:bg-indigo-700"
-      >
-        私教预览(临时)
-      </button>
-      {__tutorPreviewOpen && (
-        <div className="fixed inset-0 z-[3000] bg-black/30 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-stone-200 w-full max-w-lg h-[80vh] overflow-hidden">
-            <TutorChat onClose={() => __setTutorPreviewOpen(false)} />
-          </div>
-        </div>
-      )}
-      {/* ⚠️⚠️ TEMP 阶段2预览结束 ⚠️⚠️ */}
     </div>
   );
 };

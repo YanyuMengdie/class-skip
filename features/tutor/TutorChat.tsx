@@ -4,24 +4,25 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { Send, Square, ImagePlus, X, MessageCircle } from 'lucide-react';
-import type { ChatMessage } from '@/types';
+import type { ChatMessage, DocType } from '@/types';
 import { chatWithSkimAdaptiveTutor } from '@/services/geminiService';
 import { getMessageImages } from '@/lib/chat/messageUtils';
 import { readFileAsDataURL } from '@/lib/pdf/pdfUtils';
 
 /**
- * 私教模式纯对话组件（阶段 2：核心体验层）。
+ * 私教模式纯对话组件（阶段 3：受控版）。
  *
  * 设计要点：
  * - 纯对话单栏，**零略读元素**（无模块数 / 节奏 / 页码 / study map / stage / quiz）。
- * - 进入即见前端预置的开场白「想学什么呀~」，不走 API、不耗 token。
+ * - 开场白「想学什么呀~」由 App 在新建会话时预置进 messages[0]（不走 API、不耗 token）。
  * - **放宽「无文档不可发」的 guard**：有文字输入 OR 有待发图片即可发送，不要求文档内容。
  * - 仅调用现成的 `chatWithSkimAdaptiveTutor`（mode 固定 'tutoring'、readingOptions 传 undefined）。
- * - 本阶段用本地 state 自管消息，**不接 IndexedDB / 云端**（持久化留阶段 3）。
+ * - **受控组件**：messages 读写走 App 传入的 props（按 id 定位会话，防跨 session 污染）；
+ *   组件只本地自管 input / isChatLoading / pendingImages / abort。
  */
 
-/** 前端预置开场白：纯 UI，不进 API history */
-const OPENING_TEXT = '想学什么呀~';
+/** 前端预置开场白：纯 UI，不进 API history。App 新建会话时塞进 messages[0]，本组件发送时按此剔除。 */
+export const TUTOR_OPENING_TEXT = '想学什么呀~';
 
 /** 与 SkimPanel 同款气泡 markdown 样式（参照搬运，避免耦合改 SkimPanel） */
 const MarkdownComponents: Components = {
@@ -46,14 +47,29 @@ const MarkdownComponents: Components = {
 };
 
 export interface TutorChatProps {
-  /** 提供时右上角显示关闭按钮（临时预览 / 后续阶段挂载用） */
-  onClose?: () => void;
+  /** 受控：当前激活私教会话的消息（含 messages[0] 开场白） */
+  messages: ChatMessage[];
+  /** 受控：写回 App 的 tutorSessions（App 按 id 定位会话更新） */
+  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  /** 会话 docType，缺省 'STEM' */
+  docType?: DocType;
+  /** 本地 isChatLoading 上抛，供 App 标签栏「生成中锁切换」 */
+  onLoadingChange?: (loading: boolean) => void;
+  /**
+   * STOP-2 ①：本会话对应 PDF 的 dataURL，由 App 解析后传入（活动会话=当前内存 pdfDataUrl；
+   * 恢复会话=凭 cloudSessionId 重取）。每轮作 content 喂 AI（PDF vision），与略读完全一致。
+   * 缺省 '' = 纯对话（无文件 / 取不到）。
+   */
+  materialContent?: string;
 }
 
-export const TutorChat: React.FC<TutorChatProps> = ({ onClose }) => {
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [
-    { role: 'model', text: OPENING_TEXT, timestamp: Date.now() },
-  ]);
+export const TutorChat: React.FC<TutorChatProps> = ({
+  messages,
+  setMessages,
+  docType = 'STEM',
+  onLoadingChange,
+  materialContent = '',
+}) => {
   const [input, setInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
@@ -70,6 +86,13 @@ export const TutorChat: React.FC<TutorChatProps> = ({ onClose }) => {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [messages, isChatLoading]);
+
+  // 上抛 loading 给 App（标签栏锁切换）
+  useEffect(() => {
+    onLoadingChange?.(isChatLoading);
+  }, [isChatLoading, onLoadingChange]);
+  // 卸载（如返回退出私教）时复位 loading 标志，避免标签栏残留锁定
+  useEffect(() => () => onLoadingChange?.(false), [onLoadingChange]);
 
   /** 选图（参照 SkimPanel.handleImageSelect） */
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,7 +141,7 @@ export const TutorChat: React.FC<TutorChatProps> = ({ onClose }) => {
 
     // history = 已交换的真实轮次，剔除纯前端开场白（不把这条假 model 句喂给 API）
     const history =
-      messages[0]?.role === 'model' && messages[0]?.text === OPENING_TEXT
+      messages[0]?.role === 'model' && messages[0]?.text === TUTOR_OPENING_TEXT
         ? messages.slice(1)
         : messages;
 
@@ -141,11 +164,11 @@ export const TutorChat: React.FC<TutorChatProps> = ({ onClose }) => {
 
     try {
       const response = await chatWithSkimAdaptiveTutor(
-        '', // content：本阶段无文档，传空字符串（材料经 images 进入）
+        materialContent, // STOP-2 ①：本会话 PDF 的 dataURL（vision），与略读 content=pdfDataUrl 一致；'' 时纯对话
         history,
         trimmed,
         'tutoring', // tutor 固定 tutoring
-        'STEM', // 默认 docType（大写，对齐现有 DocType）
+        docType, // 会话 docType（默认 'STEM'）
         undefined, // readingOptions：tutoring 模式零依赖
         abortController.signal,
         imagesToSend,
@@ -169,25 +192,12 @@ export const TutorChat: React.FC<TutorChatProps> = ({ onClose }) => {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* 顶栏：标题 +（可选）关闭 */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-stone-100 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-indigo-100 text-indigo-600">
-            <MessageCircle className="w-4 h-4" />
-          </div>
-          <span className="text-sm font-bold text-slate-700">私教模式</span>
+      {/* 顶栏：标题（返回略读靠点上方略读标签，无需独立返回键） */}
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-stone-100 shrink-0">
+        <div className="p-1.5 rounded-lg bg-violet-100 text-violet-600">
+          <MessageCircle className="w-4 h-4" />
         </div>
-        {onClose && (
-          <button
-            type="button"
-            onClick={onClose}
-            title="关闭"
-            aria-label="关闭"
-            className="p-1.5 text-stone-400 hover:text-stone-600 hover:bg-stone-100 rounded-lg transition-colors"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        )}
+        <span className="text-sm font-bold text-slate-700">私教模式</span>
       </div>
 
       {/* 消息列表 */}

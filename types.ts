@@ -276,7 +276,7 @@ export type SavedArtifact =
   | (SavedArtifactBase & { type: 'flashcard'; payload: { count: number } })
   | (SavedArtifactBase & { type: 'trapList'; payload: { itemIds: string[] } });
 
-export type ViewMode = 'deep' | 'skim' | 'layered';
+export type ViewMode = 'deep' | 'skim' | 'layered' | 'tutor';
 export type SkimStage = 'diagnosis' | 'tutoring' | 'quiz' | 'reading';
 
 // --- 递进阅读模式（layered reading）---
@@ -612,6 +612,12 @@ export interface TutorSession {
   messages: ChatMessage[];
   /** 复用现有大写 DocType；缺省时由调用方给默认，本阶段不处理默认逻辑 */
   docType?: DocType;
+  /**
+   * 轻引用：创建私教会话时所基于文件的云端会话 id（= App 的 currentSessionId）。
+   * 只存这个指针，**绝不存 PDF 字节**；刷新/重登恢复时凭它 getUserSessions→fetchFileFromUrl 重取 PDF。
+   * 未登录 / 无云端文件时为空 → 恢复后退化为纯对话。
+   */
+  cloudSessionId?: string;
 }
 
 export interface FilePersistedState {
