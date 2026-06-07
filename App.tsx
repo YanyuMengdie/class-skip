@@ -6,6 +6,8 @@ import { SlideViewer } from '@/features/reader/slide-viewer/SlideViewer';
 import { SlidePageComments } from '@/features/reader/page-notes/SlidePageComments';
 import { ExplanationPanel } from '@/features/reader/deep-read/ExplanationPanel';
 import { SkimPanel } from '@/features/reader/skim/SkimPanel';
+// ⚠️ TEMP 阶段2预览 — 测完整段删除（含本行 import）
+import { TutorChat } from '@/features/tutor/TutorChat';
 import { Sidebar } from '@/shared/layout/Sidebar';
 import { TaskHug } from '@/features/energyRefuel/TaskHug';
 import { ChatHug } from '@/features/energyRefuel/ChatHug';
@@ -135,6 +137,8 @@ const MAX_SKIM_SESSIONS = 10;
 const App: React.FC = () => {
   // --- STATE DECLARATIONS ---
   const [hasStarted, setHasStarted] = useState(false);
+  // ⚠️ TEMP 阶段2预览 — 测完整段删除
+  const [__tutorPreviewOpen, __setTutorPreviewOpen] = useState(false);
 
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
@@ -3079,6 +3083,23 @@ const App: React.FC = () => {
       )}
         </>
       )}
+
+      {/* ⚠️⚠️ TEMP 阶段2预览 — 整段删除即可（悬浮按钮 + 全屏弹层挂载 <TutorChat/>）⚠️⚠️ */}
+      <button
+        type="button"
+        onClick={() => __setTutorPreviewOpen(true)}
+        className="fixed bottom-4 left-4 z-[3000] px-4 py-2 rounded-full bg-indigo-600 text-white text-xs font-bold shadow-lg hover:bg-indigo-700"
+      >
+        私教预览(临时)
+      </button>
+      {__tutorPreviewOpen && (
+        <div className="fixed inset-0 z-[3000] bg-black/30 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-stone-200 w-full max-w-lg h-[80vh] overflow-hidden">
+            <TutorChat onClose={() => __setTutorPreviewOpen(false)} />
+          </div>
+        </div>
+      )}
+      {/* ⚠️⚠️ TEMP 阶段2预览结束 ⚠️⚠️ */}
     </div>
   );
 };
