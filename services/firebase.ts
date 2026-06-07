@@ -29,7 +29,7 @@ import {
   enableIndexedDbPersistence 
 } from 'firebase/firestore';
 
-import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, Exam, ExamMaterialLink, DailyPlanCacheDoc, DailySegment, type DisciplineBand } from '@/types';
+import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, Exam, ExamMaterialLink, DailyPlanCacheDoc, DailySegment, TutorSession, type DisciplineBand } from '@/types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC0_saRd3L2zIxOfG1FQinjYpyCGs_B9ls",
@@ -446,6 +446,46 @@ export const deleteMemo = async (userId: string, memoId: string): Promise<void> 
         await deleteDoc(memoRef);
     } catch (e) {
         console.error("Delete Memo Failed", e);
+        throw e;
+    }
+};
+
+// --- 私教模式独立云存（users/{uid}/tutorSessions 子集合，与 sessions 集合物理隔离）---
+// 照 events / memos 用户子集合模式；不碰 sessions / splitUpdateData / createCloudSession / updateCloudSessionState。
+// 注：TutorSession 自带客户端生成的 id，故用 setDoc(按 id 寻址) 而非 addDoc(自动 id)，
+// 让云端文档 id 与本地 IndexedDB keyPath 'id' 对齐，便于后续阶段做本地↔云同步。
+
+/** 单条 upsert：以 session.id 作云端文档 id（setDoc 即存在则覆盖、不存在则建） */
+export const saveTutorSessionToCloud = async (user: User, session: TutorSession): Promise<void> => {
+    try {
+        const ref = doc(db, "users", user.uid, "tutorSessions", session.id);
+        await setDoc(ref, { ...session, userId: user.uid });
+    } catch (e) {
+        console.error("Save Tutor Session Failed", e);
+        throw e;
+    }
+};
+
+/** 拉取当前用户全部私教会话（按 createdAt 降序） */
+export const getTutorSessionsFromCloud = async (user: User): Promise<TutorSession[]> => {
+    try {
+        const ref = collection(db, "users", user.uid, "tutorSessions");
+        const q = query(ref, orderBy("createdAt", "desc"));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as TutorSession));
+    } catch (e) {
+        console.error("Get Tutor Sessions Failed", e);
+        return [];
+    }
+};
+
+/** 按 id 删单条 */
+export const deleteTutorSessionFromCloud = async (userId: string, sessionId: string): Promise<void> => {
+    try {
+        const ref = doc(db, "users", userId, "tutorSessions", sessionId);
+        await deleteDoc(ref);
+    } catch (e) {
+        console.error("Delete Tutor Session Failed", e);
         throw e;
     }
 };

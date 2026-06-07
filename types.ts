@@ -596,6 +596,24 @@ export interface PersistedSkimSession {
   skipDiagnosis: boolean;
 }
 
+/**
+ * 私教模式（纯对话）独立会话类型。与略读 SkimSession / skimSessions 物理隔离：
+ * 不含 study map / stage / quiz / page range 等略读包袱，只保留对话所需的最小字段。
+ * 本地 IndexedDB（store `tutorSessions`）与云端 Firestore（`users/{uid}/tutorSessions`）共用此形。
+ */
+export interface TutorSession {
+  /** 形如 tutor-${Date.now()}-${random} */
+  id: string;
+  /** 默认「私教 N」；本阶段只建字段，命名 UI 留待后续阶段 */
+  title: string;
+  /** 显式毫秒时间戳（区别于略读把创建时刻藏在 id 里） */
+  createdAt: number;
+  /** 复用现有 ChatMessage（已含 images?: string[]） */
+  messages: ChatMessage[];
+  /** 复用现有大写 DocType；缺省时由调用方给默认，本阶段不处理默认逻辑 */
+  docType?: DocType;
+}
+
 export interface FilePersistedState {
   explanations: ExplanationCache;
   chatCache: ChatCache;
