@@ -41,6 +41,7 @@ import { ExamHubModal } from '@/features/exam/ExamHubModal';
 import { ExamWorkspacePage } from '@/features/exam/workspace/ExamWorkspacePage';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from '@/lib/pdf/pdfUtils';
 import { buildArtifactSourceLabel } from '@/shared/lib/artifactSourceLabel';
+import { exportSingleSlideToPdf } from '@/features/reader/lib/exportNotebookPdf';
 import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap } from '@/services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from '@/services/transcriptionService';
 import { storageService } from '@/services/storageService';
@@ -1897,8 +1898,23 @@ const App: React.FC = () => {
   const handleSendGalgameChat = async (text: string) => { if (!slides[currentIndex]) return; };
 
   const handleExportPDF = async () => {
-    if (slides.length === 0) return; const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [1280, 720] }); const pdfWidth = pdf.internal.pageSize.getWidth(); const pdfHeight = pdf.internal.pageSize.getHeight();
-    for (let i = 0; i < slides.length; i++) { const slide = slides[i]; const slideAnnos = annotations[slide.id] || []; if (i > 0) pdf.addPage(); try { const imgProps = pdf.getImageProperties(slide.imageUrl); const ratio = Math.min(pdfWidth / imgProps.width, pdfHeight / imgProps.height); const drawWidth = imgProps.width * ratio; const drawHeight = imgProps.height * ratio; const offsetX = (pdfWidth - drawWidth) / 2; const offsetY = (pdfHeight - drawHeight) / 2; pdf.addImage(slide.imageUrl, 'PNG', offsetX, offsetY, drawWidth, drawHeight, undefined, 'FAST'); } catch (e) { pdf.addImage(slide.imageUrl, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST'); } slideAnnos.forEach(anno => { const xPos = (anno.x / 100) * pdfWidth; const yPos = (anno.y / 100) * pdfHeight; pdf.setFillColor(255, 252, 235); pdf.setDrawColor(251, 191, 36); pdf.rect(xPos, yPos, anno.width || 240, anno.height || 100, 'FD'); pdf.setFontSize(anno.fontSize || 14); if (anno.color) { const r = parseInt(anno.color.substr(1, 2), 16); const g = parseInt(anno.color.substr(3, 2), 16); const b = parseInt(anno.color.substr(5, 2), 16); pdf.setTextColor(r, g, b); } else { pdf.setTextColor(50, 50, 50); } pdf.text(pdf.splitTextToSize(cleanHtmlToText(anno.text), (anno.width || 240) - 20), xPos + 10, yPos + (anno.fontSize || 14) + 5); }); } pdf.save(`${fileName || 'study-notes'}_annotated.pdf`);
+    // TEMP: Step 2 验证单页流程,Step 4 改回全量
+    if (slides.length === 0) return;
+    const slide = slides[currentIndex];
+    if (!slide) return;
+    const slideAnnos = annotations[slide.id] || [];
+    const displayName = fileName || 'study-notes';
+    try {
+      await exportSingleSlideToPdf(
+        slide,
+        slideAnnos,
+        displayName,
+        { current: currentIndex + 1, total: slides.length, fileName: displayName }
+      );
+    } catch (e) {
+      console.error('exportSingleSlideToPdf failed:', e);
+      alert('导出 PDF 失败,请查看控制台。');
+    }
   };
 
   const handleAddNote = (text: string, category: 'deep' | 'skim' = 'deep') => { if (!fileName) { alert("请先上传课件"); return; } const currentPage = currentIndex + 1; const newNote: Note = { id: `note-${Date.now()}`, text, createdAt: Date.now(), category }; setNotebookData(prev => ({ ...prev, [fileName]: { ...(prev[fileName] || {}), [currentPage]: [...(prev[fileName]?.[currentPage] || []), newNote] } })); };

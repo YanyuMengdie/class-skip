@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git add features/reader/skim/SkimPanel.tsx)",
+      "PowerShell(git commit -m \"style\\(skim\\): user bubble indigo->amber for warmer palette\")",
+      "PowerShell(git commit -m \"style\\(skim\\): tone down user bubble from amber-700 to amber-100\")",
+      "PowerShell(git commit -m \"refactor\\(skim\\): input->textarea with auto-grow height\")",
+      "PowerShell(git commit -m \"feat\\(skim\\): Enter to send, Shift+Enter for newline\")",
+      "PowerShell(git commit -m \"feat\\(skim\\): image upload UI in input area\")",
+      "PowerShell(git commit -m \"fix\\(skim\\): allow image-only send + reset textarea height after send\")",
+      "PowerShell(git commit -m \"feat\\(skim\\): support pasting images from clipboard into textarea\")",
+      "PowerShell(git add lib/chat/messageUtils.ts types.ts App.tsx features/reader/deep-read/ExplanationPanel.tsx features/reader/skim/SkimPanel.tsx services/geminiService.ts)",
+      "PowerShell(git push origin refactor 2>&1)",
+      "PowerShell(git add App.tsx features/reader/skim/SkimPanel.tsx services/firebase.ts types.ts)",
+      "PowerShell(git commit -m \"feat\\(skim\\): focus mode toggle \\(hide top half + splitter, chat full-pane\\)\")",
+      "PowerShell(git add App.tsx)",
+      "PowerShell(npm install pdf-lib)",
+      "PowerShell(npx tsc --noEmit 2>&1 | Select-String -Pattern \"error TS\" | ForEach-Object { \\($_ -split ':'\\)[0..1] -join ':' })",
+      "PowerShell($lines = Get-Content 'lib\\\\prompts\\\\systemPrompts.ts'; \"total file lines: $\\($lines.Count\\)\"; \"line 10: $\\($lines[9]\\)\"; \"line 167: $\\($lines[166]\\)\"; \"line 166: $\\($lines[165]\\)\")",
+      "PowerShell(\"---\")",
+      "PowerShell($c = Get-Content -Raw 'lib\\\\prompts\\\\systemPrompts.ts'; \"STEM count: $\\([regex]::Matches\\($c,'export const STEM_SYSTEM_PROMPT'\\).Count\\)\"; \"HUMANITIES count: $\\([regex]::Matches\\($c,'export const HUMANITIES_SYSTEM_PROMPT'\\).Count\\)\"; \"第一原则 present: $\\($c.Contains\\('第一原则（凌驾以下所有规则）'\\)\\)\"; \"Exam Conversion removed from STEM region: $\\(-not $c.Contains\\('Exam Conversion'\\)\\)\"; npx tsc --noEmit 2>&1 | Select-String -Pattern \"error TS\" | Measure-Object | Select-Object -ExpandProperty Count)",
+      "PowerShell($c = Get-Content -Raw 'lib\\\\prompts\\\\systemPrompts.ts'; \"STEM count: $\\([regex]::Matches\\($c,'export const STEM_SYSTEM_PROMPT'\\).Count\\)\"; \"HUMANITIES count: $\\([regex]::Matches\\($c,'export const HUMANITIES_SYSTEM_PROMPT'\\).Count\\)\"; \"知识点优先级 present: $\\($c.Contains\\('知识点优先级'\\)\\)\"; \"全局判定规则 present: $\\($c.Contains\\('全局判定规则'\\)\\)\"; \"---DIFF vs HEAD---\"; git diff --stat; \"---TSC---\"; npx tsc --noEmit 2>&1 | Select-String -Pattern \"error TS\" | Measure-Object | Select-Object -ExpandProperty Count)",
+      "PowerShell(\\(Get-Content \"d:\\\\Projects\\\\class-skip\\\\features\\\\reader\\\\skim\\\\SkimPanel.tsx\" | Measure-Object -Line\\).Lines)",
+      "PowerShell($p = Get-Content \"d:\\\\Projects\\\\class-skip\\\\package.json\" -Raw | ConvertFrom-Json; $p.scripts | ConvertTo-Json)",
+      "PowerShell($f=\"d:\\\\Projects\\\\class-skip\\\\App.tsx\"; $n=\\(Get-Content $f | Measure-Object -Line\\).Lines; Write-Output \"total=$n\")",
+      "PowerShell($f=\"d:\\\\Projects\\\\class-skip\\\\App.tsx\"; $c=Get-Content $f; Write-Output \\(\"count=\"+$c.Count\\); $c | Select-Object -Last 30 | ForEach-Object {$i++; \"$\\($c.Count-30+$i\\): $_\"})"
+    ]
+  }
+}
