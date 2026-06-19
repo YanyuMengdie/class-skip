@@ -29,7 +29,7 @@ import {
   enableIndexedDbPersistence 
 } from 'firebase/firestore';
 
-import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, Exam, ExamMaterialLink, DailyPlanCacheDoc, DailySegment, TutorSession, type DisciplineBand } from '@/types';
+import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, Exam, ExamMaterialLink, DailyPlanCacheDoc, DailySegment, TutorSession, PersistedSkimSession, type DisciplineBand } from '@/types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC0_saRd3L2zIxOfG1FQinjYpyCGs_B9ls",
@@ -276,14 +276,33 @@ export const createCloudFolder = async (user: User, folderName: string, parentId
     }
 };
 
+/**
+ * 读取略读「一 session 一文档」新柜子：sessions/{id}/skims/{skimId}。
+ * 子集合为空（当前阶段尚无任何子文档）⇒ 返回 []，调用方据此回退老数组 data/main.skimSessions。
+ */
+export const readSkimSessions = async (sessionId: string): Promise<PersistedSkimSession[]> => {
+    try {
+        const skimsRef = collection(db, "sessions", sessionId, "skims");
+        const snapshot = await getDocs(skimsRef);
+        if (snapshot.empty) return [];
+        return snapshot.docs.map(d => d.data() as PersistedSkimSession);
+    } catch (error) {
+        console.error("[Firestore] Read Skims Failed:", error);
+        return [];
+    }
+};
+
 export const fetchSessionDetails = async (sessionId: string): Promise<Partial<CloudSession>> => {
     try {
         const heavyRef = doc(db, "sessions", sessionId, "data", "main");
         const snapshot = await getDoc(heavyRef);
-        if (snapshot.exists()) {
-            return snapshot.data() as Partial<CloudSession>;
+        const fullData = snapshot.exists() ? (snapshot.data() as Partial<CloudSession>) : {};
+        // 兼容读取：新柜子（skims/ 子集合）优先；子集合为空时回退老数组 data/main.skimSessions（行为照旧）。
+        const skimDocs = await readSkimSessions(sessionId);
+        if (skimDocs.length > 0) {
+            fullData.skimSessions = skimDocs;
         }
-        return {};
+        return fullData;
     } catch (error) {
         console.error("[Firestore] Fetch Details Failed:", error);
         return {};
