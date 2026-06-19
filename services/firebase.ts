@@ -17,10 +17,11 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
-  doc, 
+  doc,
   getDoc,
-  getDocs, 
-  query, 
+  getDocs,
+  writeBatch,
+  query,
   orderBy, 
   limit as firestoreLimit,
   where,
@@ -224,8 +225,7 @@ export const createCloudSession = async (user: User, fileName: string, fileUrl: 
       notebookData: {},
       pageComments: {},
       skimMessages: [],
-      // 阶段三：略读多会话列表初值（空数组；读取端把 [] 与缺失同等当作「无多段」→ 走旧格式 / 空白单段）
-      skimSessions: [],
+      // 阶段乙：略读 session 已搬到子集合 sessions/{id}/skims/{skimId}，data/main 不再存 skimSessions。
       viewMode: 'deep',
       docType: 'STEM',
       currentIndex: 0,
@@ -292,6 +292,20 @@ export const readSkimSessions = async (sessionId: string): Promise<PersistedSkim
     }
 };
 
+/**
+ * 写略读「一 session 一文档」新柜子：每个 session 写成 sessions/{id}/skims/{skimId} 子文档。
+ * 用 writeBatch 保证多子文档原子写入。本阶段只 set（新增/覆盖），不做「差量删除已移除段」——
+ * 删除清理留待「删除略读 session」功能落地时一并处理（见 deleteDoc 待办）。
+ */
+export const writeSkimSessions = async (sessionId: string, skimSessions: PersistedSkimSession[]) => {
+    const batch = writeBatch(db);
+    for (const s of skimSessions) {
+        const ref = doc(db, "sessions", sessionId, "skims", s.id);
+        batch.set(ref, JSON.parse(JSON.stringify(s)));   // 清掉 undefined，Firestore 不接受
+    }
+    await batch.commit();
+};
+
 export const fetchSessionDetails = async (sessionId: string): Promise<Partial<CloudSession>> => {
     try {
         const heavyRef = doc(db, "sessions", sessionId, "data", "main");
@@ -311,7 +325,10 @@ export const fetchSessionDetails = async (sessionId: string): Promise<Partial<Cl
 
 export const updateCloudSessionState = async (sessionId: string, data: Partial<CloudSession>) => {
   try {
-    const { metaUpdates, heavyUpdates } = splitUpdateData(data);
+    // skimSessions 改走子集合（sessions/{id}/skims/{skimId}），不再进 data/main，绕开单文档 1MB 上限。
+    // activeSkimIndex 仍随 rest 走 heavy → data/main（轻量字段，原路不变）。
+    const { skimSessions, ...rest } = data;
+    const { metaUpdates, heavyUpdates } = splitUpdateData(rest);
     const promises = [];
 
     if (Object.keys(metaUpdates).length > 0) {
@@ -325,6 +342,11 @@ export const updateCloudSessionState = async (sessionId: string, data: Partial<C
         const heavyRef = doc(db, "sessions", sessionId, "data", "main");
         const cleanHeavy = JSON.parse(JSON.stringify(heavyUpdates));
         promises.push(updateDoc(heavyRef, cleanHeavy));
+    }
+
+    // 本次更新携带 skimSessions（未被 isUntouched 抑制）⇒ 拆子文档写。undefined 则跳过（语义同读取层）。
+    if (skimSessions !== undefined) {
+        promises.push(writeSkimSessions(sessionId, skimSessions));
     }
 
     if (promises.length > 0) {
