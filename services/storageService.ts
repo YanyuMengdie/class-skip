@@ -127,8 +127,8 @@ class StorageService {
     });
   }
 
-  /** 取全部私教会话（按 createdAt 降序，新建在前） */
-  async getAllTutorSessions(): Promise<TutorSession[]> {
+  /** 取指定 PDF（fileHash）的私教会话（按 createdAt 降序，新建在前）；旧数据无 fileHash → 自动排除 */
+  async getAllTutorSessions(fileHash: string): Promise<TutorSession[]> {
     await this.init();
     if (!this.db) return [];
 
@@ -138,8 +138,10 @@ class StorageService {
       const request = store.getAll();
 
       request.onsuccess = () => {
-        const results = request.result as TutorSession[];
-        resolve(results.sort((a, b) => b.createdAt - a.createdAt));
+        const results = (request.result as TutorSession[])
+          .filter(s => s.fileHash === fileHash)
+          .sort((a, b) => b.createdAt - a.createdAt);
+        resolve(results);
       };
       request.onerror = () => reject('Failed to fetch tutor sessions');
     });

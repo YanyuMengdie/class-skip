@@ -618,6 +618,8 @@ export interface TutorSession {
    * 未登录 / 无云端文件时为空 → 恢复后退化为纯对话。
    */
   cloudSessionId?: string;
+  /** 该私教会话所属 PDF 的 fileHash；旧数据无此字段 */
+  fileHash?: string;
 }
 
 export interface FilePersistedState {

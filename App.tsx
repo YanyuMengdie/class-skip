@@ -138,13 +138,14 @@ const MAX_TUTOR_SESSIONS = 10;
 
 /** 新建一条私教会话：含前端开场白 messages[0]，docType 默认 STEM；与略读 SkimSession 完全独立。
  *  cloudSessionId：基于的云端文件会话 id（轻引用，仅存指针、不存 PDF），无则不写该字段。 */
-const createTutorSession = (seq: number, cloudSessionId?: string | null): TutorSession => ({
+const createTutorSession = (seq: number, cloudSessionId?: string | null, fileHash?: string | null): TutorSession => ({
   id: `tutor-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
   title: `私教 ${seq}`,
   createdAt: Date.now(),
   messages: [{ role: 'model', text: TUTOR_OPENING_TEXT, timestamp: Date.now() }],
   docType: 'STEM',
   ...(cloudSessionId ? { cloudSessionId } : {}),
+  ...(fileHash ? { fileHash } : {}),
 });
 
 /** 私教多会话本地↔云合并：按 id 去重，云端在冲突时覆盖本地（跨设备源），按 createdAt 倒序 */
@@ -293,14 +294,14 @@ const App: React.FC = () => {
    *  STOP-2：以当前 currentSessionId 作轻引用存进会话；以当前内存 pdfDataUrl 作本会话材料（直接复用，不再存一份）。 */
   const handleAddTutorSession = useCallback(() => {
     if (tutorActiveLoading || tutorSessions.length >= MAX_TUTOR_SESSIONS) return;
-    const newSession = createTutorSession(tutorSessions.length + 1, currentSessionId);
+    const newSession = createTutorSession(tutorSessions.length + 1, currentSessionId, fileHash);
     const newIndex = tutorSessions.length;
     setTutorSessions(prev => (prev.length >= MAX_TUTOR_SESSIONS ? prev : [...prev, newSession]));
     setActiveTutorIndex(newIndex);
     activeTutorIdRef.current = newSession.id;
     // 直接复用当前已加载 PDF（含未登录场景）；无文件则空串=纯对话
     setTutorMaterialMap(m => ({ ...m, [newSession.id]: pdfDataUrl ?? '' }));
-  }, [tutorActiveLoading, tutorSessions.length, currentSessionId, pdfDataUrl]);
+  }, [tutorActiveLoading, tutorSessions.length, currentSessionId, pdfDataUrl, fileHash]);
   /** 略读配置卡「私教模式」入口：无会话则建一条，进入独立 tutor viewMode */
   const handleStartTutorMode = useCallback(() => {
     if (tutorSessions.length === 0) handleAddTutorSession();
@@ -763,10 +764,11 @@ const App: React.FC = () => {
   // --- 私教会话持久化（阶段三）：独立于略读 / 文件 hash，按用户全局存取 ---
   // 1) 挂载即从本地 IndexedDB 恢复（仅当内存仍为空，避免覆盖用户已开的会话）
   useEffect(() => {
-    storageService.getAllTutorSessions()
-      .then(local => { if (local.length > 0) setTutorSessions(prev => (prev.length === 0 ? local : prev)); })
+    if (!fileHash) { setTutorSessions([]); return; }
+    storageService.getAllTutorSessions(fileHash)
+      .then(local => setTutorSessions(local))
       .catch(() => {});
-  }, []);
+  }, [fileHash]);
   // 2) 登录后拉云端，与内存（本地）按 id 合并、云端胜（跨设备恢复）。本地优先显示、云端到达再并入。
   useEffect(() => {
     if (!user) return;
