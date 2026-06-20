@@ -576,6 +576,9 @@ export interface LectureRecord {
 
 // --- PERSISTENCE TYPES ---
 
+/** 略读内容类型（阶段一 UI 三选一；阶段二提升为导出类型并入持久化）。缺省视为 'lecture'。 */
+export type SkimContentType = 'lecture' | 'paper' | 'article';
+
 /**
  * 略读「一段会话」的本地持久化形态（阶段二新增，仅本地 IndexedDB；云端 CloudSession 不动）。
  * 与 App 运行时的 SkimSession 同形——独立列出，避免持久化层耦合 App 内部类型。
@@ -594,6 +597,10 @@ export interface PersistedSkimSession {
   topHeight: number;
   focusMode: boolean;
   skipDiagnosis: boolean;
+  /** 内容类型（阶段二新增，可选）。旧 session 无此字段 → 读取时按 'lecture' 兜底。 */
+  contentType?: SkimContentType;
+  /** paper/文章模式：AI 是否已讲过梗概（阶段四才真正写它，此处先占位存储）。 */
+  briefingDone?: boolean;
 }
 
 /**

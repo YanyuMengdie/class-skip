@@ -12,7 +12,7 @@ import ReactMarkdown, { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType } from '@/types';
+import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType, SkimContentType } from '@/types';
 import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X, Maximize2, Minimize2 } from 'lucide-react';
 import { chatWithSkimAdaptiveTutor, generateGatekeeperQuiz, generateModuleTakeaways, generateModuleQuiz } from '@/services/geminiService';
 import { readFileAsDataURL, extractPdfPageRange } from '@/lib/pdf/pdfUtils';
@@ -58,6 +58,9 @@ interface SkimPanelProps {
   setModuleCount: (count: number) => void;
   skimPace: 'module' | 'part';
   setSkimPace: (pace: 'module' | 'part') => void;
+  /** 阶段二：内容类型受控 prop（与 moduleCount/skimPace 同款，由 App 的激活会话持有） */
+  contentType: SkimContentType;
+  onContentTypeChange: (next: SkimContentType) => void;
   pageRangeStart: number | null;
   setPageRangeStart: (v: number | null) => void;
   pageRangeEnd: number | null;
@@ -246,6 +249,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   setModuleCount: setSelectedModuleCount,
   skimPace,
   setSkimPace,
+  contentType: skimContentType,
+  onContentTypeChange: setSkimContentType,
   pageRangeStart,
   setPageRangeStart,
   pageRangeEnd,
@@ -263,6 +268,34 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [isRegeneratingMap, setIsRegeneratingMap] = useState(false);
   const [showGranularityModal, setShowGranularityModal] = useState(false);
+  // 阶段 2：内容类型改为受控 prop（contentType / onContentTypeChange），由 App 的激活会话持有并持久化。
+  // 上方解构已把它们别名回 skimContentType / setSkimContentType，故下方控件 JSX 零改动。
+  const CONTENT_TYPE_OPTIONS: { value: SkimContentType; label: string }[] = [
+    { value: 'lecture', label: 'Lecture / 讲义' },
+    { value: 'paper', label: '论文 / Paper' },
+    { value: 'article', label: '文章' },
+  ];
+  const contentTypeSelector = (
+    <div className="flex flex-col gap-2">
+      <label className="text-xs text-stone-500">你读的是什么？</label>
+      <div className="grid grid-cols-3 gap-2">
+        {CONTENT_TYPE_OPTIONS.map(({ value, label }) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setSkimContentType(value)}
+            className={`py-2 px-2 rounded-xl text-xs font-bold border-2 transition-all ${
+              skimContentType === value
+                ? 'bg-indigo-600 text-white border-indigo-600'
+                : 'bg-white text-slate-600 border-stone-200 hover:border-indigo-300'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
   const MODULE_OPTIONS = [2, 3, 4, 5, 6, 7];
   const pageRangeError = getPageRangeError(pageRangeStart, pageRangeEnd, totalPages);
 
@@ -885,6 +918,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             </div>
                         </div>
                         <div className="flex flex-col gap-2">
+                            {contentTypeSelector}
                             <label className="text-xs text-stone-500 mb-1">用几个模块解读本文（2～7）</label>
                             <select
                                 value={selectedModuleCount}
@@ -1665,6 +1699,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             <h3 className="text-sm font-bold text-slate-800">选择模块数</h3>
             <p className="text-xs text-stone-500">用几个模块解读本文（2～7），选完后即开始领读。</p>
             <div className="flex flex-col gap-2">
+              {contentTypeSelector}
               <select
                 value={selectedModuleCount}
                 onChange={(e) => setSelectedModuleCount(Number(e.target.value))}

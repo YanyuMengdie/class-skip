@@ -47,7 +47,7 @@ import { startRecording, stopRecording, isTranscriptionSupported } from '@/servi
 import { storageService } from '@/services/storageService';
 import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud } from '@/services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState, TutorSession } from '@/types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState, TutorSession, SkimContentType } from '@/types';
 import {
   computeExamWorkspaceLsapKey,
   loadWorkspaceLsapBundle,
@@ -111,6 +111,10 @@ interface SkimSession {
   focusMode: boolean;
   /** 方案 A：true = 跳过诊断开场，直接进配置区（仅「+」新建段）；首段/恢复段为 false，走完整诊断 */
   skipDiagnosis: boolean;
+  /** 阶段二：内容类型（可选，与 PersistedSkimSession 同形）。旧 session 无此字段 → 按 'lecture' 兜底。 */
+  contentType?: SkimContentType;
+  /** 阶段二：paper/文章模式 AI 是否已讲过梗概（阶段四才真正写，先占位）。 */
+  briefingDone?: boolean;
 }
 
 /** 新建一段干净的空白略读会话（id 沿用本仓库现有 `${Date.now()}-${random}` 风格） */
@@ -212,6 +216,7 @@ const App: React.FC = () => {
   // 原 SkimPanel 内部态（模块数 / 节奏 / 页码范围）提升到会话后的写入器（均为值式，与 SkimPanel 用法一致）
   const setSkimModuleCount = useCallback((count: number) => updateActiveSkimSession(s => ({ ...s, moduleCount: count })), [updateActiveSkimSession]);
   const setSkimPaceValue = useCallback((pace: 'module' | 'part') => updateActiveSkimSession(s => ({ ...s, skimPace: pace })), [updateActiveSkimSession]);
+  const setSkimContentType = useCallback((next: SkimContentType) => updateActiveSkimSession(s => ({ ...s, contentType: next })), [updateActiveSkimSession]);
   const setSkimPageRangeStart = useCallback((v: number | null) => updateActiveSkimSession(s => ({ ...s, pageRangeStart: v })), [updateActiveSkimSession]);
   const setSkimPageRangeEnd = useCallback((v: number | null) => updateActiveSkimSession(s => ({ ...s, pageRangeEnd: v })), [updateActiveSkimSession]);
   /** 「读旧不毁旧」抑制判断（阶段二/三）：本地 + 云端两条保存 effect **共用这一套**，避免漂移。
@@ -2478,6 +2483,8 @@ const App: React.FC = () => {
           setModuleCount={setSkimModuleCount}
           skimPace={activeSkim.skimPace}
           setSkimPace={setSkimPaceValue}
+          contentType={activeSkim.contentType ?? 'lecture'}
+          onContentTypeChange={setSkimContentType}
           pageRangeStart={activeSkim.pageRangeStart}
           setPageRangeStart={setSkimPageRangeStart}
           pageRangeEnd={activeSkim.pageRangeEnd}
