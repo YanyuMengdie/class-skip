@@ -1,10 +1,10 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail, LayeredReadingRound3Unit, LayeredReadingQuestion, LayeredReadingQuestionGrade } from "@/types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail, LayeredReadingRound3Unit, LayeredReadingQuestion, LayeredReadingQuestionGrade, SkimContentType } from "@/types";
 import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProfiles";
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/lib/exam/scaffoldingClassifier";
-import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT } from "@/lib/prompts/systemPrompts";
+import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT, PAPER_COMPANION_PROMPT, ARTICLE_COMPANION_PROMPT } from "@/lib/prompts/systemPrompts";
 import { getMessageImages } from "@/lib/chat/messageUtils";
 import {
   LAYERED_READING_SYSTEM_PROMPT,
@@ -2142,12 +2142,18 @@ export async function chatWithSkimAdaptiveTutor(
   readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number; skimPace?: 'module' | 'part' },
   abortSignal?: AbortSignal,
   /** 当前轮用户图片(数组,语义对齐 chatWithSlide 的 userImagesBase64;放末尾以避免 TS 必填参数顺序错误) */
-  userImagesBase64?: string[]
+  userImagesBase64?: string[],
+  /** 阶段4b：内容类型。'paper'/'article' 走顺序陪读 prompt；缺省/'lecture' 维持 docType 逻辑。私教不传。 */
+  contentType?: SkimContentType
 ): Promise<string> {
   try {
     const contentPart = getContentPart(docContent);
     const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> }> = [];
-    const systemInstruction = docType === 'HUMANITIES' ? HUMANITIES_SYSTEM_PROMPT : STEM_SYSTEM_PROMPT;
+    const systemInstruction =
+      contentType === 'paper' ? PAPER_COMPANION_PROMPT
+      : contentType === 'article' ? ARTICLE_COMPANION_PROMPT
+      : docType === 'HUMANITIES' ? HUMANITIES_SYSTEM_PROMPT
+      : STEM_SYSTEM_PROMPT;
 
     contents.push({
       role: 'user',

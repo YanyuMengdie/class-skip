@@ -268,6 +268,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const [quizSubmitted, setQuizSubmitted] = useState(false);
   const [isRegeneratingMap, setIsRegeneratingMap] = useState(false);
   const [showGranularityModal, setShowGranularityModal] = useState(false);
+  /** 阶段4b 防线：paper/文章模式下原文（pdfDataUrl）未就位时的友好提示，挡住"开始陪读" */
+  const [companionGuardNotice, setCompanionGuardNotice] = useState<string | null>(null);
   // 阶段 2：内容类型改为受控 prop（contentType / onContentTypeChange），由 App 的激活会话持有并持久化。
   // 上方解构已把它们别名回 skimContentType / setSkimContentType，故下方控件 JSX 零改动。
   const CONTENT_TYPE_OPTIONS: { value: SkimContentType; label: string }[] = [
@@ -519,7 +521,34 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
   const needRegenerate = onRegenerateStudyMap && (studyMapModuleCount == null || studyMapModuleCount !== selectedModuleCount);
 
+  /**
+   * 阶段4b：paper/文章「顺序陪读」开场。跳过 studyMap（不调 onRegenerateStudyMap）、不裁页码、不传 lecture readingOptions；
+   * 仅切到 reading 阶段并发一条中性开场，由 PAPER/ARTICLE_COMPANION_PROMPT 的开场规则驱动「先讲整篇梗概再停下等继续」。
+   */
+  const startCompanionReading = async () => {
+      setStage('reading');
+      await handleSend(
+          '请开始陪我精读这篇材料。',
+          'reading',
+          undefined,   // 不传 lecture readingOptions（无 module 数/节奏/briefing 后缀）
+          undefined,
+          undefined,   // 不裁页码，整篇喂入
+      );
+  };
+
   const handleStartWithModuleCount = async () => {
+      // 阶段4b：paper/文章 → 守住「完整原文」防线 + 跳过 studyMap，直达顺序陪读
+      if (skimContentType !== 'lecture') {
+          // 防线：pdfDataUrl 为空时只能退回截断的 fullText → 不开讲，提示稍后重试（不关 modal、不进 reading）
+          if (!pdfDataUrl) {
+              setCompanionGuardNotice('📄 原文还在加载中，请稍候片刻再开始陪读');
+              return;
+          }
+          setCompanionGuardNotice(null);
+          setShowGranularityModal(false);
+          await startCompanionReading();
+          return;
+      }
       if (pageRangeError) return; // 页码范围非法时不启动（按钮也已 disabled，此处双保险）
       setShowGranularityModal(false);
 
@@ -703,7 +732,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             docType,
             skimReadingOpts,
             abortController.signal,
-            imagesToSend
+            imagesToSend,
+            skimContentType
           );
           if (abortController.signal.aborted || skimGenerationCancelledRef.current) return;
           const aiMsg: ChatMessage = { role: 'model', text: response, timestamp: Date.now() };
@@ -914,11 +944,18 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             <Rocket className="w-5 h-5 text-indigo-400 mt-0.5" />
                             <div>
                                 <p className="text-sm font-bold text-slate-700">配置这段略读</p>
-                                <p className="text-xs text-slate-400 mt-0.5">选模块数、节奏与页码范围，点「开始领读」即按所选范围生成本段学习地图并开始。</p>
+                                <p className="text-xs text-slate-400 mt-0.5">
+                                    {skimContentType === 'lecture'
+                                        ? '选模块数、节奏与页码范围，点「开始领读」即按所选范围生成本段学习地图并开始。'
+                                        : '将从头开始顺序陪读整篇，点「开始领读」即可（AI 会先讲整篇梗概再停下等你说「继续」）。'}
+                                </p>
                             </div>
                         </div>
                         <div className="flex flex-col gap-2">
                             {contentTypeSelector}
+                            {/* 阶段4b：module 数/节奏/页码范围仅 lecture 模式显示；paper/文章走顺序陪读，无这些概念 */}
+                            {skimContentType === 'lecture' && (
+                              <>
                             <label className="text-xs text-stone-500 mb-1">用几个模块解读本文（2～7）</label>
                             <select
                                 value={selectedModuleCount}
@@ -964,9 +1001,16 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                 totalPages={totalPages}
                                 idPrefix="skim-fresh"
                             />
+                              </>
+                            )}
+                            {skimContentType !== 'lecture' && companionGuardNotice && (
+                                <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                    {companionGuardNotice}
+                                </p>
+                            )}
                             <button
                                 onClick={handleStartWithModuleCount}
-                                disabled={!!pageRangeError}
+                                disabled={skimContentType === 'lecture' && !!pageRangeError}
                                 className="w-full py-3 mt-1 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 开始领读
@@ -1244,7 +1288,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             )}
 
             {/* STAGE: READING */}
-            {stage === 'reading' && studyMap && (
+            {stage === 'reading' && studyMap && skimContentType === 'lecture' && (
                 <div className="prose prose-sm max-w-none prose-p:my-2 animate-in fade-in">
                     <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-4">
                         <div className="flex items-center space-x-2 mb-2">
@@ -1351,8 +1395,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     </div>
                  ))}
 
-                 {/* 本模块要点卡片（reading 阶段） */}
-                 {stage === 'reading' && moduleTakeaways !== null && (
+                 {/* 本模块要点卡片（reading 阶段；阶段4b：仅 lecture） */}
+                 {stage === 'reading' && moduleTakeaways !== null && skimContentType === 'lecture' && (
                      <div className="rounded-2xl border-2 border-amber-200 bg-amber-50/80 p-4 space-y-3 animate-in fade-in slide-in-from-bottom-2">
                          <div className="flex items-center gap-2 text-amber-800 font-bold">
                              <ListChecks className="w-4 h-4" />
@@ -1505,8 +1549,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                      </div>
                  )}
 
-                 {/* 本模块小题（2–3 道，逐题展示） */}
-                 {stage === 'reading' && moduleQuiz && moduleQuiz.length > 0 && currentModuleQuestion && (
+                 {/* 本模块小题（2–3 道，逐题展示；阶段4b：仅 lecture） */}
+                 {stage === 'reading' && moduleQuiz && moduleQuiz.length > 0 && currentModuleQuestion && skimContentType === 'lecture' && (
                      <div className="rounded-2xl border-2 border-violet-200 bg-violet-50/80 p-4 space-y-3 animate-in fade-in slide-in-from-bottom-2">
                          <div className="flex items-center justify-between text-violet-800 font-bold text-sm">
                              <span>本模块小题 ({moduleQuizIndex + 1}/{moduleQuiz.length})</span>
@@ -1605,7 +1649,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 style={{ display: 'none' }}
                 onChange={handleImageSelect}
             />
-            {stage === 'reading' && messages.length > 0 && (
+            {stage === 'reading' && messages.length > 0 && skimContentType === 'lecture' && (
                 <button
                     type="button"
                     onClick={handleShowTakeaways}
@@ -1696,10 +1740,13 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       {showGranularityModal && onRegenerateStudyMap && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
           <div className="bg-white rounded-2xl shadow-xl border border-stone-200 p-5 w-full max-w-sm space-y-4">
-            <h3 className="text-sm font-bold text-slate-800">选择模块数</h3>
-            <p className="text-xs text-stone-500">用几个模块解读本文（2～7），选完后即开始领读。</p>
+            <h3 className="text-sm font-bold text-slate-800">{skimContentType === 'lecture' ? '选择模块数' : '开始顺序陪读'}</h3>
+            <p className="text-xs text-stone-500">{skimContentType === 'lecture' ? '用几个模块解读本文（2～7），选完后即开始领读。' : '将从头开始顺序陪读整篇，点「开始领读」即可。'}</p>
             <div className="flex flex-col gap-2">
               {contentTypeSelector}
+              {/* 阶段4b：module 数/节奏/页码范围仅 lecture 模式显示 */}
+              {skimContentType === 'lecture' && (
+                <>
               <select
                 value={selectedModuleCount}
                 onChange={(e) => setSelectedModuleCount(Number(e.target.value))}
@@ -1744,12 +1791,19 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 totalPages={totalPages}
                 idPrefix="skim-modal"
               />
+                </>
+              )}
+              {skimContentType !== 'lecture' && companionGuardNotice && (
+                <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                    {companionGuardNotice}
+                </p>
+              )}
               <button
                 onClick={handleStartWithModuleCount}
-                disabled={!!pageRangeError}
+                disabled={skimContentType === 'lecture' && !!pageRangeError}
                 className="w-full py-3 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {needRegenerate ? '按此模块数重新生成并开始领读' : '开始领读'}
+                {skimContentType !== 'lecture' ? '开始领读' : needRegenerate ? '按此模块数重新生成并开始领读' : '开始领读'}
               </button>
             </div>
           </div>
