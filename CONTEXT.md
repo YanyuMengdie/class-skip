@@ -543,6 +543,47 @@ aff6f3e 迁移到 Windows，准备开始屎山重构
 当前阶段：P2 阶段 3 + 阶段 4 主体全部完工（utils/ 已清空、components/ 仅余 galgame 2 文件），待用户验证 + commit。
 ================================================================
 
+## 近期修复记录（Bug A 略读云端 / Bug B 私教隔离）
+
+### Bug B：私教模式跨 PDF / 跨分支串台 —— 已修复（commit 2387df2）
+- **根因：** `getAllTutorSessions()` 用无过滤的 `store.getAll()`，取出该浏览器**所有**私教记录；
+  `TutorSession` 无 `fileHash` 字段，无法按 PDF 隔离；IndexedDB 按 origin（localhost）全局共享，
+  其他分支测试写入的会话残留同库 → 跨 PDF / 跨分支串台。
+- **修复：** `TutorSession` 加 `fileHash?: string`；新建 session 时写入当前 `fileHash`；
+  `getAllTutorSessions(fileHash)` 过滤只返回当前 PDF 的记录（旧数据无 `fileHash` 自动排除）；
+  恢复 effect 依赖改为 `[fileHash]`，`!fileHash`（未开 PDF）时清空列表、不查库。
+- **影响范围：** 仅本地加载隔离。云端 `getTutorSessionsFromCloud` 隔离**未做**（下一步候选）。
+
+### Bug A：略读 session 2+ 不上传云端 —— 真实根因 + 已修复
+- **⚠️ 先前误判作废：** 曾认定根因是 `isUntouchedSkimMigration()` 误抑制写入，拟用 A1/A2 修复。
+  经 RECON + 云端实测**证伪**——新建 session 走 `setSkimSessions(prev => [...prev, …])` 产生新数组引用，
+  `isUntouched` 必返回 false 不抑制，A1/A2 对此症状是 no-op。**已作废。**
+- **真实根因：** 略读所有 session 整包写进单文档 `sessions/{id}/data/main` 的 `skimSessions` 数组。
+  该文档还塞 annotations / explanations / studyMap / chatCache / messages 等，新增 session 2 后
+  整包**撑破 Firestore 单文档 1MB 上限**，写入被静默拒绝（fire-and-forget + `catch` 仅 `console.error`）。
+  云端实测确认：`skimSessions` 数组只有 1 元素，`activeSkimIndex=1` 指向不存在元素。
+- **修复方案（「一 session 一文档」，分两阶段）：**
+  - **阶段 1（读取兼容）commit 140d70e：** 新增 `readSkimSessions()` 读 `skims` 子集合；
+    `fetchSessionDetails` 兼容读取——子集合优先，空则回退 `data/main.skimSessions`。
+  - **阶段 2（写入拆分）commit [填实际 hash]：** 新增 `writeSkimSessions()` 用 `writeBatch`
+    把每个 session 写成 `sessions/{id}/skims/{skimId}` 子文档；`updateCloudSessionState` 摘出
+    `skimSessions` 走子集合，`activeSkimIndex` 仍留 `data/main`；移除 `createCloudSession` 的
+    `skimSessions: []` 初值。
+- **旧数据策略：** 兼容读取保留，**不跑迁移脚本**。旧 session 仍在 `data/main` 老数组，
+  新 session 写子集合，读取层两边都读。
+- **本地 IndexedDB 未改：** 无 1MB 限制，整包存对本地无害；拆分只在云端读写层。
+
+### ⚠️ 关键待办（防止未来踩坑）
+- 将来若新增「删除单个略读 session」功能，**必须**同步
+  `deleteDoc(doc(db,"sessions",id,"skims",skimId))` 清理子文档，否则云端子集合残留旧段
+  （`writeSkimSessions` 只 set 不差量删除）。当前无删除入口 / UI，故本轮未做删除清理。
+
+### 方向丙（base64 图片）—— 以后观察项
+- 单个略读 session 内 `ChatMessage` 含 `image?` / `images?`（base64），若单 session 含多张大图，
+  仍可能撑爆**单个** `skims` 子文档（1MB）。
+- 本轮拆 session 维度已解决「多 session 累加撑爆」。base64 图外移（移至 Firebase Storage 存引用）
+  作为后续观察项，暂不做。
+
 ## 略读功能演进（页码范围 + 多会话）—— 关键架构与踩坑记录
 
 ### 1. 页码范围裁剪：studyMap 双轨陷阱（必读）
@@ -589,8 +630,11 @@ App 派生激活切片 + 包装 setter（按 `activeIdRef.current` 的 id 定位
 
 **冲突策略：** 多设备走「后写覆盖」（整包覆盖，未做按段合并）——单人使用、不同时多设备改同一本书即安全。
 
-### 3. 已知风险（未处理，记录在案）
-**Firestore 单文档 1MB 上限：** 多段略读把每段的 messages + studyMap 都塞进同一个
-`sessions/{id}/data/main` heavy 文档，多段重度阅读有撑爆 1MB 风险（单段时代已存在，多段放大）。
-当前按策略 A 整包写、未做分片。**症状预警：** 某本书保存报错 / 云同步失败时，优先怀疑此上限。
+### 3. 已知风险
+**Firestore 单文档 1MB 上限：** ✅ **已修复（即 Bug A，见上方「近期修复记录」）。**
+原先多段略读把每段的 messages + studyMap 都塞进同一个 `sessions/{id}/data/main` heavy 文档，
+新增 session 2 后撑破 1MB、写入被静默拒绝。现已拆成「一 session 一文档」
+（`sessions/{id}/skims/{skimId}` 子集合 + `writeBatch` 写、兼容读取）。
+**残余风险（方向丙，未处理）：** 单个 session 内含多张 base64 图仍可能撑爆**单个**子文档，
+作后续观察项。**症状预警：** 某本书保存报错 / 云同步失败时，仍优先怀疑文档体积上限。
 未来若需根治 → 云端按段分片存储（动云端结构的大改，届时单独立项）。
