@@ -15,6 +15,7 @@ import { HistoryModal } from '@/shared/history/HistoryModal';
 import { GalgameOverlay } from '@/components/GalgameOverlay';
 import { GalgameSettings } from '@/components/GalgameSettings'; 
 import { WelcomeScreen } from '@/shared/layout/WelcomeScreen';
+import { DashboardScreen } from '@/shared/layout/DashboardScreen';
 import { SideQuestPanel } from '@/features/reader/side-quest/SideQuestPanel';
 import { LayeredReadingPanel } from '@/features/reader/layered/LayeredReadingPanel';
 import { QuizReviewPanel } from '@/features/review/tools/QuizReviewPanel';
@@ -42,12 +43,26 @@ import { ExamHubModal } from '@/features/exam/ExamHubModal';
 import { ExamWorkspacePage } from '@/features/exam/workspace/ExamWorkspacePage';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from '@/lib/pdf/pdfUtils';
 import { buildArtifactSourceLabel } from '@/shared/lib/artifactSourceLabel';
-import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap } from '@/services/geminiService';
+import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap, generateProfileNotebookUpdateSuggestion } from '@/services/geminiService';
 import { startRecording, stopRecording, isTranscriptionSupported } from '@/services/transcriptionService';
 import { storageService } from '@/services/storageService';
 import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud } from '@/services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState, TutorSession, SkimContentType } from '@/types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState, TutorSession, SkimContentType, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession } from '@/types';
+import {
+  appendLocalPendingSuggestion,
+  appendLocalWitnessSession,
+  getCloudProfileNotebook,
+  getCloudWitnessSessions,
+  loadLocalPendingSuggestions,
+  loadLocalProfileNotebook,
+  loadLocalWitnessSessions,
+  normalizeProfileNotebook,
+  saveCloudPendingSuggestion,
+  saveCloudProfileNotebook,
+  saveCloudWitnessSession,
+  saveLocalProfileNotebook,
+} from '@/services/profileNotebookService';
 import {
   computeExamWorkspaceLsapKey,
   loadWorkspaceLsapBundle,
@@ -160,9 +175,73 @@ const mergeTutorSessions = (local: TutorSession[], cloud: TutorSession[]): Tutor
   return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
 };
 
+interface ActiveStudyWitnessDraft {
+  id: string;
+  fileName: string;
+  fileHash: string | null;
+  cloudSessionId: string | null;
+  startedAt: number;
+  currentPageNumber: number | null;
+  pageEnteredAt: number;
+  pageSegments: StudyWitnessPageSegment[];
+  awayEvents: StudyWitnessAwayEvent[];
+  awayStartedAt: number | null;
+}
+
+const formatDurationShort = (ms: number): string => {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds} 秒`;
+  return `${minutes} 分 ${seconds.toString().padStart(2, '0')} 秒`;
+};
+
+const summarizeWitnessPages = (segments: StudyWitnessPageSegment[]): StudyWitnessPageSummary[] => {
+  const map = new Map<number, StudyWitnessPageSummary>();
+  for (const segment of segments) {
+    const prev = map.get(segment.pageNumber) || {
+      pageNumber: segment.pageNumber,
+      totalDurationMs: 0,
+      visits: 0,
+    };
+    prev.totalDurationMs += segment.durationMs;
+    prev.visits += 1;
+    map.set(segment.pageNumber, prev);
+  }
+  return Array.from(map.values()).sort((a, b) => a.pageNumber - b.pageNumber);
+};
+
+const buildLocalSessionSummary = (session: StudyWitnessSession): string[] => {
+  const longestPage = session.pageSummaries
+    .slice()
+    .sort((a, b) => b.totalDurationMs - a.totalDurationMs)[0];
+  const result = [
+    `本次学习总时长 ${formatDurationShort(session.totalDurationMs)}，有效停留 ${formatDurationShort(session.activeDurationMs)}。`,
+    `本次共经过 ${session.pageSummaries.length} 页，结束时停在第 ${session.finalPageNumber ?? '-'} 页。`,
+  ];
+  if (longestPage) {
+    result.push(`停留最久的是第 ${longestPage.pageNumber} 页，累计 ${formatDurationShort(longestPage.totalDurationMs)}。`);
+  }
+  if (session.awayEvents.length > 0) {
+    result.push(`中途离开 ${session.awayEvents.length} 次，最长 ${formatDurationShort(Math.max(...session.awayEvents.map((event) => event.durationMs)))}。`);
+  }
+  return result;
+};
+
 const App: React.FC = () => {
   // --- STATE DECLARATIONS ---
   const [hasStarted, setHasStarted] = useState(false);
+  const [shellMode, setShellMode] = useState<'dashboard' | 'study'>('dashboard');
+  const [profileNotebook, setProfileNotebook] = useState<LearnerProfileNotebook>(() => loadLocalProfileNotebook());
+  const [activeStudyStartedAt, setActiveStudyStartedAt] = useState<number | null>(null);
+  const [activeStudyElapsedMs, setActiveStudyElapsedMs] = useState(0);
+  const activeStudyDraftRef = useRef<ActiveStudyWitnessDraft | null>(null);
+  const [summarySession, setSummarySession] = useState<StudyWitnessSession | null>(null);
+  const [profileSuggestion, setProfileSuggestion] = useState<ProfileNotebookUpdateSuggestion | null>(null);
+  const [profileSuggestionDraft, setProfileSuggestionDraft] = useState<LearnerProfileNotebook | null>(null);
+  const [isGeneratingProfileSuggestion, setIsGeneratingProfileSuggestion] = useState(false);
+  const [profileSuggestionError, setProfileSuggestionError] = useState<string | null>(null);
+  const profileCloudReadyRef = useRef(false);
 
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
@@ -537,6 +616,52 @@ const App: React.FC = () => {
     if ((host === 'localhost' || host === '127.0.0.1') && embedded) setIsEmbeddedDev(true);
   }, []);
 
+  useEffect(() => {
+    saveLocalProfileNotebook(profileNotebook);
+    if (!user || !profileCloudReadyRef.current) return;
+    const t = window.setTimeout(() => {
+      saveCloudProfileNotebook(user, profileNotebook).catch((e) => console.warn('Profile cloud save failed:', e));
+    }, 1200);
+    return () => window.clearTimeout(t);
+  }, [profileNotebook, user]);
+
+  useEffect(() => {
+    profileCloudReadyRef.current = false;
+    if (!user) return;
+    let cancelled = false;
+    getCloudProfileNotebook(user)
+      .then((cloudProfile) => {
+        if (cancelled) return;
+        if (cloudProfile) {
+          setProfileNotebook(cloudProfile);
+          saveLocalProfileNotebook(cloudProfile);
+        } else {
+          saveCloudProfileNotebook(user, profileNotebook).catch(() => {});
+        }
+      })
+      .finally(() => {
+        if (!cancelled) profileCloudReadyRef.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
+
+  useEffect(() => {
+    if (!user) return;
+    const localSessions = loadLocalWitnessSessions();
+    const localSuggestions = loadLocalPendingSuggestions();
+    if (localSessions.length === 0 && localSuggestions.length === 0) return;
+    Promise.allSettled([
+      ...localSessions.map((session) => saveCloudWitnessSession(user, session)),
+      ...localSuggestions.map((suggestion) => saveCloudPendingSuggestion(user, suggestion)),
+    ]).then((results) => {
+      if (results.some((result) => result.status === 'rejected')) {
+        console.warn('Some local profile artifacts failed to sync.');
+      }
+    });
+  }, [user?.uid]);
+
   /** M1：备考工作台材料；关考试中心后重拉以同步新关联 */
   useEffect(() => {
     if (appMode !== 'examWorkspace' || !user) {
@@ -612,6 +737,69 @@ const App: React.FC = () => {
     }
     return () => { if (interval) clearInterval(interval); };
   }, [isTimerRunning, slides.length]);
+
+  useEffect(() => {
+    if (!activeStudyStartedAt) return;
+    const interval = window.setInterval(() => {
+      setActiveStudyElapsedMs(Date.now() - activeStudyStartedAt);
+    }, 1000);
+    return () => window.clearInterval(interval);
+  }, [activeStudyStartedAt]);
+
+  useEffect(() => {
+    const draft = activeStudyDraftRef.current;
+    if (!draft || draft.awayStartedAt !== null) return;
+    const now = Date.now();
+    flushActiveStudyPageSegment(now);
+    draft.currentPageNumber = slides.length > 0 ? currentIndex + 1 : null;
+    draft.pageEnteredAt = now;
+  }, [currentIndex, slides.length]);
+
+  useEffect(() => {
+    const markAway = () => {
+      const draft = activeStudyDraftRef.current;
+      if (!draft || draft.awayStartedAt !== null) return;
+      const now = Date.now();
+      flushActiveStudyPageSegment(now);
+      draft.awayStartedAt = now;
+    };
+    const markReturn = () => {
+      const draft = activeStudyDraftRef.current;
+      if (!draft || draft.awayStartedAt === null) return;
+      const now = Date.now();
+      draft.awayEvents.push({
+        startedAt: draft.awayStartedAt,
+        endedAt: now,
+        durationMs: now - draft.awayStartedAt,
+      });
+      draft.awayStartedAt = null;
+      draft.currentPageNumber = slides.length > 0 ? currentIndex + 1 : null;
+      draft.pageEnteredAt = now;
+    };
+    const handleVisibility = () => {
+      if (document.visibilityState === 'hidden') markAway();
+      else markReturn();
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('blur', markAway);
+    window.addEventListener('focus', markReturn);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      window.removeEventListener('blur', markAway);
+      window.removeEventListener('focus', markReturn);
+    };
+  }, [currentIndex, slides.length]);
+
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      const session = buildWitnessSessionFromDraft('abandoned');
+      if (!session) return;
+      appendLocalWitnessSession(session);
+      clearActiveStudySession();
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   // --- 番茄钟倒计时 ---
   const pomodoroPhaseRef = useRef(pomodoroPhase);
@@ -899,6 +1087,160 @@ const App: React.FC = () => {
   const handleLogin = () => { setLoginModalOpen(true); };
   const handleLogout = async () => { if (window.confirm("确定要退出登录吗？")) await logoutUser(); };
 
+  const commitProfileNotebook = useCallback((next: LearnerProfileNotebook) => {
+    setProfileNotebook(normalizeProfileNotebook({ ...next, updatedAt: Date.now() }));
+  }, []);
+
+  const flushActiveStudyPageSegment = (at = Date.now()) => {
+    const draft = activeStudyDraftRef.current;
+    if (!draft || draft.currentPageNumber == null || draft.awayStartedAt !== null) return;
+    const durationMs = at - draft.pageEnteredAt;
+    if (durationMs <= 0) return;
+    draft.pageSegments.push({
+      pageNumber: draft.currentPageNumber,
+      enteredAt: draft.pageEnteredAt,
+      leftAt: at,
+      durationMs,
+    });
+    draft.pageEnteredAt = at;
+  };
+
+  const buildWitnessSessionFromDraft = (status: StudyWitnessSession['status']): StudyWitnessSession | null => {
+    const draft = activeStudyDraftRef.current;
+    if (!draft) return null;
+    const endedAt = Date.now();
+    if (draft.awayStartedAt !== null) {
+      draft.awayEvents.push({
+        startedAt: draft.awayStartedAt,
+        endedAt,
+        durationMs: endedAt - draft.awayStartedAt,
+      });
+      draft.awayStartedAt = null;
+    } else {
+      flushActiveStudyPageSegment(endedAt);
+    }
+    const activeDurationMs = draft.pageSegments.reduce((sum, segment) => sum + segment.durationMs, 0);
+    return {
+      id: draft.id,
+      fileName: draft.fileName,
+      fileHash: draft.fileHash,
+      cloudSessionId: draft.cloudSessionId,
+      startedAt: draft.startedAt,
+      endedAt,
+      status,
+      totalDurationMs: endedAt - draft.startedAt,
+      activeDurationMs,
+      pageSegments: draft.pageSegments,
+      pageSummaries: summarizeWitnessPages(draft.pageSegments),
+      awayEvents: draft.awayEvents,
+      finalPageNumber: draft.currentPageNumber,
+      createdAt: Date.now(),
+    };
+  };
+
+  const clearActiveStudySession = () => {
+    activeStudyDraftRef.current = null;
+    setActiveStudyStartedAt(null);
+    setActiveStudyElapsedMs(0);
+  };
+
+  const persistWitnessSession = async (session: StudyWitnessSession) => {
+    appendLocalWitnessSession(session);
+    if (user) {
+      await saveCloudWitnessSession(user, session);
+    }
+  };
+
+  const abandonActiveStudySession = async () => {
+    const session = buildWitnessSessionFromDraft('abandoned');
+    if (!session) return;
+    clearActiveStudySession();
+    try {
+      await persistWitnessSession(session);
+    } catch (e) {
+      console.warn('Abandoned witness save failed:', e);
+    }
+  };
+
+  const handleStartStudySession = () => {
+    if (!fileName || slides.length === 0) {
+      alert('请先打开一份 PDF。');
+      return;
+    }
+    if (activeStudyDraftRef.current) return;
+    const now = Date.now();
+    activeStudyDraftRef.current = {
+      id: `witness-${now}-${Math.random().toString(36).slice(2, 8)}`,
+      fileName,
+      fileHash,
+      cloudSessionId: currentSessionId,
+      startedAt: now,
+      currentPageNumber: currentIndex + 1,
+      pageEnteredAt: now,
+      pageSegments: [],
+      awayEvents: [],
+      awayStartedAt: null,
+    };
+    setActiveStudyStartedAt(now);
+    setActiveStudyElapsedMs(0);
+  };
+
+  const handleEndStudySession = async () => {
+    const session = buildWitnessSessionFromDraft('completed');
+    if (!session) return;
+    clearActiveStudySession();
+    setSummarySession(session);
+    setProfileSuggestion(null);
+    setProfileSuggestionDraft(null);
+    setProfileSuggestionError(null);
+    setIsGeneratingProfileSuggestion(true);
+    try {
+      await persistWitnessSession(session);
+      const localRecent = loadLocalWitnessSessions();
+      const cloudRecent = user ? await getCloudWitnessSessions(user, 20).catch(() => []) : [];
+      const mergedRecent = [session, ...cloudRecent, ...localRecent]
+        .filter((item, index, arr) => arr.findIndex((x) => x.id === item.id) === index)
+        .sort((a, b) => b.startedAt - a.startedAt);
+      const suggestion = await generateProfileNotebookUpdateSuggestion(profileNotebook, session, mergedRecent);
+      setProfileSuggestion(suggestion);
+      setProfileSuggestionDraft(suggestion.proposedNotebook);
+    } catch (e) {
+      console.warn('Profile suggestion generation failed:', e);
+      setProfileSuggestionError('AI 画像建议生成失败。录像已经保存，你可以稍后再试。');
+    } finally {
+      setIsGeneratingProfileSuggestion(false);
+    }
+  };
+
+  const closeProfileSummaryModal = () => {
+    setSummarySession(null);
+    setProfileSuggestion(null);
+    setProfileSuggestionDraft(null);
+    setProfileSuggestionError(null);
+    setIsGeneratingProfileSuggestion(false);
+  };
+
+  const handleAcceptProfileSuggestion = async () => {
+    if (!profileSuggestionDraft) return;
+    commitProfileNotebook(profileSuggestionDraft);
+    closeProfileSummaryModal();
+  };
+
+  const handleSaveProfileSuggestionForLater = async () => {
+    if (!profileSuggestion) {
+      closeProfileSummaryModal();
+      return;
+    }
+    const suggestionToSave = profileSuggestionDraft
+      ? { ...profileSuggestion, proposedNotebook: normalizeProfileNotebook(profileSuggestionDraft) }
+      : profileSuggestion;
+    appendLocalPendingSuggestion(suggestionToSave);
+    if (user) {
+      saveCloudPendingSuggestion(user, suggestionToSave).catch(() => {});
+    }
+    closeProfileSummaryModal();
+  };
+
   const handleOpenHistory = async () => { setHistoryItems(await storageService.getAllHistory()); setIsHistoryOpen(true); };
   const handleDeleteHistory = async (hash: string) => { await storageService.deleteFileState(hash); setHistoryItems(await storageService.getAllHistory()); };
   const handleSelectHistory = (item: FileHistoryItem) => { setRestoreHash(item.hash); setIsHistoryOpen(false); alert(`请重新选择文件 "${item.name}" 以恢复学习进度。`); hiddenFileInputRef.current?.click(); };
@@ -1022,6 +1364,7 @@ const App: React.FC = () => {
         processFile(file),
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error('处理超时（120秒），请重试或换一个较小的 PDF。')), PROCESS_FILE_TIMEOUT_MS)),
       ]);
+      setShellMode('study');
       // #region agent log
       _debugLog('App.tsx:handleFileUpload', 'processFile resolved', {});
       // #endregion
@@ -1042,6 +1385,8 @@ const App: React.FC = () => {
 
   const handleRestoreCloudSession = async (session: CloudSession) => {
     if (!user) return;
+    const wasInDashboard = shellMode === 'dashboard';
+    if (wasInDashboard) setShellMode('study');
     setIsProcessingFile(true);
     try {
       if (!session.fileUrl) throw new Error('File URL missing');
@@ -1079,6 +1424,7 @@ const App: React.FC = () => {
       };
       await processFile(file, restoreData, fullData.customAvatarUrl, fullData.customBackgroundUrl);
       setCurrentSessionId(session.id);
+      setShellMode('study');
       setIsSyncing(true);
       const pendCloud = pendingNavSegmentRef.current;
       if (pendCloud && pendCloud.cloudSessionId === session.id) {
@@ -1087,6 +1433,7 @@ const App: React.FC = () => {
       }
     } catch (e) {
       console.error('Restore failed:', e);
+      if (wasInDashboard) setShellMode('dashboard');
       alert('无法从云端恢复，请重试。');
     } finally {
       setIsProcessingFile(false);
@@ -2308,6 +2655,10 @@ const App: React.FC = () => {
       onLogout={handleLogout}
       isSyncing={isSyncing}
       onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+      onOpenDashboard={() => {
+        if (activeStudyDraftRef.current) abandonActiveStudySession();
+        setShellMode('dashboard');
+      }}
       onEnterEnergyMode={() => setIsEnergyMode(true)}
       onOpenMarkPanel={() => setIsMarkPanelOpen(true)}
       hasMarkOnCurrentPage={fileName && pageMarks[fileName] && pageMarks[fileName][currentIndex + 1] ? pageMarks[fileName][currentIndex + 1].length > 0 : false}
@@ -2540,7 +2891,7 @@ const App: React.FC = () => {
   );
   
   if (!hasStarted) {
-    return <WelcomeScreen onStart={() => setHasStarted(true)} />;
+    return <WelcomeScreen onStart={() => { setHasStarted(true); setShellMode('dashboard'); }} />;
   }
 
   if (authLoading) {
@@ -2548,6 +2899,27 @@ const App: React.FC = () => {
       <div className="min-h-screen flex items-center justify-center bg-[#FFFBF7] flex-col space-y-4">
         <Loader2 className="w-10 h-10 animate-spin text-slate-400" />
         <p className="text-sm font-bold text-slate-500">正在连接云端...</p>
+      </div>
+    );
+  }
+
+  if (shellMode === 'dashboard') {
+    return (
+      <div className="min-h-screen bg-[#f7f8f6] font-sans">
+        <LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
+        <DashboardScreen
+          user={user}
+          isSyncing={isSyncing}
+          isProcessing={isProcessingFile}
+          currentFileName={fileName}
+          onLogin={handleLogin}
+          onLogout={handleLogout}
+          onRestoreSession={handleRestoreCloudSession}
+          onUpload={handleFileUpload}
+          onOpenCurrentStudy={() => setShellMode('study')}
+          profileNotebook={profileNotebook}
+          onProfileNotebookChange={commitProfileNotebook}
+        />
       </div>
     );
   }
@@ -2564,6 +2936,119 @@ const App: React.FC = () => {
       )}
 
       <LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
+
+      {summarySession && (
+        <div className="fixed inset-0 z-[220] bg-slate-900/35 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-white rounded-2xl shadow-2xl border border-stone-200 p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-black text-slate-900">本次学习小结</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {summarySession.fileName} · {formatDurationShort(summarySession.totalDurationMs)}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeProfileSummaryModal}
+                className="p-2 rounded-lg text-slate-400 hover:bg-stone-100 hover:text-slate-700"
+                aria-label="关闭"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <section className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+              <h3 className="text-sm font-black text-slate-800">这次记录到的现象</h3>
+              <ul className="mt-3 space-y-2 text-sm text-slate-600">
+                {buildLocalSessionSummary(summarySession).map((line) => (
+                  <li key={line} className="flex gap-2">
+                    <span className="mt-2 h-1.5 w-1.5 rounded-full bg-slate-400 shrink-0" />
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+
+            <section className="mt-5">
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-sm font-black text-slate-800">画像更新建议</h3>
+                {isGeneratingProfileSuggestion && (
+                  <span className="inline-flex items-center gap-2 text-xs font-bold text-indigo-600">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    正在生成
+                  </span>
+                )}
+              </div>
+
+              {profileSuggestionError && (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  {profileSuggestionError}
+                </div>
+              )}
+
+              {profileSuggestion && (
+                <div className="mt-3 space-y-4">
+                  <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+                    <p className="text-xs font-black uppercase text-indigo-500">AI 小结</p>
+                    <ul className="mt-2 space-y-1 text-sm text-indigo-900">
+                      {profileSuggestion.sessionSummary.map((line) => (
+                        <li key={line}>· {line}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {profileSuggestionDraft && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {([
+                        ['smoothAndStuck', '哪里顺 / 哪里卡'],
+                        ['focusDuration', '专注能撑多久'],
+                        ['stuckReaction', '卡住时的反应'],
+                        ['bestTime', '什么时候状态最好'],
+                        ['recentTrend', '最近怎么样'],
+                      ] as const).map(([key, label]) => (
+                        <label key={key} className={key === 'recentTrend' ? 'md:col-span-2' : ''}>
+                          <span className="text-xs font-black text-slate-400 uppercase">{label}</span>
+                          <textarea
+                            value={profileSuggestionDraft[key]}
+                            onChange={(event) => setProfileSuggestionDraft((prev) => prev ? { ...prev, [key]: event.target.value } : prev)}
+                            className="mt-1 w-full h-24 rounded-xl border border-slate-200 p-3 text-sm text-slate-700 outline-none resize-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </section>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeProfileSummaryModal}
+                className="px-4 py-2 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-100"
+              >
+                跳过这次
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveProfileSuggestionForLater}
+                disabled={!profileSuggestion}
+                className="px-4 py-2 rounded-xl text-sm font-bold border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+              >
+                稍后再看
+              </button>
+              <button
+                type="button"
+                onClick={handleAcceptProfileSuggestion}
+                disabled={!profileSuggestionDraft}
+                className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-40"
+              >
+                保存当前建议
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {user && examHubOpen && (
         <ExamHubModal
@@ -3128,6 +3613,39 @@ const App: React.FC = () => {
           </div>
         )}
         {commonHeader}
+
+        {fileName && slides.length > 0 && (
+          <div className="shrink-0 border-b border-emerald-100 bg-gradient-to-r from-emerald-50 via-white to-sky-50 px-6 py-3">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className={`h-2.5 w-2.5 rounded-full ${activeStudyStartedAt ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
+                  <p className="text-sm font-black text-slate-900">本次学习</p>
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-black ${activeStudyStartedAt ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                    {activeStudyStartedAt ? '记录中' : '未开始记录'}
+                  </span>
+                </div>
+                <p className="mt-1 truncate text-xs font-semibold text-slate-500">
+                  {activeStudyStartedAt
+                    ? `已经记录 ${formatDurationShort(activeStudyElapsedMs)}，当前第 ${currentIndex + 1} / ${slides.length} 页`
+                    : '点开始后，只记录页面停留、离开和回来，不记录聊天内容。'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={activeStudyStartedAt ? handleEndStudySession : handleStartStudySession}
+                disabled={isProcessingFile}
+                className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  activeStudyStartedAt
+                    ? 'bg-rose-500 text-white hover:bg-rose-600'
+                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                }`}
+              >
+                {activeStudyStartedAt ? '结束本次学习' : '开始学习'}
+              </button>
+            </div>
+          </div>
+        )}
         
         {false && fileName && !isImmersive && (
             <button

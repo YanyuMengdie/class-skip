@@ -561,38 +561,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="w-[320px] bg-[#F9F9F9] border-r border-stone-200 flex flex-col h-full shrink-0 z-40 animate-in slide-in-from-left-4 duration-200 shadow-xl shadow-stone-200/50">
-      
-      {/* 1. New Navigation Bar (Flex Based) */}
-      <div className="p-2 border-b border-stone-200 bg-white flex items-center justify-between gap-1">
-          {[
-              { id: 'pages', icon: LayoutGrid, label: '页面' },
-              { id: 'cloud', icon: Cloud, label: '云端' },
-              { id: 'calendar', icon: CalendarIcon, label: '日历' },
-              { id: 'memo', icon: PenTool, label: '便签' },
-          ].map((tab) => (
-              <button 
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as Tab)}
-                className={`flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-xl transition-all min-w-0 ${
-                    activeTab === tab.id 
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' 
-                    : 'text-stone-400 hover:bg-stone-100 hover:text-stone-600'
-                }`}
-                title={tab.label}
-              >
-                  <tab.icon className="w-5 h-5 mb-0.5 shrink-0" />
-                  <span className="text-[10px] font-bold truncate">{tab.label}</span>
-              </button>
-          ))}
-      </div>
 
-      {/* 2. Content Area */}
+      {/* Content Area */}
       <div className="flex-1 overflow-y-auto custom-scrollbar relative bg-[#F9F9F9]"
            onDragOver={(e) => { e.preventDefault(); }} 
            onDrop={handleRootDrop}
       >
-          {/* --- TAB: PAGES --- */}
-          {activeTab === 'pages' && (
+          {/* --- PAGES --- */}
               <div className="p-3 flex flex-col gap-4">
                 {totalPages === 0 ? (
                     <div className="flex flex-col items-center justify-center mt-20 text-stone-300 space-y-3">
@@ -745,7 +720,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     </>
                 )}
               </div>
-          )}
 
           {/* --- TAB: CLOUD --- */}
           {activeTab === 'cloud' && (

@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail, LayeredReadingRound3Unit, LayeredReadingQuestion, LayeredReadingQuestionGrade, SkimContentType } from "@/types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail, LayeredReadingRound3Unit, LayeredReadingQuestion, LayeredReadingQuestionGrade, SkimContentType, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessSession } from "@/types";
 import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProfiles";
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/lib/exam/scaffoldingClassifier";
@@ -19,9 +19,22 @@ import {
   buildLayeredQuestionGradingPrompt,
 } from "@/lib/prompts/layeredReadingPrompts";
 
-// Ensure API Key exists or fail gracefully in logs (though process.env check is assumed handled elsewhere)
-const apiKey = process.env.API_KEY || "";
-const ai = new GoogleGenAI({ apiKey: apiKey });
+let aiClient: GoogleGenAI | null = null;
+
+const getAIClient = (): GoogleGenAI => {
+  const apiKey = process.env.API_KEY || "";
+  if (!apiKey) {
+    throw new Error("Gemini API key is missing. Set API_KEY before using AI features.");
+  }
+  if (!aiClient) aiClient = new GoogleGenAI({ apiKey });
+  return aiClient;
+};
+
+const ai = new Proxy({} as GoogleGenAI, {
+  get(_target, prop: keyof GoogleGenAI) {
+    return getAIClient()[prop];
+  },
+});
 
 export interface TaskHugResponse {
   message: string;
@@ -3752,4 +3765,111 @@ export const gradeLayeredQuestion = async (
         console.error('gradeLayeredQuestion Error:', e);
         return null;
     }
+};
+
+const summarizeWitnessForPrompt = (session: StudyWitnessSession) => ({
+    id: session.id,
+    fileName: session.fileName,
+    startedAt: new Date(session.startedAt).toISOString(),
+    endedAt: new Date(session.endedAt).toISOString(),
+    status: session.status,
+    totalMinutes: Math.round(session.totalDurationMs / 6000) / 10,
+    activeMinutes: Math.round(session.activeDurationMs / 6000) / 10,
+    finalPageNumber: session.finalPageNumber,
+    pageSummaries: session.pageSummaries
+        .slice()
+        .sort((a, b) => b.totalDurationMs - a.totalDurationMs)
+        .slice(0, 8)
+        .map((page) => ({
+            pageNumber: page.pageNumber,
+            totalMinutes: Math.round(page.totalDurationMs / 6000) / 10,
+            visits: page.visits,
+        })),
+    awayEvents: session.awayEvents.map((event) => ({
+        startedAt: new Date(event.startedAt).toISOString(),
+        durationSeconds: Math.round(event.durationMs / 1000),
+    })),
+});
+
+export const generateProfileNotebookUpdateSuggestion = async (
+    currentNotebook: LearnerProfileNotebook,
+    currentSession: StudyWitnessSession,
+    recentSessions: StudyWitnessSession[]
+): Promise<ProfileNotebookUpdateSuggestion> => {
+    const recentCutoff = Date.now() - 21 * 24 * 60 * 60 * 1000;
+    const recentWindow = recentSessions
+        .filter((session) => session.status === 'completed')
+        .filter((session) => session.startedAt >= recentCutoff || session.id === currentSession.id)
+        .slice(0, 5);
+
+    const prompt = `
+你在更新一份"长期画像笔记本"。规则非常重要:
+1. 只记看得见的现象，不猜原因，不贴"懒/逃避/自律差/害怕"这类判断。
+2. 用户可以编辑画像；当前画像就是最高优先级事实。你只能基于它做轻微印证、修正、补充。
+3. 前四栏是长期稳定判断；第 5 栏"最近状态趋势"只看最近 5 次学习和最近 21 天。
+4. 输出必须是 JSON，不要输出 markdown。
+
+当前正式笔记本:
+${JSON.stringify(currentNotebook, null, 2)}
+
+本次学习录像:
+${JSON.stringify(summarizeWitnessForPrompt(currentSession), null, 2)}
+
+最近窗口内的学习录像:
+${JSON.stringify(recentWindow.map(summarizeWitnessForPrompt), null, 2)}
+
+请生成:
+- sessionSummary: 3 到 5 条本次学习小结，必须是现象描述。
+- proposedNotebook: 更新后的五栏文字，保留用户语气，避免过度断言。
+`;
+
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    sessionSummary: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                    },
+                    proposedNotebook: {
+                        type: Type.OBJECT,
+                        properties: {
+                            smoothAndStuck: { type: Type.STRING },
+                            focusDuration: { type: Type.STRING },
+                            stuckReaction: { type: Type.STRING },
+                            bestTime: { type: Type.STRING },
+                            recentTrend: { type: Type.STRING },
+                            welcomeLine: { type: Type.STRING },
+                        },
+                        required: ['smoothAndStuck', 'focusDuration', 'stuckReaction', 'bestTime', 'recentTrend'],
+                    },
+                },
+                required: ['sessionSummary', 'proposedNotebook'],
+            },
+        },
+    });
+
+    const parsed = JSON.parse(response.text || '{}') as {
+        sessionSummary?: string[];
+        proposedNotebook?: Partial<LearnerProfileNotebook>;
+    };
+    const now = Date.now();
+    return {
+        id: `profile-suggestion-${now}-${Math.random().toString(36).slice(2, 8)}`,
+        witnessSessionId: currentSession.id,
+        createdAt: now,
+        sessionSummary: Array.isArray(parsed.sessionSummary) && parsed.sessionSummary.length > 0
+            ? parsed.sessionSummary.map(String).slice(0, 5)
+            : ['本次学习已记录，但 AI 没有生成可用小结。'],
+        proposedNotebook: {
+            ...currentNotebook,
+            ...(parsed.proposedNotebook || {}),
+            updatedAt: now,
+            version: currentNotebook.version + 1,
+        },
+    };
 };

@@ -681,6 +681,67 @@ export interface FileHistoryItem {
   state: FilePersistedState;
 }
 
+// --- LONG-TERM PROFILE NOTEBOOK ---
+export type LearnerProfileAvatarTone = 'sky' | 'sage' | 'rose' | 'ink';
+
+export interface LearnerProfileNotebook {
+  companionName: string;
+  welcomeLine: string;
+  avatarTone: LearnerProfileAvatarTone;
+  smoothAndStuck: string;
+  focusDuration: string;
+  stuckReaction: string;
+  bestTime: string;
+  recentTrend: string;
+  updatedAt: number;
+  version: number;
+}
+
+export interface StudyWitnessPageSegment {
+  pageNumber: number;
+  enteredAt: number;
+  leftAt: number;
+  durationMs: number;
+}
+
+export interface StudyWitnessPageSummary {
+  pageNumber: number;
+  totalDurationMs: number;
+  visits: number;
+}
+
+export interface StudyWitnessAwayEvent {
+  startedAt: number;
+  endedAt: number;
+  durationMs: number;
+}
+
+export interface StudyWitnessSession {
+  id: string;
+  userId?: string;
+  fileName: string;
+  fileHash: string | null;
+  cloudSessionId?: string | null;
+  startedAt: number;
+  endedAt: number;
+  status: 'completed' | 'abandoned';
+  totalDurationMs: number;
+  activeDurationMs: number;
+  pageSegments: StudyWitnessPageSegment[];
+  pageSummaries: StudyWitnessPageSummary[];
+  awayEvents: StudyWitnessAwayEvent[];
+  finalPageNumber: number | null;
+  createdAt: number;
+}
+
+export interface ProfileNotebookUpdateSuggestion {
+  id: string;
+  witnessSessionId: string;
+  createdAt: number;
+  sessionSummary: string[];
+  proposedNotebook: LearnerProfileNotebook;
+}
+
 // --- CLOUD SESSION TYPES ---
 export interface CloudSession {
   id: string;
@@ -1023,4 +1084,3 @@ export interface TurtleSoupState {
   solved: boolean;
   questionHistory?: { q: string; a: string }[];
 }
-

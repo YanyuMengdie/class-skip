@@ -60,6 +60,11 @@ interface HeaderProps {
   
   // Sidebar
   onToggleSidebar: () => void;
+  onOpenDashboard?: () => void;
+  isStudySessionActive?: boolean;
+  studySessionElapsedMs?: number;
+  onStartStudySession?: () => void;
+  onEndStudySession?: () => void;
 
   // Energy Mode
   onEnterEnergyMode: () => void;
@@ -149,6 +154,11 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   isSyncing,
   onToggleSidebar,
+  onOpenDashboard,
+  isStudySessionActive = false,
+  studySessionElapsedMs = 0,
+  onStartStudySession,
+  onEndStudySession,
   onEnterEnergyMode,
   onOpenMarkPanel,
   hasMarkOnCurrentPage,
@@ -226,7 +236,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isPomodoroActive = pomodoroPhase === 'study' || pomodoroPhase === 'break';
   const displayTime = isPomodoroActive ? (pomodoroRemainingSeconds ?? 0) : studyTime;
   return (
-    <header className={`${isImmersive ? 'bg-white border-b border-stone-200' : 'bg-white/80 backdrop-blur-md border-b border-stone-100'} shadow-sm z-30 relative flex flex-col transition-all`}>
+    <header className={`${isImmersive ? 'bg-white border-b border-stone-200' : 'bg-white/80 backdrop-blur-md border-b border-stone-100'} shadow-sm z-[260] relative flex flex-col transition-all`}>
       {/* Top Bar */}
       <div className="h-16 flex items-center justify-between px-6">
         <div className="flex items-center space-x-3 min-w-[200px]">
@@ -238,6 +248,18 @@ export const Header: React.FC<HeaderProps> = ({
           >
              <Menu className="w-5 h-5" />
           </button>
+
+          {onOpenDashboard && (
+            <button
+              type="button"
+              onClick={onOpenDashboard}
+              className="p-2 mr-1 hover:bg-stone-100 rounded-lg text-stone-500 hover:text-stone-800 transition-colors"
+              title="Dashboard"
+              aria-label="Dashboard"
+            >
+              <LayoutDashboard className="w-5 h-5" />
+            </button>
+          )}
 
           <div className="bg-gradient-to-br from-violet-400 to-fuchsia-400 p-2 rounded-xl shadow-md shadow-violet-200 transform hover:scale-105 transition-transform">
             <FileText className="w-5 h-5 text-white" />
@@ -319,6 +341,24 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right: 与 3001 一致 = 学习工具、更多、上传、背景音（+ 账户）*/}
         <div className="flex items-center gap-x-2 min-w-[200px] justify-end">
+          {onStartStudySession && onEndStudySession && (
+            <button
+              type="button"
+              onClick={isStudySessionActive ? onEndStudySession : onStartStudySession}
+              disabled={isProcessing || totalPages === 0}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                isStudySessionActive
+                  ? 'bg-rose-500 text-white hover:bg-rose-600'
+                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+              }`}
+              title={isStudySessionActive ? '结束本次学习并生成小结' : '开始记录本次学习'}
+              aria-label={isStudySessionActive ? '结束本次学习' : '开始本次学习'}
+            >
+              <Timer className="w-3.5 h-3.5" />
+              <span>{isStudySessionActive ? `结束 ${formatTime(Math.round(studySessionElapsedMs / 1000))}` : '开始学习'}</span>
+            </button>
+          )}
+
           {/* 学习工具 */}
           {onOpenReview && (
             <button onClick={onOpenReview} className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-sm" title="选择文档进行测验、闪卡、考前速览等" aria-label="学习工具">
@@ -350,7 +390,7 @@ export const Header: React.FC<HeaderProps> = ({
               <MoreHorizontal className="w-5 h-5" />
             </button>
             {moreMenuOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-stone-200 py-1 z-[100]">
+              <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-stone-200 py-1 z-[300]">
                 {onStartClass && !isClassroomMode && (
                   <button type="button" onClick={() => { onStartClass(); setMoreMenuOpen(false); }} disabled={isTranscriptionSupported === false} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50 disabled:opacity-50">
                     <Mic className="w-4 h-4 text-slate-500" /> 上课

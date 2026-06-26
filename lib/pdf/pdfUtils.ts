@@ -76,6 +76,57 @@ export const convertPdfToImages = async (file: File): Promise<string[]> => {
   return images;
 };
 
+export const renderPdfFirstPagePreview = async (file: File, scale = 0.8): Promise<string> => {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({
+    data: arrayBuffer,
+    ...getDocumentOptions(),
+  }).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    throw new Error('Could not get canvas context');
+  }
+
+  canvas.height = viewport.height;
+  canvas.width = viewport.width;
+
+  await page.render({
+    canvasContext: context,
+    viewport,
+  } as any).promise;
+
+  return canvas.toDataURL('image/png');
+};
+
+export const renderPdfFirstPagePreviewFromUrl = async (url: string, filename: string, scale = 0.8): Promise<string> => {
+  const pdf = await pdfjsLib.getDocument({
+    url,
+    ...getDocumentOptions(),
+  }).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+
+  if (!context) {
+    throw new Error(`Could not render preview for ${filename}`);
+  }
+
+  canvas.height = viewport.height;
+  canvas.width = viewport.width;
+
+  await page.render({
+    canvasContext: context,
+    viewport,
+  } as any).promise;
+
+  return canvas.toDataURL('image/png');
+};
+
 export const extractPdfText = async (file: File): Promise<string[]> => {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({

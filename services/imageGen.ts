@@ -1,8 +1,22 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-const apiKey = process.env.API_KEY || "";
-const ai = new GoogleGenAI({ apiKey: apiKey });
+let aiClient: GoogleGenAI | null = null;
+
+const getAIClient = (): GoogleGenAI => {
+  const apiKey = process.env.API_KEY || "";
+  if (!apiKey) {
+    throw new Error("Gemini API key is missing. Set API_KEY before using image generation.");
+  }
+  if (!aiClient) aiClient = new GoogleGenAI({ apiKey });
+  return aiClient;
+};
+
+const ai = new Proxy({} as GoogleGenAI, {
+  get(_target, prop: keyof GoogleGenAI) {
+    return getAIClient()[prop];
+  },
+});
 
 // Helper to convert Base64 string to Blob
 const base64ToBlob = (base64: string, mimeType: string): Blob => {
