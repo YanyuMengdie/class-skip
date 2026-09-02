@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Image as ImageIcon, Coffee, X, Download, StickyNote, GripHorizontal, Minus, Plus, Scaling, Move, Bold, ZoomIn, ZoomOut, Maximize2, ChevronDown } from 'lucide-react';
+import { Image as ImageIcon, Coffee, X, Download, StickyNote, GripHorizontal, Minus, Plus, Scaling, Move, Bold, ZoomIn, ZoomOut, Maximize2, ChevronDown, Loader2 } from 'lucide-react';
 import { Slide, SlideAnnotation } from '@/types';
 import { plainTextToHtmlWithSupSub } from '@/features/reader/lib/textUtils';
 
@@ -10,6 +10,7 @@ interface SlideViewerProps {
   onUpdateAnnotation: (id: string, updates: Partial<SlideAnnotation>) => void;
   onDeleteAnnotation: (id: string) => void;
   onExportPDF: () => void;
+  isExporting?: boolean;
   onRequestUpload?: () => void;
   isImmersive?: boolean;
   leftPanelRef?: React.RefObject<HTMLDivElement>; // 左侧面板的 ref，用于扩大拖拽范围
@@ -22,6 +23,20 @@ const COLORS = [
   { hex: '#3b82f6', name: 'Blue' },   // blue-500
 ];
 
+const normalizeHtmlLineBreaks = (html: string): string => (
+  html.replace(/<br\s*\/?>|&lt;br\s*\/?&gt;/gi, '\n')
+);
+
+const richAnnotationClassName = [
+  'w-full h-full',
+  '[&_table]:w-full [&_table]:border-collapse [&_table]:table-fixed',
+  '[&_thead]:bg-stone-100',
+  '[&_th]:border-b [&_th]:border-stone-300 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_th]:align-top',
+  '[&_td]:border-b [&_td]:border-stone-200 [&_td]:px-3 [&_td]:py-3 [&_td]:align-top',
+  '[&_th]:break-words [&_td]:break-words',
+  '[&_p]:mb-2 [&_p:last-child]:mb-0',
+].join(' ');
+
 export const SlideViewer: React.FC<SlideViewerProps> = ({ 
   slide, 
   annotations = [], 
@@ -29,6 +44,7 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
   onUpdateAnnotation, 
   onDeleteAnnotation,
   onExportPDF,
+  isExporting = false,
   onRequestUpload: _onRequestUpload,
   isImmersive = false,
   leftPanelRef
@@ -61,7 +77,7 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
     if (editingId && editorRef.current) {
       const currentNote = annotations.find(n => n.id === editingId);
       if (currentNote && editorRef.current.innerHTML !== currentNote.text) {
-        editorRef.current.innerHTML = currentNote.text;
+        editorRef.current.innerHTML = normalizeHtmlLineBreaks(currentNote.text);
       }
       // 聚焦并移动光标到末尾
       editorRef.current.focus();
@@ -322,9 +338,9 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
 
   // CSS Styles for the Container based on Mode
   // If immersive, we want a "Preview" like look: Gray bg, centered content, shadow
-  const containerClasses = isImmersive 
-    ? "bg-[#E5E7EB] w-full h-full overflow-auto flex items-start justify-center p-8 relative"
-    : `flex-1 h-full flex items-center justify-center p-8 overflow-hidden relative transition-colors duration-200 ${isDragOver ? 'bg-amber-50 ring-4 ring-inset ring-amber-300' : 'bg-[#FFFBF7]'}`;
+  const containerClasses = isImmersive
+    ? "craft-slide-viewer bg-[#E5E7EB] w-full h-full overflow-auto flex flex-col items-center justify-start p-6 relative"
+    : `craft-slide-viewer flex-1 h-full flex items-center justify-center p-8 overflow-hidden relative transition-colors duration-200 ${isDragOver ? 'bg-amber-50 ring-4 ring-inset ring-amber-300' : 'bg-[#FFFBF7]'}`;
 
   // If normal mode, we constrain strictly to viewport. If immersive, we allow overflow for zoom.
   // We use `min-h-min` and `min-w-min` in a flex container to allow centering when smaller than viewport,
@@ -339,11 +355,15 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
         onDrop={handleDrop}
         onMouseDown={handleBgClick} 
     >
-      {!isImmersive && <div className="absolute inset-0 bg-[radial-gradient(#E2E8F0_1px,transparent_1px)] [background-size:20px_20px] opacity-60 pointer-events-none" />}
-      
-      {/* ZOOM CONTROLS (Floating in Immersive) */}
+      {/* ZOOM CONTROLS */}
       {slide && (
-          <div className={`absolute z-50 flex items-center space-x-2 ${isImmersive ? 'bottom-6 left-1/2 -translate-x-1/2 bg-white/90 shadow-lg px-4 py-2 rounded-full border border-stone-200' : 'top-6 right-6'}`}>
+          <div
+            className={
+              isImmersive
+                ? 'sticky top-4 z-50 self-end mb-4 flex items-center space-x-2 rounded-2xl border border-stone-200 bg-white/90 px-3 py-2 shadow-lg backdrop-blur transition-opacity hover:opacity-100'
+                : 'absolute top-6 right-6 z-50 flex items-center space-x-2'
+            }
+          >
               
               {isImmersive && (
                   <>
@@ -358,11 +378,12 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
 
               <button 
                 onClick={(e) => { e.stopPropagation(); onExportPDF(); }}
-                className={`${isImmersive ? 'text-slate-600 hover:text-slate-900 p-1.5' : 'bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl shadow-xl'} flex items-center space-x-2 transition-all font-bold text-sm`}
-                title="导出笔记版 PDF"
+                disabled={isExporting}
+                className={`${isImmersive ? 'text-slate-600 hover:text-slate-900 p-1.5' : 'bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl shadow-xl'} flex items-center space-x-2 transition-all font-bold text-sm ${isExporting ? 'opacity-70 cursor-not-allowed' : ''}`}
+                title="导出复习讲义 PDF"
               >
-                  <Download className="w-4 h-4" />
-                  {!isImmersive && <span>导出笔记版 PDF</span>}
+                  {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  {!isImmersive && <span>{isExporting ? '导出中...' : '导出复习讲义 PDF'}</span>}
               </button>
           </div>
       )}
@@ -378,10 +399,10 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
 
       {slide ? (
         // Inner Wrapper for centering and scaling
-        <div className={`relative transition-transform duration-100 ease-out origin-top ${isImmersive ? 'mt-4 mb-20' : 'w-full h-full flex items-center justify-center p-4'}`}>
+        <div className={`relative transition-transform duration-100 ease-out origin-top ${isImmersive ? 'w-full flex justify-center pb-12' : 'w-full h-full flex items-center justify-center p-4'}`}>
           <div 
             ref={containerRef} 
-            className={`relative shadow-2xl bg-white ${isImmersive ? '' : 'max-w-full max-h-full rounded-xl border-[6px] border-white'}`}
+            className={`craft-pdf-sheet relative bg-white ${isImmersive ? '' : 'max-w-full max-h-full rounded-lg border-[6px] border-white'}`}
             style={{
                 width: isImmersive ? `${zoom * 100}%` : 'auto',
                 // For immersive, allow natural height. For normal, constrain.
@@ -479,7 +500,7 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
                                 ref={editorRef}
                                 contentEditable
                                 suppressContentEditableWarning
-                                className="w-full h-full bg-transparent focus:outline-none p-0 m-0 border-none cursor-text select-text"
+                                className={`${richAnnotationClassName} bg-transparent focus:outline-none p-0 m-0 border-none cursor-text select-text`}
                                 style={{ 
                                     fontSize: 'inherit', 
                                     color: 'inherit',
@@ -498,7 +519,7 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
                             />
                         ) : (
                             <div 
-                                className="w-full h-full select-none pointer-events-none"
+                                className={`${richAnnotationClassName} select-none pointer-events-none`}
                                 style={{ 
                                     whiteSpace: 'pre-wrap', 
                                     wordBreak: 'break-word',
@@ -506,7 +527,7 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
                                     // 确保 KaTeX 公式不会被拆分
                                     overflow: 'auto'
                                 }}
-                                dangerouslySetInnerHTML={{ __html: note.text }} 
+                                dangerouslySetInnerHTML={{ __html: normalizeHtmlLineBreaks(note.text) }} 
                             />
                         )}
                     </div>

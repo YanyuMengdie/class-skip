@@ -38,11 +38,11 @@ interface HeaderProps {
   onToggleImmersive: () => void;
   onLayoutPreset?: (ratio: number) => void;
 
-  // Skim Mode + Layered Reading Mode
+  // Guided Reading + Layered Reading Mode
   viewMode: ViewMode;
-  /** 切换略读 ↔ 精读（'skim' 时回 'deep'，否则切到 'skim'，含从 'layered' 直切） */
+  /** 切换领读 ↔ 页面工具（内部仍兼容使用 'skim' / 'deep'） */
   onToggleSkim: () => void;
-  /** 切换递进阅读 ↔ 精读（'layered' 时回 'deep'，否则切到 'layered'，含从 'skim' 直切） */
+  /** 切换递进阅读 ↔ 领读 */
   onToggleLayered: () => void;
   hasStudyMap: boolean;
 
@@ -66,9 +66,6 @@ interface HeaderProps {
   onStartStudySession?: () => void;
   onEndStudySession?: () => void;
 
-  // Energy Mode
-  onEnterEnergyMode: () => void;
-
   // Page Mark
   onOpenMarkPanel?: () => void;
   hasMarkOnCurrentPage?: boolean;
@@ -77,13 +74,15 @@ interface HeaderProps {
   musicPanelOpen?: boolean;
   onMusicPanelOpenChange?: (open: boolean) => void;
 
-  // 上课录音文本（有记录时显示入口）
+  // 课堂录音（有记录时显示入口）
   hasLectureHistory?: boolean;
   onOpenLectureTranscript?: () => void;
 
   // 上课模式（录音+转写）
   isClassroomMode?: boolean;
+  isClassroomPanelVisible?: boolean;
   onStartClass?: () => void;
+  onOpenClassroomPanel?: () => void;
   isTranscriptionSupported?: boolean;
 
   // 独立复习入口（选 1 个或多个 PDF 进行复习）
@@ -159,7 +158,6 @@ export const Header: React.FC<HeaderProps> = ({
   studySessionElapsedMs = 0,
   onStartStudySession,
   onEndStudySession,
-  onEnterEnergyMode,
   onOpenMarkPanel,
   hasMarkOnCurrentPage,
   musicPanelOpen,
@@ -167,7 +165,9 @@ export const Header: React.FC<HeaderProps> = ({
   hasLectureHistory,
   onOpenLectureTranscript,
   isClassroomMode,
+  isClassroomPanelVisible,
   onStartClass,
+  onOpenClassroomPanel,
   isTranscriptionSupported,
   onOpenReview,
   onOpenExamWorkspace,
@@ -236,7 +236,7 @@ export const Header: React.FC<HeaderProps> = ({
   const isPomodoroActive = pomodoroPhase === 'study' || pomodoroPhase === 'break';
   const displayTime = isPomodoroActive ? (pomodoroRemainingSeconds ?? 0) : studyTime;
   return (
-    <header className={`${isImmersive ? 'bg-white border-b border-stone-200' : 'bg-white/80 backdrop-blur-md border-b border-stone-100'} shadow-sm z-[260] relative flex flex-col transition-all`}>
+    <header className={`craft-reader-header ${isImmersive ? 'border-b border-stone-200' : 'border-b border-stone-100'} z-[260] relative flex flex-col transition-all`}>
       {/* Top Bar */}
       <div className="h-16 flex items-center justify-between px-6">
         <div className="flex items-center space-x-3 min-w-[200px]">
@@ -261,7 +261,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
           )}
 
-          <div className="bg-gradient-to-br from-violet-400 to-fuchsia-400 p-2 rounded-xl shadow-md shadow-violet-200 transform hover:scale-105 transition-transform">
+          <div className="craft-brand-mark p-2 rounded-lg transform hover:scale-105 transition-transform">
             <FileText className="w-5 h-5 text-white" />
           </div>
           <div className="hidden md:block">
@@ -296,7 +296,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
              </div>
 
-             {/* Mode Toggle Button — 略读 */}
+             {/* Mode Toggle Button — 领读 / 页面工具 */}
              {hasStudyMap && (
                  <button
                     onClick={onToggleSkim}
@@ -307,7 +307,7 @@ export const Header: React.FC<HeaderProps> = ({
                     }`}
                  >
                     {viewMode === 'skim' ? <Layers className="w-3.5 h-3.5" /> : <Rocket className="w-3.5 h-3.5" />}
-                    <span>{viewMode === 'skim' ? '返回精读' : '进入略读'}</span>
+                    <span>{viewMode === 'skim' ? '页面工具' : '进入领读'}</span>
                  </button>
              )}
 
@@ -320,7 +320,7 @@ export const Header: React.FC<HeaderProps> = ({
                     : 'bg-white text-slate-600 border-stone-200 hover:bg-stone-50'
                 }`}
              >
-                <span>{viewMode === 'layered' ? '返回精读' : '进入递进阅读'}</span>
+                <span>{viewMode === 'layered' ? '返回领读' : '进入递进阅读'}</span>
              </button>
 
              {/* Immersive Layout Controls */}
@@ -377,7 +377,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="hidden sm:inline">考试复习</span>
             </button>
           )}
-          {/* 更多：上课、学累了/休息、重点标记、沉浸、上课录音文本、计时、背景音入口等 */}
+          {/* 更多：上课、学累了/休息、重点标记、沉浸、课堂录音、计时、背景音入口等 */}
           <div className="relative" ref={moreMenuRef}>
             <button
               type="button"
@@ -397,9 +397,14 @@ export const Header: React.FC<HeaderProps> = ({
                   </button>
                 )}
                 {isClassroomMode && (
-                  <div className="flex items-center gap-2 px-4 py-2.5 text-sm text-rose-600 font-medium">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> 上课中
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { onOpenClassroomPanel?.(); setMoreMenuOpen(false); }}
+                    className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-rose-600 hover:bg-rose-50"
+                  >
+                    <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+                    {isClassroomPanelVisible ? '正在查看课堂字幕' : '返回课堂字幕'}
+                  </button>
                 )}
                 <div className="relative">
                   <button type="button" onClick={() => setRestSubmenuOpen((o) => !o)} className="w-full flex items-center justify-between gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
@@ -413,9 +418,6 @@ export const Header: React.FC<HeaderProps> = ({
                       </button>
                       <button type="button" onClick={() => { onMusicPanelOpenChange?.(true); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
                         <Play className="w-3.5 h-3.5" /> 白噪音
-                      </button>
-                      <button type="button" onClick={() => { onEnterEnergyMode(); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
-                        <Coffee className="w-3.5 h-3.5" /> 能量补给
                       </button>
                       {onOpenTurtleSoup && <button type="button" onClick={() => { onOpenTurtleSoup(); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
                         <Swords className="w-3.5 h-3.5" /> 海龟汤
@@ -439,7 +441,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
                 {onOpenLectureTranscript && (
                   <button type="button" onClick={() => { onOpenLectureTranscript(); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
-                    <Mic className="w-4 h-4 text-slate-500" /> 上课录音文本{!hasLectureHistory && <span className="text-[10px] text-slate-400">(暂无)</span>}
+                    <Mic className="w-4 h-4 text-slate-500" /> 课堂录音{!hasLectureHistory && <span className="text-[10px] text-slate-400">(暂无)</span>}
                   </button>
                 )}
                 <div className="border-t border-stone-100 mt-1 pt-1">

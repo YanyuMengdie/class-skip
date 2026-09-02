@@ -1,1 +1,310 @@
-/* 基础样式已在 index.html 中定义 */
+/* Craft-inspired visual foundation. Feature behavior stays in component styles. */
+:root {
+  --craft-paper: #f8f7f2;
+  --craft-paper-strong: #fffefb;
+  --craft-ink: #172033;
+  --craft-muted: #687385;
+  --craft-line: #dfe4e2;
+  --craft-violet: #6961d8;
+  --craft-coral: #ee7768;
+  --craft-sky: #7fc6dc;
+  --craft-mint: #8fcfae;
+  --craft-sun: #f1c95b;
+  --craft-shadow-sm: 0 2px 10px rgba(39, 48, 68, 0.07);
+  --craft-shadow-md: 0 12px 32px rgba(39, 48, 68, 0.1);
+  --craft-shadow-lg: 0 24px 56px rgba(39, 48, 68, 0.14);
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  color: var(--craft-ink);
+  background: var(--craft-paper);
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  letter-spacing: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  letter-spacing: 0;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid rgba(105, 97, 216, 0.28);
+  outline-offset: 2px;
+}
+
+/* Dashboard */
+.craft-dashboard {
+  background:
+    linear-gradient(rgba(104, 115, 133, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(104, 115, 133, 0.045) 1px, transparent 1px),
+    var(--craft-paper);
+  background-size: 28px 28px;
+}
+
+.craft-dashboard-sidebar {
+  position: relative;
+  background: rgba(248, 247, 242, 0.96);
+  box-shadow: 8px 0 28px rgba(39, 48, 68, 0.06);
+}
+
+.craft-dashboard-sidebar::after {
+  position: absolute;
+  top: 110px;
+  right: -1px;
+  width: 3px;
+  height: 76px;
+  content: "";
+  background: var(--craft-coral);
+  border-radius: 3px 0 0 3px;
+}
+
+.craft-dashboard-nav button,
+.craft-dashboard-nav a {
+  transition: color 160ms ease, background-color 160ms ease, transform 160ms ease;
+}
+
+.craft-dashboard-nav button:hover,
+.craft-dashboard-nav a:hover {
+  transform: translateX(2px);
+}
+
+.craft-dashboard-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: #cceaf1;
+}
+
+.craft-dashboard-hero::before {
+  position: absolute;
+  inset: auto auto -92px -64px;
+  z-index: -1;
+  width: 330px;
+  height: 210px;
+  content: "";
+  background: #f3c8bf;
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  border-radius: 46% 54% 28% 72%;
+  transform: rotate(7deg);
+}
+
+.craft-dashboard-hero::after {
+  position: absolute;
+  top: -70px;
+  right: 7%;
+  z-index: -1;
+  width: 260px;
+  height: 210px;
+  content: "";
+  background: #b9dfcc;
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  clip-path: polygon(18% 0, 100% 12%, 82% 100%, 0 76%);
+  transform: rotate(-5deg);
+}
+
+.craft-dashboard-companion {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 254, 251, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  box-shadow: var(--craft-shadow-md);
+  backdrop-filter: blur(12px);
+}
+
+.craft-dashboard-companion::before {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 5px;
+  content: "";
+  background: var(--craft-violet);
+}
+
+.craft-dashboard-content {
+  position: relative;
+}
+
+.craft-dashboard-content::before {
+  position: absolute;
+  top: 26px;
+  right: 4%;
+  z-index: -1;
+  width: 78px;
+  height: 78px;
+  content: "";
+  background: rgba(241, 201, 91, 0.18);
+  border: 1px solid rgba(241, 201, 91, 0.38);
+  transform: rotate(8deg);
+}
+
+.craft-library-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--craft-paper-strong);
+  border-color: var(--craft-line) !important;
+  box-shadow: var(--craft-shadow-sm);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.craft-library-card::before {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 4px;
+  content: "";
+  background: var(--craft-violet);
+}
+
+.craft-library-card:nth-child(3n + 2)::before {
+  background: var(--craft-coral);
+}
+
+.craft-library-card:nth-child(3n + 3)::before {
+  background: var(--craft-mint);
+}
+
+.craft-library-card:hover {
+  border-color: rgba(105, 97, 216, 0.32) !important;
+  box-shadow: var(--craft-shadow-md);
+  transform: translateY(-3px);
+}
+
+/* Learning page */
+.craft-learning-shell {
+  background: var(--craft-paper);
+}
+
+.craft-reader-header {
+  border-top: 4px solid var(--craft-violet);
+  background: rgba(255, 254, 251, 0.96) !important;
+  box-shadow: var(--craft-shadow-sm);
+  backdrop-filter: blur(14px);
+}
+
+.craft-brand-mark {
+  background: var(--craft-violet) !important;
+  box-shadow: 5px 5px 0 rgba(238, 119, 104, 0.24) !important;
+}
+
+.craft-study-strip {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background: #e7f4ed !important;
+  border-color: #b9dfcc !important;
+}
+
+.craft-study-strip::after {
+  position: absolute;
+  right: 13%;
+  bottom: -48px;
+  z-index: -1;
+  width: 190px;
+  height: 92px;
+  content: "";
+  background: rgba(127, 198, 220, 0.26);
+  clip-path: polygon(0 30%, 100% 0, 84% 100%, 14% 78%);
+}
+
+.craft-reader-canvas {
+  background:
+    linear-gradient(rgba(104, 115, 133, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(104, 115, 133, 0.05) 1px, transparent 1px),
+    #e9ecea !important;
+  background-size: 24px 24px;
+}
+
+.craft-reader-panel {
+  background: var(--craft-paper-strong) !important;
+  border-left: 1px solid var(--craft-line);
+  box-shadow: -10px 0 30px rgba(39, 48, 68, 0.07);
+}
+
+.craft-slide-viewer {
+  isolation: isolate;
+}
+
+.craft-slide-viewer::before,
+.craft-slide-viewer::after {
+  position: absolute;
+  z-index: 0;
+  content: "";
+  pointer-events: none;
+}
+
+.craft-slide-viewer::before {
+  top: 5%;
+  left: 4%;
+  width: 74px;
+  height: 74px;
+  background: rgba(241, 201, 91, 0.2);
+  border: 1px solid rgba(241, 201, 91, 0.36);
+  transform: rotate(-8deg);
+}
+
+.craft-slide-viewer::after {
+  right: 3%;
+  bottom: 5%;
+  width: 104px;
+  height: 58px;
+  background: rgba(238, 119, 104, 0.15);
+  border: 1px solid rgba(238, 119, 104, 0.28);
+  clip-path: polygon(0 24%, 100% 0, 84% 100%, 10% 76%);
+}
+
+.craft-pdf-sheet {
+  z-index: 1;
+  /* Annotations intentionally extend beyond the PDF page when users drag them
+     into the surrounding canvas, so the visual paper shell must not clip them. */
+  overflow: visible;
+  border-color: rgba(255, 255, 255, 0.9) !important;
+  box-shadow: var(--craft-shadow-lg) !important;
+}
+
+.craft-notebook-section {
+  background: var(--craft-paper) !important;
+}
+
+@media (max-width: 1023px) {
+  .craft-dashboard-content::before,
+  .craft-slide-viewer::before,
+  .craft-slide-viewer::after {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

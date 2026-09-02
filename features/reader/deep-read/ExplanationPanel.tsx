@@ -4,16 +4,23 @@ import ReactMarkdown, { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { Sparkles, RefreshCw, Send, Image as ImageIcon, MessageSquare, X, Heart, HelpCircle, Highlighter, Plus, GripHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertCircle, Sparkles, RefreshCw, Send, Image as ImageIcon, MessageSquare, X, Heart, HelpCircle, Highlighter, Plus, GripHorizontal, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react';
 import { ChatMessage } from '@/types';
 import { getMessageImages } from '@/lib/chat/messageUtils';
 import { plainTextToHtmlWithSupSub, normalizeSelectionText, dedupeHtml } from '@/features/reader/lib/textUtils';
 import { LoadingInteractiveContent } from '@/features/reader/deep-read/LoadingInteractiveContent';
 
+type PageToolMode = 'explain' | 'note' | 'exam';
+
 interface ExplanationPanelProps {
   explanation: string | undefined;
+  explanationError?: string;
   isLoadingExplanation: boolean;
   onRetryExplanation: () => void;
+  activeToolMode?: PageToolMode;
+  onRunPageTool?: (mode: PageToolMode) => void;
+  onSaveExplanation?: () => void;
+  onBackToGuidedReading?: () => void;
   chatMessages: ChatMessage[];
   onSendChat: (text: string, images?: string[]) => void;
   isChatLoading: boolean;
@@ -127,7 +134,7 @@ const MarkdownComponents: Components = {
 const MarkdownView = React.memo(({ content }: { content: string }) => {
     const processedContent = preprocessLaTeX(content);
     return (
-        <div className="select-text font-sans text-base">
+        <div className="select-text font-sans text-base" data-preserve-language="true">
             <ReactMarkdown 
                 components={MarkdownComponents}
                 remarkPlugins={[remarkMath, remarkGfm]}
@@ -142,8 +149,13 @@ const MarkdownView = React.memo(({ content }: { content: string }) => {
 
 export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({ 
   explanation, 
+  explanationError,
   isLoadingExplanation, 
   onRetryExplanation,
+  activeToolMode = 'explain',
+  onRunPageTool,
+  onSaveExplanation,
+  onBackToGuidedReading,
   chatMessages,
   onSendChat,
   isChatLoading,
@@ -169,6 +181,11 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
   const [selectedText, setSelectedText] = useState('');
   const [selectedHtml, setSelectedHtml] = useState<string>(''); // 新增：保存 HTML 格式
   const selectionTimerRef = useRef<number | null>(null);
+  const pageTools: { mode: PageToolMode; label: string; hint: string }[] = [
+    { mode: 'explain', label: '听讲解', hint: '像陪读一样把这一页讲到听懂' },
+    { mode: 'note', label: '整理本页内容', hint: '只整理当前页本身，不加复习或考试内容' },
+    { mode: 'exam', label: '这页怎么考', hint: '提炼考点、问法和易错点' },
+  ];
 
   // Fix Bug 1: Scoped scrolling to prevent global window jump
   useEffect(() => {
@@ -526,24 +543,60 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
         </div>
       )}
 
-      {/* TOP HALF: AI Explanation (Resizable) */}
+      {/* TOP HALF: Page Tools (Resizable) */}
       <div style={{ height: `${topHeight}%` }} className="flex flex-col min-h-0 overflow-hidden relative bg-white">
         <div className={`p-5 flex items-center justify-between bg-white/50 backdrop-blur-sm z-10 border-b border-stone-50 ${isImmersive ? 'pl-10' : ''}`}>
           <div className="flex items-center space-x-2.5">
             <div className="bg-rose-100 p-1.5 rounded-lg text-rose-500">
                 <Sparkles className="w-4 h-4" />
             </div>
-            <h2 className="font-bold text-slate-700 text-base">AI 核心讲解</h2>
+            <div>
+                <h2 className="font-bold text-slate-700 text-base">页面工具</h2>
+                <p className="text-[11px] text-slate-400 mt-0.5">领读卡住时，再局部放大这一页。</p>
+            </div>
           </div>
-          {!isLoadingExplanation && explanation && (
-              <button 
-                  onClick={onRetryExplanation} 
-                  className="p-2 text-slate-400 hover:text-rose-500 rounded-xl hover:bg-rose-50 transition-all"
-                  title="重新生成讲解"
+          <div className="flex items-center gap-1.5">
+              {onBackToGuidedReading && (
+                  <button
+                      onClick={onBackToGuidedReading}
+                      className="px-3 py-1.5 text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-xl transition-all"
+                      title="回到领读"
+                  >
+                      回到领读
+                  </button>
+              )}
+              {!isLoadingExplanation && (explanation || explanationError) && (
+                  <button 
+                      onClick={onRetryExplanation} 
+                      className="p-2 text-slate-400 hover:text-rose-500 rounded-xl hover:bg-rose-50 transition-all"
+                      title="重新生成当前页面工具结果"
+                  >
+                      <RefreshCw className="w-4 h-4" />
+                  </button>
+              )}
+          </div>
+        </div>
+
+        <div className="px-5 py-3 border-b border-stone-100 bg-stone-50/40 grid grid-cols-3 gap-2">
+          {pageTools.map((tool) => {
+            const active = activeToolMode === tool.mode;
+            return (
+              <button
+                key={tool.mode}
+                type="button"
+                onClick={() => onRunPageTool?.(tool.mode)}
+                disabled={isLoadingExplanation}
+                title={tool.hint}
+                className={`px-2.5 py-2 rounded-xl text-xs font-bold border transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                  active
+                    ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                    : 'bg-white text-slate-600 border-stone-200 hover:border-rose-200 hover:bg-rose-50'
+                }`}
               >
-                  <RefreshCw className="w-4 h-4" />
+                {tool.label}
               </button>
-          )}
+            );
+          })}
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-white" ref={explanationRef}>
@@ -551,13 +604,48 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
             <LoadingInteractiveContent />
           ) : explanation ? (
             <div className="p-8 max-w-none">
+                {onSaveExplanation && (
+                    <div className="flex justify-end mb-4">
+                        <button
+                            onClick={onSaveExplanation}
+                            className="inline-flex items-center gap-2 rounded-full bg-amber-50 px-3.5 py-2 text-xs font-bold text-amber-700 border border-amber-100 hover:bg-amber-100 transition-all"
+                        >
+                            <BookOpen className="w-3.5 h-3.5" />
+                            保存到学习手帐
+                        </button>
+                    </div>
+                )}
                 <MarkdownView content={explanation} />
             </div>
+          ) : explanationError ? (
+            <div className="h-full flex flex-col items-center justify-center text-center px-8 py-10 animate-in fade-in duration-300">
+                <div className="relative mb-5">
+                    <div className="absolute inset-0 rounded-full bg-rose-100 animate-ping opacity-40"></div>
+                    <div className="relative w-20 h-20 rounded-full bg-gradient-to-br from-rose-50 to-orange-50 border border-rose-100 shadow-sm flex items-center justify-center animate-pulse">
+                        <AlertCircle className="w-9 h-9 text-rose-400" />
+                    </div>
+                </div>
+                <p className="text-base font-bold text-slate-700">{explanationError}</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                    这次没有拿到稳定结果，可以点右上角重新生成，或重新选择一个页面工具。
+                </p>
+                <button
+                    onClick={onRetryExplanation}
+                    className="mt-5 inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-slate-200 hover:bg-slate-800 active:scale-95 transition-all"
+                >
+                    <RefreshCw className="w-4 h-4" />
+                    重新生成
+                </button>
+            </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-stone-300">
-                <div className="w-24 h-24 bg-stone-100 rounded-full mb-4 opacity-50"></div>
-                <div className="w-40 h-4 bg-stone-100 rounded-full mb-2 opacity-50"></div>
-                <div className="w-24 h-4 bg-stone-100 rounded-full opacity-50"></div>
+            <div className="h-full flex flex-col items-center justify-center text-center text-stone-400 px-8">
+                <div className="w-20 h-20 bg-rose-50 rounded-2xl mb-4 flex items-center justify-center text-rose-300">
+                    <Sparkles className="w-9 h-9" />
+                </div>
+                <p className="text-base font-bold text-slate-600">需要时再用页面工具</p>
+                <p className="text-sm leading-6 mt-2 max-w-xs">
+                    领读继续作为主流程；遇到关键页、难图表或想沉淀笔记时，再点上面的页面工具。
+                </p>
             </div>
           )}
         </div>
@@ -596,7 +684,7 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
             ) : (
                 chatMessages.map((msg, idx) => (
                     <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-[85%] px-4 py-3 text-sm shadow-sm transition-all ${
+                        <div data-preserve-language="true" className={`max-w-[85%] px-4 py-3 text-sm shadow-sm transition-all ${
                             msg.role === 'user' 
                             ? 'bg-gradient-to-br from-indigo-500 to-violet-500 text-white rounded-2xl rounded-tr-none' 
                             : 'bg-white text-slate-600 border border-stone-100 rounded-2xl rounded-tl-none shadow-stone-100'

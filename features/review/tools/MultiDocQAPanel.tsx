@@ -140,6 +140,7 @@ export const MultiDocQAPanel: React.FC<MultiDocQAPanelProps> = ({
                 className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
+                  data-preserve-language="true"
                   className={`max-w-[85%] rounded-2xl px-4 py-2.5 ${
                     msg.role === 'user'
                       ? 'bg-indigo-500 text-white'

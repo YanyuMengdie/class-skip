@@ -1,15 +1,14 @@
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
-import { jsPDF } from 'jspdf';
 import { Header } from '@/shared/layout/Header';
 import { SlideViewer } from '@/features/reader/slide-viewer/SlideViewer';
+import { exportStudyHandoutPdf } from '@/features/reader/export/studyHandoutPdf';
 import { SlidePageComments } from '@/features/reader/page-notes/SlidePageComments';
 import { ExplanationPanel } from '@/features/reader/deep-read/ExplanationPanel';
 import { SkimPanel } from '@/features/reader/skim/SkimPanel';
+import { SkimRecordShelf } from '@/features/reader/skim/SkimRecordShelf';
 import { TutorChat, TUTOR_OPENING_TEXT } from '@/features/tutor/TutorChat';
 import { Sidebar } from '@/shared/layout/Sidebar';
-import { TaskHug } from '@/features/energyRefuel/TaskHug';
-import { ChatHug } from '@/features/energyRefuel/ChatHug';
 import { Notebook } from '@/features/reader/notebook/Notebook';
 import { HistoryModal } from '@/shared/history/HistoryModal';
 import { GalgameOverlay } from '@/components/GalgameOverlay';
@@ -36,6 +35,7 @@ import { LoginModal } from '@/shared/auth/LoginModal';
 import { FiveMinFlowPanel } from '@/features/sessionStart/FiveMinFlowPanel';
 import { ClassroomPanel } from '@/features/lecture/ClassroomPanel';
 import { LectureTranscriptPage } from '@/features/lecture/LectureTranscriptPage';
+import { getLecturePageAtElapsedMs } from '@/features/lecture/lectureReviewExport';
 import { ReviewPage, ReviewType } from '@/features/review/ReviewPage';
 import { TurtleSoupPanel } from '@/features/turtleSoup/TurtleSoupPanel';
 import { ExamPredictionPanel } from '@/features/exam/ExamPredictionPanel';
@@ -43,12 +43,22 @@ import { ExamHubModal } from '@/features/exam/ExamHubModal';
 import { ExamWorkspacePage } from '@/features/exam/workspace/ExamWorkspacePage';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from '@/lib/pdf/pdfUtils';
 import { buildArtifactSourceLabel } from '@/shared/lib/artifactSourceLabel';
-import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, generateLSAPContentMap, generateLogicAtomsForContentMap, generateProfileNotebookUpdateSuggestion } from '@/services/geminiService';
-import { startRecording, stopRecording, isTranscriptionSupported } from '@/services/transcriptionService';
+import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, organizeLectureWithEvidence, generateLSAPContentMap, generateLogicAtomsForContentMap, generateProfileNotebookUpdateSuggestion, translateLectureTranscriptSegment, type SlideExplanationMode } from '@/services/geminiService';
+import { pauseRecording, resumeRecording, startRecording, stopRecording, isLectureRecordingSupported } from '@/services/transcriptionService';
+import {
+  retryElevenLabsRealtimeTranscription,
+  startElevenLabsRealtimeTranscription,
+  stopElevenLabsRealtimeTranscription,
+} from '@/services/elevenLabsRealtimeService';
+import { lectureAudioStorage } from '@/services/lectureAudioStorage';
+import {
+  transcribeLectureAudio,
+  type LectureTranscriptionOptions,
+} from '@/services/elevenLabsTranscriptionService';
 import { storageService } from '@/services/storageService';
-import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud } from '@/services/firebase';
+import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, deleteSkimSessionFromCloud, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud, deleteTutorSessionFromCloud } from '@/services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState, TutorSession, SkimContentType, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession } from '@/types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, LectureAudioRecording, LectureRealtimeLine, LectureRealtimeStatus, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState, TutorSession, SkimContentType, SkimAuxiliaryMaterial, SkimReadingRoute, SkimStudyStyle, SkimExplanationDepth, SkimRecordDeck, SkimRecordCardState, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession, LectureCaseLearningState } from '@/types';
 import {
   appendLocalPendingSuggestion,
   appendLocalWitnessSession,
@@ -70,16 +80,116 @@ import {
   saveWorkspaceLsapBundle,
   truncateWorkspaceDialogue,
   type WorkspaceDialogueTurn,
+  type WorkspaceEvidenceAnnotation,
 } from '@/features/exam/lib/examWorkspaceLsapKey';
+import { filterEvidenceAnnotationsForMap } from '@/features/exam/lib/examLearningEvidence';
+import { getActiveIndexAfterDeletion, getNextDefaultSessionSequence } from '@/features/reader/sessionTabs';
 import { computePredictedScore } from '@/features/exam/lib/lsapScore';
 import { normalizeTermKey } from '@/lib/text/extractBoldTermsFromMarkdown';
-import { Sparkles, X, ChevronDown, Loader2, Wand2, Plus, MessageCircle } from 'lucide-react';
+import { Sparkles, X, ChevronDown, Loader2, Wand2, Plus, MessageCircle, MoreHorizontal, Pencil, Trash2, PanelRightClose, PanelRightOpen, Mic, Pause, Play } from 'lucide-react';
+import { useAppLanguage, getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
+import { getCloudAppPreferences, saveCloudAppPreferences } from '@/services/appPreferencesService';
+import type { AppLanguage, AppPreferences } from '@/types';
 
 /** P0 备考工作台：当前考试 ID 存 localStorage */
 const EXAM_WORKSPACE_ACTIVE_EXAM_LS = 'examWorkspace_activeExamId';
 
 /** P2：备考台按单份材料抽逻辑原子时与 KC 图谱单份上限一致（120000），避免仍被 4 万截断 */
 const LSAP_ATOMS_PER_MATERIAL_MAX_CHARS = 120_000;
+const PAGE_TOOL_PROMPT_VERSION = 'v2';
+const getLegacyPageToolCacheKey = (slideId: string, mode: SlideExplanationMode) => `${slideId}::${mode}::${PAGE_TOOL_PROMPT_VERSION}`;
+const getPageToolCacheKey = (slideId: string, mode: SlideExplanationMode, language: AppLanguage = getCurrentAppLanguage()) => (
+  `${getLegacyPageToolCacheKey(slideId, mode)}::${language}`
+);
+const getPageToolLabel = (mode: SlideExplanationMode) => {
+  if (mode === 'note') return '整理本页内容';
+  if (mode === 'exam') return '这页怎么考';
+  return '听讲解';
+};
+
+const getCloudAppPreferencesWithTimeout = async (user: User, timeoutMs = 4000): Promise<AppPreferences | null> => {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      getCloudAppPreferences(user),
+      new Promise<never>((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('App preference cloud read timed out')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+};
+
+const getLectureAudioExtension = (mimeType?: string) => {
+  const normalized = mimeType?.toLowerCase() || '';
+  if (normalized.includes('mpeg') || normalized.includes('mp3')) return 'mp3';
+  if (normalized.includes('mp4') || normalized.includes('m4a')) return 'm4a';
+  if (normalized.includes('wav')) return 'wav';
+  if (normalized.includes('ogg')) return 'ogg';
+  if (normalized.includes('flac')) return 'flac';
+  if (normalized.includes('aac')) return 'aac';
+  return 'webm';
+};
+
+const withLectureAudio = (
+  lecture: LectureRecord,
+  audio: LectureAudioRecording
+): LectureRecord => ({
+  ...lecture,
+  audioRecordingId: audio.id,
+  audioSource: audio.source,
+  audioStatus: audio.status,
+  audioMimeType: audio.mimeType,
+  audioSizeBytes: audio.sizeBytes,
+  audioChunkCount: audio.chunkCount,
+  audioDurationMs: audio.durationMs,
+  endedAt: lecture.endedAt || audio.endedAt,
+});
+
+const importedAudioLecture = (audio: LectureAudioRecording): LectureRecord => ({
+  id: audio.id,
+  startedAt: audio.createdAt,
+  endedAt: audio.endedAt,
+  transcript: [],
+  name: audio.originalFileName?.replace(/\.[^.]+$/, '') || '上传的课堂录音',
+  audioRecordingId: audio.id,
+  audioSource: audio.source,
+  audioStatus: audio.status,
+  audioMimeType: audio.mimeType,
+  audioSizeBytes: audio.sizeBytes,
+  audioChunkCount: audio.chunkCount,
+  audioDurationMs: audio.durationMs,
+});
+
+const getLectureHistoryKey = (lecture: LectureRecord) => (
+  lecture.audioRecordingId || lecture.id
+);
+
+const dedupeLectureHistory = (lectures: LectureRecord[]): LectureRecord[] => {
+  const deduped = new Map<string, LectureRecord>();
+  [...lectures]
+    .sort((a, b) => b.startedAt - a.startedAt)
+    .forEach((lecture) => {
+      const key = getLectureHistoryKey(lecture);
+      const existing = deduped.get(key);
+      deduped.set(key, existing ? { ...lecture, ...existing } : lecture);
+    });
+  return [...deduped.values()].sort((a, b) => b.startedAt - a.startedAt);
+};
+
+const upsertLectureHistory = (
+  lectures: LectureRecord[],
+  lecture: LectureRecord
+): LectureRecord[] => {
+  const key = getLectureHistoryKey(lecture);
+  return dedupeLectureHistory([
+    lecture,
+    ...lectures.filter((item) => (
+      getLectureHistoryKey(item) !== key && item.id !== lecture.id
+    )),
+  ]);
+};
 
 // #region agent log
 const _debugLog = (location: string, message: string, data: Record<string, unknown>) => {
@@ -90,13 +200,9 @@ const _debugLog = (location: string, message: string, data: Record<string, unkno
 };
 // #endregion
 
-const cleanHtmlToText = (html: string): string => {
-  if (!html) return '';
-  const temp = document.createElement('div');
-  let processed = html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/div>/gi, '\n').replace(/<\/p>/gi, '\n');
-  temp.innerHTML = processed;
-  return temp.innerText.trim();
-};
+const normalizeGeneratedLineBreaks = (text: string): string => (
+  text.replace(/<br\s*\/?>|&lt;br\s*\/?&gt;/gi, '\n')
+);
 
 const DEFAULT_PERSONA: PersonaSettings = {
     charName: '蕾姆',
@@ -113,6 +219,8 @@ const DEFAULT_PERSONA: PersonaSettings = {
  */
 interface SkimSession {
   id: string;
+  /** 稳定标签名；删除其他会话时不会随数组位置重排 */
+  title: string;
   studyMap: StudyMap | null;
   messages: ChatMessage[];
   stage: SkimStage;
@@ -128,13 +236,28 @@ interface SkimSession {
   skipDiagnosis: boolean;
   /** 阶段二：内容类型（可选，与 PersistedSkimSession 同形）。旧 session 无此字段 → 按 'lecture' 兜底。 */
   contentType?: SkimContentType;
+  /** 学习页领读：可选联合一个云端辅助 PDF；AI 只在相关时作为补充引用。 */
+  auxiliaryMaterial?: SkimAuxiliaryMaterial | null;
+  /** V1：结构化领读路线，用于后续目录跳转和重规划。 */
+  readingRoute?: SkimReadingRoute | null;
+  /** Lecture 领读呈现方式；旧会话缺省为整段式。 */
+  studyStyle?: SkimStudyStyle;
+  /** 普通 Lecture 整段式/分段唱片式领读的后续讲解深度；旧会话缺省为正常讲。 */
+  explanationDepth?: SkimExplanationDepth;
+  /** 整段式领读自己的 PDF 停留页，与唱片停留页分开保存。 */
+  continuousLastPage?: number;
+  /** 分段式学习的唱片路线、状态与独立对话。 */
+  recordDeck?: SkimRecordDeck | null;
+  /** 案件式领读的适配报告、内容账本、章节与学习证据。 */
+  caseLearning?: LectureCaseLearningState | null;
   /** 阶段二：paper/文章模式 AI 是否已讲过梗概（阶段四才真正写，先占位）。 */
   briefingDone?: boolean;
 }
 
 /** 新建一段干净的空白略读会话（id 沿用本仓库现有 `${Date.now()}-${random}` 风格） */
-const createEmptySkimSession = (): SkimSession => ({
+const createEmptySkimSession = (seq = 1): SkimSession => ({
   id: `skim-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  title: `领读 ${seq}`,
   studyMap: null,
   messages: [],
   stage: 'diagnosis',
@@ -147,6 +270,12 @@ const createEmptySkimSession = (): SkimSession => ({
   topHeight: 60,
   focusMode: false,
   skipDiagnosis: false,
+  readingRoute: null,
+  studyStyle: 'continuous',
+  explanationDepth: 'normal',
+  continuousLastPage: 1,
+  recordDeck: null,
+  caseLearning: null,
 });
 
 /** 略读会话数量上限（阶段一） */
@@ -154,6 +283,8 @@ const MAX_SKIM_SESSIONS = 10;
 
 /** 私教会话数量上限 */
 const MAX_TUTOR_SESSIONS = 10;
+
+type ManagedSessionTab = { kind: 'skim' | 'tutor'; id: string };
 
 /** 新建一条私教会话：含前端开场白 messages[0]，docType 默认 STEM；与略读 SkimSession 完全独立。
  *  cloudSessionId：基于的云端文件会话 id（轻引用，仅存指针、不存 PDF），无则不写该字段。 */
@@ -228,10 +359,33 @@ const buildLocalSessionSummary = (session: StudyWitnessSession): string[] => {
   return result;
 };
 
+const buildSkimRecordDigest = (messages: ChatMessage[]) => {
+  const clarified = messages
+    .filter((message) => (
+      message.role === 'model'
+      && message.text.trim()
+      && !message.skimKnowledgeExtraction
+      && !message.skimKnowledgeExtractionFeedback
+    ))
+    .slice(-3)
+    .map((message) => message.text.replace(/\s+/g, ' ').trim().slice(0, 220));
+  const unresolved = messages
+    .filter((message, index) => (
+      message.role === 'user'
+      && message.text.trim()
+      && !messages[index - 1]?.skimKnowledgeExtraction
+    ))
+    .slice(-3)
+    .map((message) => message.text.replace(/\s+/g, ' ').trim().slice(0, 160));
+  return { clarified, unresolved, updatedAt: Date.now() };
+};
+
 const App: React.FC = () => {
+  const { language: appLanguage, setLanguage: setAppLanguage, text: uiText } = useAppLanguage();
   // --- STATE DECLARATIONS ---
   const [hasStarted, setHasStarted] = useState(false);
   const [shellMode, setShellMode] = useState<'dashboard' | 'study'>('dashboard');
+  const [dashboardInitialTab, setDashboardInitialTab] = useState<'library' | 'calendar' | 'memo' | 'energy' | 'growth' | 'profile' | 'settings'>('library');
   const [profileNotebook, setProfileNotebook] = useState<LearnerProfileNotebook>(() => loadLocalProfileNotebook());
   const [activeStudyStartedAt, setActiveStudyStartedAt] = useState<number | null>(null);
   const [activeStudyElapsedMs, setActiveStudyElapsedMs] = useState(0);
@@ -246,6 +400,8 @@ const App: React.FC = () => {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentIndex, setCurrentIndex] = useState<number>(0);
   const [explanations, setExplanations] = useState<ExplanationCache>({});
+  const [explanationErrors, setExplanationErrors] = useState<Record<string, string>>({});
+  const [activePageToolMode, setActivePageToolMode] = useState<SlideExplanationMode>('explain');
   const [chatCache, setChatCache] = useState<ChatCache>({});
   const [annotations, setAnnotations] = useState<AnnotationCache>({});
   const [pageComments, setPageComments] = useState<PageCommentsCache>({});
@@ -264,7 +420,14 @@ const App: React.FC = () => {
   // 派生当前激活会话切片：喂给 SkimPanel 的「单份」props 全部从这里取，SkimPanel 的 props 形状保持不变。
   const activeSkim = skimSessions[activeSkimIndex] ?? skimSessions[0];
   activeIdRef.current = activeSkim?.id ?? null;
-  const skimMessages = activeSkim.messages;
+  const activeRecordCard = useMemo<SkimRecordCardState | null>(() => {
+    const deck = activeSkim?.recordDeck;
+    if (activeSkim?.studyStyle !== 'records' || deck?.view !== 'reader' || !deck.activeCardId) return null;
+    return deck.cards[deck.activeCardId] ?? null;
+  }, [activeSkim?.recordDeck, activeSkim?.studyStyle]);
+  const activeRecordCardIdRef = useRef<string | null>(null);
+  activeRecordCardIdRef.current = activeRecordCard?.id ?? null;
+  const skimMessages = activeRecordCard?.messages ?? activeSkim.messages;
   const skimTopHeight = activeSkim.topHeight;
   const skimFocusMode = activeSkim.focusMode;
   const skimStage = activeSkim.stage;
@@ -279,7 +442,36 @@ const App: React.FC = () => {
   }, []);
   // ↓↓↓ 与原单值 setter 同名同形（含函数式更新），故所有既有调用点无需改动，只是改为写进激活会话。
   const setSkimMessages = useCallback<React.Dispatch<React.SetStateAction<ChatMessage[]>>>(
-    value => updateActiveSkimSession(s => ({ ...s, messages: typeof value === 'function' ? (value as (p: ChatMessage[]) => ChatMessage[])(s.messages) : value })),
+    value => updateActiveSkimSession(s => {
+      const cardId = activeRecordCardIdRef.current;
+      const deck = s.recordDeck;
+      if (s.studyStyle === 'records' && cardId && deck?.cards[cardId]) {
+        const previous = deck.cards[cardId].messages ?? [];
+        const messages = typeof value === 'function'
+          ? (value as (p: ChatMessage[]) => ChatMessage[])(previous)
+          : value;
+        return {
+          ...s,
+          recordDeck: {
+            ...deck,
+            cards: {
+              ...deck.cards,
+              [cardId]: {
+                ...deck.cards[cardId],
+                messages,
+                digest: buildSkimRecordDigest(messages),
+              },
+            },
+          },
+        };
+      }
+      return {
+        ...s,
+        messages: typeof value === 'function'
+          ? (value as (p: ChatMessage[]) => ChatMessage[])(s.messages)
+          : value,
+      };
+    }),
     [updateActiveSkimSession]
   );
   const setSkimTopHeight = useCallback<React.Dispatch<React.SetStateAction<number>>>(
@@ -295,7 +487,157 @@ const App: React.FC = () => {
   // 原 SkimPanel 内部态（模块数 / 节奏 / 页码范围）提升到会话后的写入器（均为值式，与 SkimPanel 用法一致）
   const setSkimModuleCount = useCallback((count: number) => updateActiveSkimSession(s => ({ ...s, moduleCount: count })), [updateActiveSkimSession]);
   const setSkimPaceValue = useCallback((pace: 'module' | 'part') => updateActiveSkimSession(s => ({ ...s, skimPace: pace })), [updateActiveSkimSession]);
-  const setSkimContentType = useCallback((next: SkimContentType) => updateActiveSkimSession(s => ({ ...s, contentType: next })), [updateActiveSkimSession]);
+  const setSkimContentType = useCallback((next: SkimContentType) => updateActiveSkimSession(s => ({
+    ...s,
+    contentType: next,
+    readingRoute: null,
+    ...(next === 'lecture' ? {} : { studyStyle: 'continuous' as const, recordDeck: null }),
+  })), [updateActiveSkimSession]);
+  const setSkimAuxiliaryMaterial = useCallback((next: SkimAuxiliaryMaterial | null) => updateActiveSkimSession(s => ({ ...s, auxiliaryMaterial: next })), [updateActiveSkimSession]);
+  const setSkimReadingRoute = useCallback((route: SkimReadingRoute | null) => updateActiveSkimSession(s => ({ ...s, readingRoute: route })), [updateActiveSkimSession]);
+  const setSkimExplanationDepth = useCallback((explanationDepth: SkimExplanationDepth) => updateActiveSkimSession(s => ({
+    ...s,
+    explanationDepth,
+  })), [updateActiveSkimSession]);
+  const setSkimStudyStyle = useCallback((studyStyle: SkimStudyStyle) => {
+    if (studyStyle === 'continuous') {
+      const page = Math.max(1, Math.min(activeSkim.continuousLastPage ?? 1, Math.max(1, slides.length)));
+      setCurrentIndex(page - 1);
+    }
+    updateActiveSkimSession(s => ({
+      ...s,
+      studyStyle,
+      continuousLastPage: (s.studyStyle ?? 'continuous') === 'continuous' && studyStyle !== 'continuous'
+        ? currentIndex + 1
+        : (s.continuousLastPage ?? 1),
+      ...(studyStyle === 'continuous'
+        ? {
+            recordDeck: s.recordDeck ? {
+              ...s.recordDeck,
+              view: 'shelf' as const,
+              cards: s.recordDeck.activeCardId && s.recordDeck.cards[s.recordDeck.activeCardId]
+                ? {
+                    ...s.recordDeck.cards,
+                    [s.recordDeck.activeCardId]: {
+                      ...s.recordDeck.cards[s.recordDeck.activeCardId],
+                      digest: buildSkimRecordDigest(s.recordDeck.cards[s.recordDeck.activeCardId].messages),
+                    },
+                  }
+                : s.recordDeck.cards,
+            } : s.recordDeck,
+          }
+        : { readingRoute: s.recordDeck ? s.readingRoute : null }),
+    }));
+  }, [activeSkim.continuousLastPage, currentIndex, slides.length, updateActiveSkimSession]);
+  const setSkimRecordDeck = useCallback<React.Dispatch<React.SetStateAction<SkimRecordDeck | null>>>(
+    value => updateActiveSkimSession(s => ({
+      ...s,
+      recordDeck: typeof value === 'function'
+        ? (value as (previous: SkimRecordDeck | null) => SkimRecordDeck | null)(s.recordDeck ?? null)
+        : value,
+    })),
+    [updateActiveSkimSession]
+  );
+  const setLectureCaseLearning = useCallback<React.Dispatch<React.SetStateAction<LectureCaseLearningState | null>>>(
+    value => updateActiveSkimSession(s => ({
+      ...s,
+      caseLearning: typeof value === 'function'
+        ? (value as (previous: LectureCaseLearningState | null) => LectureCaseLearningState | null)(s.caseLearning ?? null)
+        : value,
+    })),
+    [updateActiveSkimSession]
+  );
+  const handleOpenSkimRecord = useCallback((cardId: string) => {
+    const deck = activeSkim.recordDeck;
+    const card = deck?.cards[cardId];
+    if (!deck || !card) return;
+    setCurrentIndex(Math.max(0, Math.min((card.lastPage || card.pageStart) - 1, Math.max(0, slides.length - 1))));
+    setSkimRecordDeck(previous => {
+      if (!previous) return previous;
+      const previousCard = previous.activeCardId && previous.activeCardId !== cardId
+        ? previous.cards[previous.activeCardId]
+        : null;
+      const nextCard = previous.cards[cardId];
+      if (!nextCard) return previous;
+      const cards = previousCard
+        ? {
+            ...previous.cards,
+            [previousCard.id]: {
+              ...previousCard,
+              digest: buildSkimRecordDigest(previousCard.messages),
+            },
+          }
+        : previous.cards;
+      return {
+        ...previous,
+        view: 'reader',
+        activeCardId: cardId,
+        selectedModuleIndex: nextCard.moduleIndex,
+        cards: {
+          ...cards,
+          [cardId]: {
+            ...nextCard,
+            status: nextCard.status === 'completed' ? 'completed' : 'in_progress',
+            lastOpenedAt: Date.now(),
+          },
+        },
+      };
+    });
+    setSkimStage('reading');
+  }, [activeSkim.recordDeck, setSkimRecordDeck, setSkimStage, slides.length]);
+  const handleFocusSkimRecord = useCallback((cardId: string) => {
+    setSkimRecordDeck(previous => {
+      const card = previous?.cards[cardId];
+      if (!previous || !card) return previous;
+      if (previous.activeCardId === cardId && previous.selectedModuleIndex === card.moduleIndex) return previous;
+      return {
+        ...previous,
+        activeCardId: cardId,
+        selectedModuleIndex: card.moduleIndex,
+      };
+    });
+  }, [setSkimRecordDeck]);
+  const handleReturnToSkimRecordShelf = useCallback(() => {
+    setSkimRecordDeck(previous => {
+      if (!previous) return previous;
+      const cardId = previous.activeCardId;
+      const card = cardId ? previous.cards[cardId] : null;
+      return {
+        ...previous,
+        view: 'shelf',
+        cards: cardId && card ? {
+          ...previous.cards,
+          [cardId]: { ...card, digest: buildSkimRecordDigest(card.messages) },
+        } : previous.cards,
+      };
+    });
+  }, [setSkimRecordDeck]);
+  const handleSetSkimRecordCompleted = useCallback((completed: boolean) => {
+    setSkimRecordDeck(previous => {
+      if (!previous?.activeCardId) return previous;
+      const card = previous.cards[previous.activeCardId];
+      if (!card) return previous;
+      return {
+        ...previous,
+        cards: {
+          ...previous.cards,
+          [card.id]: {
+            ...card,
+            status: completed ? 'completed' : 'in_progress',
+            completedAt: completed ? Date.now() : undefined,
+            digest: buildSkimRecordDigest(card.messages),
+          },
+        },
+      };
+    });
+  }, [setSkimRecordDeck]);
+  const handleOpenNextSkimRecord = useCallback(() => {
+    const deck = activeSkim.recordDeck;
+    if (!deck?.activeCardId) return;
+    const index = deck.orderedCardIds.indexOf(deck.activeCardId);
+    const nextId = deck.orderedCardIds[index + 1];
+    if (nextId) handleOpenSkimRecord(nextId);
+  }, [activeSkim.recordDeck, handleOpenSkimRecord]);
   const setSkimPageRangeStart = useCallback((v: number | null) => updateActiveSkimSession(s => ({ ...s, pageRangeStart: v })), [updateActiveSkimSession]);
   const setSkimPageRangeEnd = useCallback((v: number | null) => updateActiveSkimSession(s => ({ ...s, pageRangeEnd: v })), [updateActiveSkimSession]);
   /** 「读旧不毁旧」抑制判断（阶段二/三）：本地 + 云端两条保存 effect **共用这一套**，避免漂移。
@@ -305,7 +647,10 @@ const App: React.FC = () => {
     [skimSessions]
   );
 
-  const [viewMode, setViewMode] = useState<ViewMode>('deep');
+  const [viewMode, setViewMode] = useState<ViewMode>('skim');
+  const [managedSessionTab, setManagedSessionTab] = useState<ManagedSessionTab | null>(null);
+  const [sessionRenameDraft, setSessionRenameDraft] = useState('');
+  const [sessionTabDeleting, setSessionTabDeleting] = useState(false);
 
   // === 私教多会话（阶段三）：与略读三件套平行、命名独立，绝不混进 skimSessions / 文件 hash 存储 ===
   const [tutorSessions, setTutorSessions] = useState<TutorSession[]>([]);
@@ -346,11 +691,14 @@ const App: React.FC = () => {
   const [personaSettings, setPersonaSettings] = useState<PersonaSettings>(DEFAULT_PERSONA);
 
   const [isProcessingFile, setIsProcessingFile] = useState<boolean>(false);
+  const [isExportingHandout, setIsExportingHandout] = useState(false);
+  const [isOpeningStudyFile, setIsOpeningStudyFile] = useState<boolean>(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
   /** 递进阅读模式独立 state，与 studyMap 完全无关（铁律 2，详见 docs/inquiries/LAYERED_READING_INQUIRY.md §8.G） */
   const [layeredReadingState, setLayeredReadingState] = useState<LayeredReadingState | null>(null);
-  const [fullPdfText, setFullPdfText] = useState<string | null>(null); 
+  const [fullPdfText, setFullPdfText] = useState<string | null>(null);
+  const [pdfPageTexts, setPdfPageTexts] = useState<string[]>([]);
   const [isStudyMapLoading, setIsStudyMapLoading] = useState<boolean>(false);
   
   const [isImmersive, setIsImmersive] = useState(false);
@@ -370,6 +718,7 @@ const App: React.FC = () => {
   const [authLoading, setAuthLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [studyCloudSessions, setStudyCloudSessions] = useState<CloudSession[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
@@ -378,14 +727,15 @@ const App: React.FC = () => {
    *  STOP-2：以当前 currentSessionId 作轻引用存进会话；以当前内存 pdfDataUrl 作本会话材料（直接复用，不再存一份）。 */
   const handleAddTutorSession = useCallback(() => {
     if (tutorActiveLoading || tutorSessions.length >= MAX_TUTOR_SESSIONS) return;
-    const newSession = createTutorSession(tutorSessions.length + 1, currentSessionId, fileHash);
+    const nextSequence = getNextDefaultSessionSequence(tutorSessions.map(session => session.title), '私教');
+    const newSession = createTutorSession(nextSequence, currentSessionId, fileHash);
     const newIndex = tutorSessions.length;
     setTutorSessions(prev => (prev.length >= MAX_TUTOR_SESSIONS ? prev : [...prev, newSession]));
     setActiveTutorIndex(newIndex);
     activeTutorIdRef.current = newSession.id;
     // 直接复用当前已加载 PDF（含未登录场景）；无文件则空串=纯对话
     setTutorMaterialMap(m => ({ ...m, [newSession.id]: pdfDataUrl ?? '' }));
-  }, [tutorActiveLoading, tutorSessions.length, currentSessionId, pdfDataUrl, fileHash]);
+  }, [tutorActiveLoading, tutorSessions, currentSessionId, pdfDataUrl, fileHash]);
   /** 略读配置卡「私教模式」入口：无会话则建一条，进入独立 tutor viewMode */
   const handleStartTutorMode = useCallback(() => {
     if (tutorSessions.length === 0) handleAddTutorSession();
@@ -416,9 +766,6 @@ const App: React.FC = () => {
     })();
     return () => { cancelled = true; };
   }, [viewMode, activeTutor?.id, activeTutor?.cloudSessionId, tutorMaterialMap, user]);
-
-  // --- ENERGY MODE STATE ---
-  const [isEnergyMode, setIsEnergyMode] = useState(false);
 
   // --- 白噪音面板受控（休息改为顶栏下方弹层，不再用独立面板）---
   const [isMusicPanelOpen, setIsMusicPanelOpen] = useState(false);
@@ -507,11 +854,14 @@ const App: React.FC = () => {
   const [workspaceDialogueTranscript, setWorkspaceDialogueTranscript] = useState<WorkspaceDialogueTurn[]>([]);
   /** KC 即时术语侧栏（按 kcId 分组，与 bundle 同步） */
   const [workspaceKcGlossary, setWorkspaceKcGlossary] = useState<Record<string, KcGlossaryEntry[]>>({});
+  /** 用户对学习证据的纠正备注与待回访项。 */
+  const [workspaceEvidenceAnnotations, setWorkspaceEvidenceAnnotations] = useState<WorkspaceEvidenceAnnotation[]>([]);
   /** 与 bundle 保存同步，避免闭包覆盖旧 state */
   const workspaceLsapStateRef = useRef<LSAPState | null>(null);
   const workspaceAtomCoverageRef = useRef<AtomCoverageByKc>({});
   const workspaceDialogueTranscriptRef = useRef<WorkspaceDialogueTurn[]>([]);
   const workspaceKcGlossaryRef = useRef<Record<string, KcGlossaryEntry[]>>({});
+  const workspaceEvidenceAnnotationsRef = useRef<WorkspaceEvidenceAnnotation[]>([]);
   const [workspaceAtomsGenerating, setWorkspaceAtomsGenerating] = useState(false);
   useEffect(() => {
     workspaceLsapStateRef.current = workspaceLsapState;
@@ -525,6 +875,9 @@ const App: React.FC = () => {
   useEffect(() => {
     workspaceKcGlossaryRef.current = workspaceKcGlossary;
   }, [workspaceKcGlossary]);
+  useEffect(() => {
+    workspaceEvidenceAnnotationsRef.current = workspaceEvidenceAnnotations;
+  }, [workspaceEvidenceAnnotations]);
   const examWorkspaceMaterialsSorted = useMemo(() => {
     if (!activeExamId) return [];
     return [...examWorkspaceMaterials]
@@ -538,10 +891,15 @@ const App: React.FC = () => {
   const [moodDialogOpen, setMoodDialogOpen] = useState(false);
   const [fiveMinFlowOpen, setFiveMinFlowOpen] = useState(false);
   const [isClassroomMode, setIsClassroomMode] = useState(false);
+  const [isClassroomPanelVisible, setIsClassroomPanelVisible] = useState(false);
+  const [isClassroomPaused, setIsClassroomPaused] = useState(false);
+  const [classroomPausedAt, setClassroomPausedAt] = useState<number | null>(null);
+  const [classroomPausedDurationMs, setClassroomPausedDurationMs] = useState(0);
   const [currentLecture, setCurrentLecture] = useState<LectureRecord | null>(null);
   const [lectureHistory, setLectureHistory] = useState<LectureRecord[]>(() => {
     try {
-      return JSON.parse(localStorage.getItem('lecture_history') || '[]');
+      const stored = JSON.parse(localStorage.getItem('lecture_history') || '[]');
+      return Array.isArray(stored) ? dedupeLectureHistory(stored) : [];
     } catch {
       return [];
     }
@@ -553,8 +911,46 @@ const App: React.FC = () => {
   }, [lectureHistory]);
   const [lectureTranscriptPageOpen, setLectureTranscriptPageOpen] = useState(false);
   const [organizingLectureId, setOrganizingLectureId] = useState<string | null>(null);
+  const [transcribingLectureId, setTranscribingLectureId] = useState<string | null>(null);
   const [transcriptLive, setTranscriptLive] = useState('');
-  const transcriptionSupported = useMemo(() => isTranscriptionSupported(), []);
+  const [lectureRealtimeStatus, setLectureRealtimeStatus] = useState<LectureRealtimeStatus>('idle');
+  const [lectureRealtimeMessage, setLectureRealtimeMessage] = useState('');
+  const [lectureRealtimeLines, setLectureRealtimeLines] = useState<LectureRealtimeLine[]>([]);
+  const [lectureAudioLevel, setLectureAudioLevel] = useState(0);
+  const activeLectureIdRef = useRef<string | null>(null);
+  const lectureRecentTextRef = useRef<string[]>([]);
+  const lectureTranslationQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lectureEndingRef = useRef(false);
+  const transcriptionSupported = useMemo(() => isLectureRecordingSupported(), []);
+  useEffect(() => () => {
+    activeLectureIdRef.current = null;
+    stopElevenLabsRealtimeTranscription();
+  }, []);
+  useEffect(() => {
+    let cancelled = false;
+    lectureAudioStorage.recoverInterruptedRecordings()
+      .then((recordings) => {
+        if (cancelled || recordings.length === 0) return;
+        setLectureHistory((previous) => {
+          const previousByAudioId = new Map(
+            previous.map((lecture) => [lecture.audioRecordingId || lecture.id, lecture])
+          );
+          const merged = recordings.map((audio) => {
+            const existing = previousByAudioId.get(audio.id);
+            return existing ? withLectureAudio(existing, audio) : importedAudioLecture(audio);
+          });
+          const audioIds = new Set(recordings.map((recording) => recording.id));
+          return dedupeLectureHistory([
+            ...merged,
+            ...previous.filter((lecture) => !audioIds.has(lecture.audioRecordingId || lecture.id)),
+          ]);
+        });
+      })
+      .catch((error) => console.error('Lecture audio recovery failed:', error));
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [trapList, setTrapList] = useState<TrapItem[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('trap_list') || '[]');
@@ -680,6 +1076,7 @@ const App: React.FC = () => {
       setWorkspaceAtomCoverage({});
       setWorkspaceDialogueTranscript([]);
       setWorkspaceKcGlossary({});
+      setWorkspaceEvidenceAnnotations([]);
       return;
     }
     if (examWorkspaceMaterialsSorted.length === 0) {
@@ -689,6 +1086,7 @@ const App: React.FC = () => {
       setWorkspaceAtomCoverage({});
       setWorkspaceDialogueTranscript([]);
       setWorkspaceKcGlossary({});
+      setWorkspaceEvidenceAnnotations([]);
       return;
     }
     const key = computeExamWorkspaceLsapKey(user.uid, activeExamId, examWorkspaceMaterialsSorted);
@@ -700,12 +1098,14 @@ const App: React.FC = () => {
       setWorkspaceAtomCoverage(mergeAtomCoverageForMap(bundle.atomCoverage, bundle.contentMap));
       setWorkspaceDialogueTranscript(bundle.dialogueTranscript ?? []);
       setWorkspaceKcGlossary(bundle.kcGlossary ?? {});
+      setWorkspaceEvidenceAnnotations(filterEvidenceAnnotationsForMap(bundle.evidenceAnnotations, bundle.contentMap));
     } else {
       setWorkspaceLsapContentMap(null);
       setWorkspaceLsapState(null);
       setWorkspaceAtomCoverage({});
       setWorkspaceDialogueTranscript([]);
       setWorkspaceKcGlossary({});
+      setWorkspaceEvidenceAnnotations([]);
     }
   }, [appMode, user?.uid, activeExamId, examWorkspaceMaterialsSorted]);
   useEffect(() => { 
@@ -943,16 +1343,54 @@ const App: React.FC = () => {
     storageService.getAllHistory().then(setHistoryItems);
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      setAuthLoading(false);
       if (currentUser) {
           console.log("✅ [App] User Authenticated:", currentUser.uid);
+          try {
+            const cloudPreferences = await getCloudAppPreferencesWithTimeout(currentUser);
+            if (cloudPreferences) {
+              setAppLanguage(cloudPreferences.language);
+            } else {
+              void saveCloudAppPreferences(currentUser, {
+                version: 1,
+                language: getCurrentAppLanguage(),
+                updatedAt: Date.now(),
+              }).catch((error) => console.warn('Initial app language cloud save failed.', error));
+            }
+          } catch (error) {
+            console.warn('App language cloud restore failed; keeping the local preference.', error);
+          }
       } else {
           console.log("ℹ️ [App] No User Authenticated");
           setCurrentSessionId(null);
       }
+      setAuthLoading(false);
     });
     return () => unsubscribe();
-  }, []);
+  }, [setAppLanguage]);
+
+  const handleAppLanguageChange = useCallback((language: AppLanguage) => {
+    setAppLanguage(language);
+    if (!user) return;
+    saveCloudAppPreferences(user, { version: 1, language, updatedAt: Date.now() })
+      .catch((error) => console.warn('App language cloud save failed; the local preference is still active.', error));
+  }, [setAppLanguage, user]);
+
+  const reloadStudyCloudSessions = useCallback(async () => {
+    if (!user) {
+      setStudyCloudSessions([]);
+      return;
+    }
+    try {
+      const sessions = await getUserSessions(user);
+      setStudyCloudSessions(sessions);
+    } catch (error) {
+      console.warn('学习页云端资料列表刷新失败', error);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    reloadStudyCloudSessions();
+  }, [reloadStudyCloudSessions]);
 
   // --- 私教会话持久化（阶段三）：独立于略读 / 文件 hash，按用户全局存取 ---
   // 1) 挂载即从本地 IndexedDB 恢复（仅当内存仍为空，避免覆盖用户已开的会话）
@@ -1260,16 +1698,20 @@ const App: React.FC = () => {
       // #endregion
       const newSlides: Slide[] = images.map((img, idx) => ({ id: `slide-${hash}-${idx}`, imageUrl: img, pageNumber: idx + 1 }));
       const fullText = pdfText.join('\n');
-      setFileName(file.name); setSlides(newSlides); setFullPdfText(fullText); setStudyTime(0); pageEntryTime.current = Date.now();
+      setFileName(file.name); setSlides(newSlides); setFullPdfText(fullText); setPdfPageTexts(pdfText); setStudyTime(0); pageEntryTime.current = Date.now();
       const existingRecord = await storageService.getFileState(hash);
       const stateToRestore = restoreData || (existingRecord ? existingRecord.state : null);
       if (stateToRestore) {
-        setExplanations(stateToRestore.explanations || {}); setChatCache(stateToRestore.chatCache || {}); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
-        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'deep'); setLayeredReadingState(stateToRestore.layeredReadingState ?? null); setDocType(stateToRestore.docType || 'STEM');
+        setExplanations(stateToRestore.explanations || {}); setExplanationErrors({}); setChatCache(stateToRestore.chatCache || {}); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
+        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'skim'); setLayeredReadingState(stateToRestore.layeredReadingState ?? null); setDocType(stateToRestore.docType || 'STEM');
         // 阶段二：区分新旧格式。无 version 字段，只能靠「skimSessions 是否存在」判断（RECON Q4）。
         if (stateToRestore.skimSessions && stateToRestore.skimSessions.length > 0) {
           // 新格式：直接恢复多段列表 + 激活索引（越界回 0）。补 createEmptySkimSession 默认值，兼容未来新增字段。
-          const list: SkimSession[] = stateToRestore.skimSessions.map(s => ({ ...createEmptySkimSession(), ...s }));
+          const list: SkimSession[] = stateToRestore.skimSessions.map((s, index) => ({
+            ...createEmptySkimSession(index + 1),
+            ...s,
+            title: s.title?.trim() || `领读 ${index + 1}`,
+          }));
           const rawIdx = stateToRestore.activeSkimIndex ?? 0;
           const idx = rawIdx >= 0 && rawIdx < list.length ? rawIdx : 0;
           setSkimSessions(list); setActiveSkimIndex(idx); activeIdRef.current = list[idx].id;
@@ -1299,16 +1741,16 @@ const App: React.FC = () => {
         if (restoredBg) setCustomBackgroundUrl(restoredBg); else if (stateToRestore.galgameBackgroundUrl) setCustomBackgroundUrl(stateToRestore.galgameBackgroundUrl);
         if (stateToRestore.personaSettings) setPersonaSettings(stateToRestore.personaSettings);
       } else {
-        setExplanations({}); setChatCache({}); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('deep'); setLayeredReadingState(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
-        // 全新文件：略读回到单段空白（非迁移，不抑制保存）。
-        const blankSkimSession = createEmptySkimSession();
+        setExplanations({}); setExplanationErrors({}); setChatCache({}); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('skim'); setLayeredReadingState(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
+        // 全新文件：领读回到单段空白配置区（非迁移，不抑制保存）。
+        const blankSkimSession = { ...createEmptySkimSession(), skipDiagnosis: true };
         setSkimSessions([blankSkimSession]); setActiveSkimIndex(0); activeIdRef.current = blankSkimSession.id;
         migratedSkimBaselineRef.current = null;
       }
-      // 后台诊断只写「本次打开时的那一段」（旧格式迁移段或空白段），按 id 锁定，绝不串到别段。
-      // 新格式（skimSessions 存在）已自带各段 map / skipDiagnosis 状态，不跑文件级诊断。
+      // 后台诊断只写「本次打开时的那一段」（旧格式迁移段），按 id 锁定，绝不串到别段。
+      // 新格式（skimSessions 存在）已自带各段 map / skipDiagnosis 状态；全新文件直接进领读配置区。
       const diagTargetSkimId = activeIdRef.current;
-      if (!stateToRestore?.skimSessions && !stateToRestore?.studyMap) {
+      if (stateToRestore && !stateToRestore.skimSessions && !stateToRestore.studyMap) {
         setIsStudyMapLoading(true); const diagnosisContent = rawPdfData || fullText;
         // #region agent log
         _debugLog('App.tsx:processFile', 'before diagnosis (background)', {});
@@ -1355,6 +1797,7 @@ const App: React.FC = () => {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return; setIsProcessingFile(true);
+    setIsOpeningStudyFile(true);
     // #region agent log
     _debugLog('App.tsx:handleFileUpload', 'upload started', { fileName: file?.name });
     // #endregion
@@ -1365,10 +1808,11 @@ const App: React.FC = () => {
         new Promise<never>((_, rej) => setTimeout(() => rej(new Error('处理超时（120秒），请重试或换一个较小的 PDF。')), PROCESS_FILE_TIMEOUT_MS)),
       ]);
       setShellMode('study');
+      setIsOpeningStudyFile(false);
       // #region agent log
       _debugLog('App.tsx:handleFileUpload', 'processFile resolved', {});
       // #endregion
-      if (user) { setIsSyncing(true); try { const downloadUrl = await uploadPDF(user, file); const sessionId = await createCloudSession(user, file.name, downloadUrl); setCurrentSessionId(sessionId); } catch (e) { console.error("Cloud Sync Failed:", e); alert("云端同步失败，请检查网络。"); } finally { setIsSyncing(false); } }
+      if (user) { setIsSyncing(true); try { const downloadUrl = await uploadPDF(user, file); const sessionId = await createCloudSession(user, file.name, downloadUrl); setCurrentSessionId(sessionId); await reloadStudyCloudSessions(); } catch (e) { console.error("Cloud Sync Failed:", e); alert("云端同步失败，请检查网络。"); } finally { setIsSyncing(false); } }
     } catch (e) {
       console.error("Local Processing Failed", e);
       // #region agent log
@@ -1379,13 +1823,15 @@ const App: React.FC = () => {
       // #region agent log
       _debugLog('App.tsx:handleFileUpload', 'setIsProcessingFile(false)', {});
       // #endregion
+      setIsOpeningStudyFile(false);
       setIsProcessingFile(false);
     }
   };
 
-  const handleRestoreCloudSession = async (session: CloudSession) => {
+  const handleRestoreCloudSession = async (session: CloudSession, options?: { initialPage?: number }) => {
     if (!user) return;
     const wasInDashboard = shellMode === 'dashboard';
+    setIsOpeningStudyFile(true);
     if (wasInDashboard) setShellMode('study');
     setIsProcessingFile(true);
     try {
@@ -1411,7 +1857,9 @@ const App: React.FC = () => {
         docType: fullData.docType,
         skimTopHeight: fullData.skimTopHeight,
         skimFocusMode: fullData.skimFocusMode,
-        currentIndex: fullData.currentIndex,
+        currentIndex: options?.initialPage
+          ? Math.max(0, Math.trunc(options.initialPage) - 1)
+          : fullData.currentIndex,
         personaSettings: fullData.personaSettings,
         reviewQuizRounds: fullData.reviewQuizRounds,
         reviewFlashCards: fullData.reviewFlashCards,
@@ -1424,6 +1872,7 @@ const App: React.FC = () => {
       };
       await processFile(file, restoreData, fullData.customAvatarUrl, fullData.customBackgroundUrl);
       setCurrentSessionId(session.id);
+      await reloadStudyCloudSessions();
       setShellMode('study');
       setIsSyncing(true);
       const pendCloud = pendingNavSegmentRef.current;
@@ -1436,6 +1885,7 @@ const App: React.FC = () => {
       if (wasInDashboard) setShellMode('dashboard');
       alert('无法从云端恢复，请重试。');
     } finally {
+      setIsOpeningStudyFile(false);
       setIsProcessingFile(false);
     }
   };
@@ -1568,7 +2018,7 @@ const App: React.FC = () => {
       switch (seg.kind) {
         case 'slide_review':
           setViewMode('deep');
-          window.alert('已进入精读模式：先看当前页，再向右侧提问“先讲这页最核心的3点”。');
+          window.alert('已打开页面工具：可以点“听讲解”或“整理本页内容”。');
           break;
         case 'lsap_probe':
           setExamPredictionPanelOpen(true);
@@ -1592,8 +2042,8 @@ const App: React.FC = () => {
           window.alert('已打开学习指南：先完成一个小节，再回到今日学习选下一块。');
           break;
         default:
-          setViewMode('deep');
-          window.alert('该任务将打开精读模式；若需其他功能请从「复习」进入');
+          setViewMode('skim');
+          window.alert('该任务将打开领读模式；若需其他功能请从「复习」进入');
       }
     },
     [slides.length]
@@ -1638,7 +2088,8 @@ const App: React.FC = () => {
 
   const navigateStudyFlowStep = useCallback((step: StudyFlowStep) => {
     if (step.action === 'rest') {
-      setIsEnergyMode(true);
+      setDashboardInitialTab('energy');
+      setShellMode('dashboard');
       return;
     }
     if (step.action === 'slide_skim') {
@@ -1677,7 +2128,8 @@ const App: React.FC = () => {
           setFiveMinFlowOpen(true);
           break;
         case 'break':
-          setIsEnergyMode(true);
+          setDashboardInitialTab('energy');
+          setShellMode('dashboard');
           break;
         case 'examPrediction':
           setExamPredictionInitialKCId(null);
@@ -1927,12 +2379,14 @@ const App: React.FC = () => {
       setWorkspaceAtomCoverage(atomCoverage);
       setWorkspaceDialogueTranscript([]);
       setWorkspaceKcGlossary({});
+      setWorkspaceEvidenceAnnotations([]);
       saveWorkspaceLsapBundle(key, {
         contentMap: map,
         state,
         atomCoverage,
         dialogueTranscript: [],
         kcGlossary: {},
+        evidenceAnnotations: [],
         dialogueUpdatedAt: Date.now(),
         savedAt: Date.now(),
       });
@@ -1949,7 +2403,7 @@ const App: React.FC = () => {
    *   无 `sourceLinkId` 的 KC 另用「整包 merged」抽一次（子集），再按 `kc.id` 拼回。
    * 某份失败则跳过并继续；若全部失败则 alert。未返回 atoms 的 KC 保留原 atoms（若有）。
    */
-  const handleExtractLogicAtoms = useCallback(async () => {
+  const handleExtractLogicAtoms = useCallback(async (options?: { preserveExistingAtoms?: boolean }) => {
     if (!user?.uid || !activeExamId || !workspaceLsapContentMap?.kcs?.length) {
       window.alert('请先生成本场考点图谱。');
       return;
@@ -1976,21 +2430,28 @@ const App: React.FC = () => {
         return false;
       }
       setWorkspaceAtomsProgress({ current: 1, total: 1, fileName: '整包合并讲义（旧版考点图谱）' });
-      const newMap = await generateLogicAtomsForContentMap(merged, workspaceLsapContentMap, { maxDocChars: 60000 });
+      const newMap = await generateLogicAtomsForContentMap(merged, workspaceLsapContentMap, {
+        maxDocChars: 60000,
+        preserveExistingAtoms: options?.preserveExistingAtoms,
+      });
       if (!newMap) {
         window.alert('提取逻辑原子失败，请重试。');
         return false;
       }
       const key = computeExamWorkspaceLsapKey(user.uid, activeExamId, examWorkspaceMaterialsSorted);
       const atomCoverage = mergeAtomCoverageForMap(workspaceAtomCoverage, newMap);
+      const evidenceAnnotations = filterEvidenceAnnotationsForMap(workspaceEvidenceAnnotationsRef.current, newMap);
       setWorkspaceLsapContentMap(newMap);
       setWorkspaceAtomCoverage(atomCoverage);
+      workspaceEvidenceAnnotationsRef.current = evidenceAnnotations;
+      setWorkspaceEvidenceAnnotations(evidenceAnnotations);
       saveWorkspaceLsapBundle(key, {
         contentMap: newMap,
         state: workspaceLsapStateRef.current ?? workspaceLsapState,
         atomCoverage,
         dialogueTranscript: workspaceDialogueTranscriptRef.current,
         kcGlossary: workspaceKcGlossaryRef.current,
+        evidenceAnnotations,
         dialogueUpdatedAt: Date.now(),
         savedAt: Date.now(),
       });
@@ -2069,6 +2530,7 @@ const App: React.FC = () => {
           const newPartial = await generateLogicAtomsForContentMap(text, partialMap, {
             maxDocChars: LSAP_ATOMS_PER_MATERIAL_MAX_CHARS,
             perMaterial: true,
+            preserveExistingAtoms: options?.preserveExistingAtoms,
           });
           if (!newPartial) {
             skippedFail++;
@@ -2078,7 +2540,11 @@ const App: React.FC = () => {
           anySuccess = true;
           for (const kc of newPartial.kcs) {
             const target = resultMap.kcs.find((x) => x.id === kc.id);
-            if (target) target.atoms = kc.atoms;
+            if (target) {
+              target.atoms = kc.atoms;
+              target.conceptZh = kc.conceptZh;
+              target.definitionZh = kc.definitionZh;
+            }
           }
         } else {
           const merged = await getMergedDocContentForExamLinks(examWorkspaceMaterialsSorted);
@@ -2092,7 +2558,10 @@ const App: React.FC = () => {
             createdAt: resultMap.createdAt,
             kcs: withoutSource,
           };
-          const newPartial = await generateLogicAtomsForContentMap(merged, partialMap, { maxDocChars: 60000 });
+          const newPartial = await generateLogicAtomsForContentMap(merged, partialMap, {
+            maxDocChars: 60000,
+            preserveExistingAtoms: options?.preserveExistingAtoms,
+          });
           if (!newPartial) {
             skippedFail++;
             continue;
@@ -2100,7 +2569,11 @@ const App: React.FC = () => {
           anySuccess = true;
           for (const kc of newPartial.kcs) {
             const target = resultMap.kcs.find((x) => x.id === kc.id);
-            if (target) target.atoms = kc.atoms;
+            if (target) {
+              target.atoms = kc.atoms;
+              target.conceptZh = kc.conceptZh;
+              target.definitionZh = kc.definitionZh;
+            }
           }
         }
       }
@@ -2115,14 +2588,18 @@ const App: React.FC = () => {
 
       const key = computeExamWorkspaceLsapKey(user.uid, activeExamId, examWorkspaceMaterialsSorted);
       const atomCoverage = mergeAtomCoverageForMap(workspaceAtomCoverage, resultMap);
+      const evidenceAnnotations = filterEvidenceAnnotationsForMap(workspaceEvidenceAnnotationsRef.current, resultMap);
       setWorkspaceLsapContentMap(resultMap);
       setWorkspaceAtomCoverage(atomCoverage);
+      workspaceEvidenceAnnotationsRef.current = evidenceAnnotations;
+      setWorkspaceEvidenceAnnotations(evidenceAnnotations);
       saveWorkspaceLsapBundle(key, {
         contentMap: resultMap,
         state: workspaceLsapStateRef.current ?? workspaceLsapState,
         atomCoverage,
         dialogueTranscript: workspaceDialogueTranscriptRef.current,
         kcGlossary: workspaceKcGlossaryRef.current,
+        evidenceAnnotations,
         dialogueUpdatedAt: Date.now(),
         savedAt: Date.now(),
       });
@@ -2152,6 +2629,7 @@ const App: React.FC = () => {
         atomCoverage: next,
         dialogueTranscript: workspaceDialogueTranscriptRef.current,
         kcGlossary: workspaceKcGlossaryRef.current,
+        evidenceAnnotations: workspaceEvidenceAnnotationsRef.current,
         dialogueUpdatedAt: Date.now(),
         savedAt: Date.now(),
       });
@@ -2170,6 +2648,7 @@ const App: React.FC = () => {
         atomCoverage: workspaceAtomCoverageRef.current,
         dialogueTranscript: workspaceDialogueTranscriptRef.current,
         kcGlossary: workspaceKcGlossaryRef.current,
+        evidenceAnnotations: workspaceEvidenceAnnotationsRef.current,
         dialogueUpdatedAt: Date.now(),
         savedAt: Date.now(),
       });
@@ -2192,11 +2671,32 @@ const App: React.FC = () => {
             atomCoverage: workspaceAtomCoverageRef.current,
             dialogueTranscript: next,
             kcGlossary: workspaceKcGlossaryRef.current,
+            evidenceAnnotations: workspaceEvidenceAnnotationsRef.current,
             dialogueUpdatedAt: Date.now(),
             savedAt: Date.now(),
           });
         });
         return next;
+      });
+    },
+    [user?.uid, workspaceLsapKey, workspaceLsapContentMap]
+  );
+
+  /** 用户证据备注与待回访队列；不改动原子覆盖和理解等级。 */
+  const handleWorkspaceEvidenceAnnotationsChange = useCallback(
+    (next: WorkspaceEvidenceAnnotation[]) => {
+      workspaceEvidenceAnnotationsRef.current = next;
+      setWorkspaceEvidenceAnnotations(next);
+      if (!user?.uid || !workspaceLsapKey || !workspaceLsapContentMap || !workspaceLsapStateRef.current) return;
+      saveWorkspaceLsapBundle(workspaceLsapKey, {
+        contentMap: workspaceLsapContentMap,
+        state: workspaceLsapStateRef.current,
+        atomCoverage: workspaceAtomCoverageRef.current,
+        dialogueTranscript: workspaceDialogueTranscriptRef.current,
+        kcGlossary: workspaceKcGlossaryRef.current,
+        evidenceAnnotations: next,
+        dialogueUpdatedAt: Date.now(),
+        savedAt: Date.now(),
       });
     },
     [user?.uid, workspaceLsapKey, workspaceLsapContentMap]
@@ -2224,6 +2724,7 @@ const App: React.FC = () => {
             atomCoverage: workspaceAtomCoverageRef.current,
             dialogueTranscript: workspaceDialogueTranscriptRef.current,
             kcGlossary: workspaceKcGlossaryRef.current,
+            evidenceAnnotations: workspaceEvidenceAnnotationsRef.current,
             dialogueUpdatedAt: Date.now(),
             savedAt: Date.now(),
           });
@@ -2339,68 +2840,322 @@ const App: React.FC = () => {
     lsapState,
   ]);
 
-  const handleStartClass = async () => {
-    try {
-      const lecture: LectureRecord = {
-        id: `lecture-${Date.now()}`,
-        startedAt: Date.now(),
-        transcript: []
+  useEffect(() => {
+    if (!isClassroomMode || !fileName || slides.length === 0) return;
+    const pageNumber = currentIndex + 1;
+
+    setCurrentLecture((previous) => {
+      if (!previous) return previous;
+      const visits = previous.pageVisits || [];
+      if (visits[visits.length - 1]?.pageNumber === pageNumber) return previous;
+
+      return {
+        ...previous,
+        sourceFileName: previous.sourceFileName || fileName,
+        sourceFileHash: previous.sourceFileHash || fileHash || undefined,
+        sourceStartedPage: previous.sourceStartedPage || pageNumber,
+        pageVisits: [
+          ...visits,
+          {
+            pageNumber,
+            elapsedMs: Math.max(0, Date.now() - previous.startedAt),
+          },
+        ],
       };
-      setCurrentLecture(lecture);
-      setTranscriptLive('');
-      setIsClassroomMode(true);
-      await startRecording((text, isFinal) => {
-        if (isFinal) {
-          setCurrentLecture((prev) =>
-            prev
-              ? { ...prev, transcript: [...prev.transcript, { text, timestamp: Date.now() }] }
-              : null
-          );
-        } else {
-          setTranscriptLive(text);
+    });
+  }, [currentIndex, fileHash, fileName, isClassroomMode, slides.length]);
+
+  const handleLectureRealtimeCommitted = useCallback((lectureId: string, text: string) => {
+    if (activeLectureIdRef.current !== lectureId) return;
+    const normalized = text.trim();
+    if (!normalized) return;
+
+    const timestamp = Date.now();
+    const lineId = `${lectureId}-${timestamp}-${Math.random().toString(36).slice(2, 8)}`;
+    const context = lectureRecentTextRef.current.slice(-2);
+    lectureRecentTextRef.current = [...lectureRecentTextRef.current, normalized].slice(-3);
+    setTranscriptLive('');
+    setCurrentLecture((previous) => previous?.id === lectureId
+      ? { ...previous, transcript: [...previous.transcript, { text: normalized, timestamp }] }
+      : previous);
+    setLectureRealtimeLines((previous) => [
+      ...previous,
+      { id: lineId, text: normalized, timestamp, translationStatus: 'pending' },
+    ]);
+
+    lectureTranslationQueueRef.current = lectureTranslationQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          const translation = await translateLectureTranscriptSegment(normalized, context);
+          if (activeLectureIdRef.current !== lectureId) return;
+          setLectureRealtimeLines((previous) => previous.map((line) => line.id === lineId
+            ? { ...line, translation, translationStatus: 'ready' }
+            : line));
+        } catch (error) {
+          console.error('Lecture realtime translation failed:', error);
+          if (activeLectureIdRef.current !== lectureId) return;
+          setLectureRealtimeLines((previous) => previous.map((line) => line.id === lineId
+            ? { ...line, translationStatus: 'error' }
+            : line));
         }
       });
+  }, []);
+
+  const startLectureRealtime = useCallback(async (lectureId: string) => {
+    await startElevenLabsRealtimeTranscription({
+      onStatus: (status, message) => {
+        if (activeLectureIdRef.current !== lectureId) return;
+        setLectureRealtimeStatus(status);
+        setLectureRealtimeMessage(message || '');
+      },
+      onPartial: (text) => {
+        if (activeLectureIdRef.current !== lectureId) return;
+        setTranscriptLive(text);
+      },
+      onCommitted: (text) => handleLectureRealtimeCommitted(lectureId, text),
+    });
+  }, [handleLectureRealtimeCommitted]);
+
+  const handleRetryLectureRealtime = useCallback(async () => {
+    if (!activeLectureIdRef.current || isClassroomPaused) return;
+    setLectureRealtimeMessage('');
+    await retryElevenLabsRealtimeTranscription();
+  }, [isClassroomPaused]);
+
+  const handleStartClass = async () => {
+    const startedAt = Date.now();
+    const hasOpenMaterial = Boolean(fileName && slides.length > 0);
+    const lecture: LectureRecord = {
+      id: `lecture-${startedAt}`,
+      startedAt,
+      transcript: [],
+      audioStatus: 'recording',
+      audioSource: 'microphone',
+      sourceFileName: hasOpenMaterial ? fileName || undefined : undefined,
+      sourceFileHash: hasOpenMaterial ? fileHash || undefined : undefined,
+      sourceStartedPage: hasOpenMaterial ? currentIndex + 1 : undefined,
+      pageVisits: hasOpenMaterial
+        ? [{ pageNumber: currentIndex + 1, elapsedMs: 0 }]
+        : undefined,
+    };
+    try {
+      activeLectureIdRef.current = lecture.id;
+      lectureEndingRef.current = false;
+      lectureRecentTextRef.current = [];
+      lectureTranslationQueueRef.current = Promise.resolve();
+      setCurrentLecture(lecture);
+      setTranscriptLive('');
+      setLectureRealtimeLines([]);
+      setLectureRealtimeStatus('connecting');
+      setLectureRealtimeMessage('');
+      setLectureAudioLevel(0);
+      setIsClassroomPaused(false);
+      setClassroomPausedAt(null);
+      setClassroomPausedDurationMs(0);
+      setIsClassroomMode(true);
+      setIsClassroomPanelVisible(true);
+      const audio = await startRecording(
+        lecture.id,
+        (progress) => {
+          setCurrentLecture((prev) => prev ? withLectureAudio(prev, progress) : null);
+        },
+        setLectureAudioLevel
+      );
+      setCurrentLecture((prev) => prev ? withLectureAudio(prev, audio) : null);
+      void startLectureRealtime(lecture.id);
     } catch (e) {
+      activeLectureIdRef.current = null;
+      stopElevenLabsRealtimeTranscription();
       alert(e instanceof Error ? e.message : '无法开启录音');
       setCurrentLecture(null);
+      setIsClassroomPaused(false);
+      setClassroomPausedAt(null);
+      setClassroomPausedDurationMs(0);
       setIsClassroomMode(false);
+      setIsClassroomPanelVisible(false);
+    }
+  };
+
+  const handlePauseClass = async () => {
+    if (!isClassroomMode || isClassroomPaused || !currentLecture) return;
+    try {
+      await pauseRecording();
+      stopElevenLabsRealtimeTranscription();
+      setTranscriptLive('');
+      setLectureRealtimeStatus('idle');
+      setLectureRealtimeMessage('');
+      setLectureAudioLevel(0);
+      setClassroomPausedAt(Date.now());
+      setIsClassroomPaused(true);
+    } catch (error) {
+      console.error('Lecture pause failed:', error);
+      alert(error instanceof Error ? error.message : '课堂录音暂时无法暂停');
+    }
+  };
+
+  const handleResumeClass = async () => {
+    if (!isClassroomMode || !isClassroomPaused || !currentLecture) return;
+    try {
+      await resumeRecording();
+      const resumedAt = Date.now();
+      if (classroomPausedAt !== null) {
+        setClassroomPausedDurationMs((duration) => duration + Math.max(0, resumedAt - classroomPausedAt));
+      }
+      setClassroomPausedAt(null);
+      setIsClassroomPaused(false);
+      setLectureRealtimeStatus('connecting');
+      setLectureRealtimeMessage('');
+      void startLectureRealtime(currentLecture.id);
+    } catch (error) {
+      console.error('Lecture resume failed:', error);
+      alert(error instanceof Error ? error.message : '课堂录音暂时无法继续');
     }
   };
 
   const handleEndClass = async () => {
-    await stopRecording();
+    if (lectureEndingRef.current) return;
+    lectureEndingRef.current = true;
+    const lecture = currentLecture;
+    activeLectureIdRef.current = null;
+    stopElevenLabsRealtimeTranscription();
+    let audio: LectureAudioRecording | null = null;
+    try {
+      audio = await stopRecording();
+    } catch (error) {
+      console.error('Lecture audio stop failed:', error);
+      alert('音频收尾没有完整完成，已保存的分段仍会保留为未正常结束记录。');
+    }
     setTranscriptLive('');
-    setCurrentLecture((prev) => {
-      if (!prev) return null;
-      const ended = { ...prev, endedAt: Date.now() };
-      setLectureHistory((h) => [ended, ...h]);
-      return null;
-    });
+    setLectureRealtimeStatus('idle');
+    setLectureRealtimeMessage('');
+    setLectureAudioLevel(0);
+    setIsClassroomPaused(false);
+    setClassroomPausedAt(null);
+    setClassroomPausedDurationMs(0);
+    if (lecture) {
+      const ended = audio
+        ? withLectureAudio({ ...lecture, endedAt: audio.endedAt || Date.now() }, audio)
+        : { ...lecture, endedAt: Date.now(), audioStatus: 'interrupted' as const };
+      setLectureHistory((history) => upsertLectureHistory(history, ended));
+    }
+    setCurrentLecture(null);
     setIsClassroomMode(false);
+    setIsClassroomPanelVisible(false);
     setLectureTranscriptPageOpen(true);
+    lectureEndingRef.current = false;
   };
 
   const handleOrganizeLecture = useCallback(async (lecture: LectureRecord) => {
     const id = lecture.id;
+    const segments = lecture.transcriptSegments || [];
     const text = lecture.transcript.map((t) => t.text).join('');
-    if (!text.trim()) return;
+    if (segments.length === 0 && !text.trim()) return;
     setOrganizingLectureId(id);
     try {
-      const summary = await organizeLectureFromTranscript(text);
-      setLectureHistory((prev) =>
-        prev.map((l) => (l.id === id ? { ...l, organizedSummary: summary } : l))
-      );
+      if (segments.length > 0) {
+        const matchesCurrentMaterial = Boolean(
+          lecture.sourceFileHash
+            ? fileHash && lecture.sourceFileHash === fileHash
+            : lecture.sourceFileName && fileName && lecture.sourceFileName === fileName
+        );
+        const pageBySegmentId = Object.fromEntries(
+          segments.flatMap((segment) => {
+            const pageNumber = getLecturePageAtElapsedMs(lecture, segment.startMs);
+            return pageNumber ? [[segment.id, pageNumber]] : [];
+          })
+        );
+        const structuredNotes = await organizeLectureWithEvidence(segments, {
+          sourceFileName: lecture.sourceFileName,
+          pageBySegmentId,
+          pageTexts: matchesCurrentMaterial
+            ? pdfPageTexts.map((pageText, index) => ({
+                pageNumber: index + 1,
+                text: pageText,
+              }))
+            : [],
+        });
+        setLectureHistory((prev) =>
+          prev.map((item) => item.id === id
+            ? { ...item, structuredNotes, organizedSummary: structuredNotes.overview }
+            : item)
+        );
+      } else {
+        const summary = await organizeLectureFromTranscript(text);
+        setLectureHistory((prev) =>
+          prev.map((item) => item.id === id ? { ...item, organizedSummary: summary } : item)
+        );
+      }
     } catch (e) {
       console.error(e);
       alert(e instanceof Error ? e.message : 'AI 整理失败');
     } finally {
       setOrganizingLectureId(null);
     }
+  }, [fileHash, fileName, pdfPageTexts]);
+
+  const handleTranscribeLecture = useCallback(async (
+    lecture: LectureRecord,
+    options: LectureTranscriptionOptions
+  ) => {
+    if (!lecture.audioRecordingId) return;
+    const id = lecture.id;
+    setTranscribingLectureId(id);
+    setLectureHistory((previous) => previous.map((item) => (
+      item.id === id
+        ? { ...item, transcriptionStatus: 'transcribing', transcriptionError: undefined }
+        : item
+    )));
+
+    try {
+      const audio = await lectureAudioStorage.getRecordingBlob(lecture.audioRecordingId);
+      const result = await transcribeLectureAudio(
+        audio,
+        {
+          ...options,
+          fileName: options.fileName || `${lecture.name || lecture.id}.${getLectureAudioExtension(lecture.audioMimeType)}`,
+        },
+        lecture.audioDurationMs
+      );
+      setLectureHistory((previous) => previous.map((item) => (
+        item.id === id
+          ? {
+              ...item,
+              transcript: result.legacyTranscript,
+              transcriptSegments: result.segments,
+              transcriptionStatus: 'ready',
+              transcriptionError: undefined,
+              transcriptionProvider: 'elevenlabs-scribe-v2',
+              transcriptionLanguageCode: result.languageCode,
+              transcriptionLanguageProbability: result.languageProbability,
+              transcribedAt: Date.now(),
+              audioQuality: result.quality,
+              transcriptionKeyterms: options.keyterms,
+              transcriptionSpeakerCount: result.speakerCount,
+            }
+          : item
+      )));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '高精度转写失败，请稍后重试。';
+      setLectureHistory((previous) => previous.map((item) => (
+        item.id === id
+          ? { ...item, transcriptionStatus: 'error', transcriptionError: message }
+          : item
+      )));
+    } finally {
+      setTranscribingLectureId(null);
+    }
   }, []);
 
-  const handleDeleteLecture = useCallback((lectureId: string) => {
+  const handleDeleteLecture = useCallback(async (lectureId: string) => {
+    const lecture = lectureHistory.find((item) => item.id === lectureId);
+    if (lecture?.audioRecordingId) {
+      await lectureAudioStorage.deleteRecording(lecture.audioRecordingId).catch((error) => {
+        console.error('Lecture audio deletion failed:', error);
+      });
+    }
     setLectureHistory((prev) => prev.filter((l) => l.id !== lectureId));
-  }, []);
+  }, [lectureHistory]);
 
   const handleRenameLecture = useCallback((lectureId: string, newName: string) => {
     setLectureHistory((prev) =>
@@ -2408,32 +3163,87 @@ const App: React.FC = () => {
     );
   }, []);
 
+  const handleImportLectureAudio = useCallback(async (file: File) => {
+    const recordingId = `lecture-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const audio = await lectureAudioStorage.importAudioFile(file, recordingId);
+    setLectureHistory((previous) => upsertLectureHistory(previous, importedAudioLecture(audio)));
+  }, []);
+
   // --- STANDARD LOGIC ---
-  const fetchExplanation = useCallback(async (index: number, currentSlides: Slide[], fullContext: string | null) => {
+  const getCachedPageToolExplanation = useCallback((slideId: string, mode: SlideExplanationMode) => {
+    const otherLanguage: AppLanguage = appLanguage === 'en' ? 'zh-CN' : 'en';
+    return explanations[getPageToolCacheKey(slideId, mode, appLanguage)]
+      ?? explanations[getLegacyPageToolCacheKey(slideId, mode)]
+      ?? explanations[getPageToolCacheKey(slideId, mode, otherLanguage)]
+      ?? (mode === 'explain' ? explanations[slideId] : undefined);
+  }, [appLanguage, explanations]);
+
+  const buildPageToolGuideContext = useCallback((mode: SlideExplanationMode) => {
+    const recentTurns = skimMessages
+      .slice(-6)
+      .map((msg) => `${msg.role === 'user' ? '学生' : 'AI'}：${msg.text.slice(0, 700)}`)
+      .join('\n');
+    return [
+      `页面工具：${getPageToolLabel(mode)}`,
+      `当前主学习路径：领读模式（内部兼容字段仍为 skim）。`,
+      `当前领读状态：${skimStage}`,
+      `当前材料类型：${activeSkim.contentType ?? 'lecture'}`,
+      `领读模块数：${activeSkim.moduleCount}`,
+      `领读节奏：${activeSkim.skimPace === 'part' ? '一次一个 part' : '一次一个 module'}`,
+      activeSkim.pageRangeStart || activeSkim.pageRangeEnd ? `本段页码范围：${activeSkim.pageRangeStart ?? '开头'}-${activeSkim.pageRangeEnd ?? '结尾'}` : '本段页码范围：全本',
+      studyMap?.topic ? `学习地图主题：${studyMap.topic}` : '',
+      studyMap?.initialBriefing ? `学习地图摘要：${studyMap.initialBriefing}` : '',
+      recentTurns ? `最近领读对话：\n${recentTurns}` : '最近领读对话：暂无。',
+    ].filter(Boolean).join('\n');
+  }, [activeSkim.contentType, activeSkim.moduleCount, activeSkim.pageRangeEnd, activeSkim.pageRangeStart, activeSkim.skimPace, skimMessages, skimStage, studyMap?.initialBriefing, studyMap?.topic]);
+
+  const fetchExplanation = useCallback(async (index: number, currentSlides: Slide[], fullContext: string | null, mode: SlideExplanationMode = 'explain', forceRegenerate = false) => {
     const slide = currentSlides[index]; 
     if (!slide) return; 
-    if (explanations[slide.id]) { setIsGeneratingAI(false); return; } 
+    const cacheKey = getPageToolCacheKey(slide.id, mode);
+    if (!forceRegenerate && getCachedPageToolExplanation(slide.id, mode)) {
+      setExplanationErrors(prev => {
+        if (!prev[cacheKey]) return prev;
+        const next = { ...prev };
+        delete next[cacheKey];
+        return next;
+      });
+      setIsGeneratingAI(false);
+      return;
+    } 
     
+    setExplanationErrors(prev => {
+      if (!prev[cacheKey]) return prev;
+      const next = { ...prev };
+      delete next[cacheKey];
+      return next;
+    });
     setIsGeneratingAI(true); 
     try { 
-        // Modified to pass fullContext for "smart memory"
-        const explanation = await generateSlideExplanation(slide.imageUrl, fullContext || undefined); 
-        setExplanations(prev => ({ ...prev, [slide.id]: explanation })); 
+        const explanation = await generateSlideExplanation(slide.imageUrl, fullContext || undefined, {
+          mode,
+          pageNumber: slide.pageNumber,
+          guideContext: buildPageToolGuideContext(mode),
+        }); 
+        setExplanations(prev => ({ ...prev, [cacheKey]: explanation })); 
+        setExplanationErrors(prev => {
+          if (!prev[cacheKey]) return prev;
+          const next = { ...prev };
+          delete next[cacheKey];
+          return next;
+        });
     } catch (error) { 
         console.error(error); 
+        setExplanationErrors(prev => ({ ...prev, [cacheKey]: '页面工具生成失败，请稍后重试。' }));
     } finally { 
         setIsGeneratingAI(false); 
     }
-  }, [explanations]);
+  }, [buildPageToolGuideContext, getCachedPageToolExplanation]);
 
   useEffect(() => { 
     pageEntryTime.current = Date.now(); 
     hasEncouragedOnPage.current = false; 
-    if (!isGalgameMode && slides.length > 0 && viewMode === 'deep') { 
-        // Pass fullPdfText state to fetchExplanation
-        fetchExplanation(currentIndex, slides, fullPdfText); 
-    } 
-  }, [currentIndex, slides, viewMode, isGalgameMode, fetchExplanation, fullPdfText]);
+  }, [currentIndex]);
 
   const toggleImmersiveMode = async () => { if (!isImmersive) { setIsImmersive(true); try { if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen(); } catch (e) {} } else { setIsImmersive(false); try { if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen(); } catch (e) {} } };
   useEffect(() => { const handleFullscreenChange = () => { if (!document.fullscreenElement) setIsImmersive(false); }; document.addEventListener('fullscreenchange', handleFullscreenChange); return () => document.removeEventListener('fullscreenchange', handleFullscreenChange); }, []);
@@ -2494,24 +3304,170 @@ const App: React.FC = () => {
    *  studyMap 留到用户在配置区点「开始领读」时按所选页码范围 + 模块数生成（复用 onRegenerateStudyMap）。 */
   const handleAddSkimSession = useCallback(() => {
     if (skimActiveLoading || skimSessions.length >= MAX_SKIM_SESSIONS) return;
-    const newSession: SkimSession = { ...createEmptySkimSession(), skipDiagnosis: true };
+    const nextSequence = getNextDefaultSessionSequence(skimSessions.map(session => session.title), '领读');
+    const newSession: SkimSession = { ...createEmptySkimSession(nextSequence), skipDiagnosis: true };
     const newIndex = skimSessions.length;
     setSkimSessions(prev => (prev.length >= MAX_SKIM_SESSIONS ? prev : [...prev, newSession]));
     setActiveSkimIndex(newIndex);
-  }, [skimActiveLoading, skimSessions.length]);
+  }, [skimActiveLoading, skimSessions]);
+
+  const openSessionTabManager = useCallback((kind: ManagedSessionTab['kind'], id: string, title: string) => {
+    setManagedSessionTab({ kind, id });
+    setSessionRenameDraft(title);
+  }, []);
+
+  const managedSkimSession = managedSessionTab?.kind === 'skim'
+    ? skimSessions.find(session => session.id === managedSessionTab.id) ?? null
+    : null;
+  const managedTutorSession = managedSessionTab?.kind === 'tutor'
+    ? tutorSessions.find(session => session.id === managedSessionTab.id) ?? null
+    : null;
+  const managedSessionTitle = managedSkimSession?.title ?? managedTutorSession?.title ?? '';
+  const managedSessionIsGenerating = Boolean(
+    (managedSkimSession && skimActiveLoading && managedSkimSession.id === activeSkim?.id) ||
+    (managedTutorSession && tutorActiveLoading && managedTutorSession.id === activeTutor?.id)
+  );
+
+  const handleRenameManagedSession = useCallback(() => {
+    if (!managedSessionTab) return;
+    const nextTitle = sessionRenameDraft.trim().slice(0, 40);
+    if (!nextTitle) {
+      window.alert('名称不能为空。');
+      return;
+    }
+    if (managedSessionTab.kind === 'skim') {
+      if (skimSessions.some(session => session.id !== managedSessionTab.id && session.title.trim() === nextTitle)) {
+        window.alert('已经有一个同名的领读标签。');
+        return;
+      }
+      migratedSkimBaselineRef.current = null;
+      setSkimSessions(previous => previous.map(session => session.id === managedSessionTab.id
+        ? { ...session, title: nextTitle }
+        : session));
+    } else {
+      if (tutorSessions.some(session => session.id !== managedSessionTab.id && session.title.trim() === nextTitle)) {
+        window.alert('已经有一个同名的私教标签。');
+        return;
+      }
+      const target = tutorSessions.find(session => session.id === managedSessionTab.id);
+      if (!target) return;
+      const renamed = { ...target, title: nextTitle };
+      setTutorSessions(previous => previous.map(session => session.id === renamed.id ? renamed : session));
+      void storageService.saveTutorSession(renamed).catch(() => {});
+      if (user) void saveTutorSessionToCloud(user, renamed).catch(() => {});
+    }
+    setManagedSessionTab(null);
+  }, [managedSessionTab, sessionRenameDraft, skimSessions, tutorSessions, user]);
+
+  const handleDeleteManagedSession = useCallback(async () => {
+    if (!managedSessionTab || sessionTabDeleting) return;
+    const targetTitle = managedSessionTab.kind === 'skim'
+      ? skimSessions.find(session => session.id === managedSessionTab.id)?.title
+      : tutorSessions.find(session => session.id === managedSessionTab.id)?.title;
+    if (!targetTitle) return;
+    const targetGenerating = managedSessionTab.kind === 'skim'
+      ? skimActiveLoading && skimSessions[activeSkimIndex]?.id === managedSessionTab.id
+      : tutorActiveLoading && tutorSessions[activeTutorIndex]?.id === managedSessionTab.id;
+    if (targetGenerating) return;
+
+    const lastSkimHint = managedSessionTab.kind === 'skim' && skimSessions.length === 1
+      ? '\n\n为了让领读入口保持可用，删除后会建立一个全新的空白领读标签。'
+      : '';
+    const confirmed = window.confirm(
+      `永久删除“${targetTitle}”？\n\n该标签里的对话、学习位置和模式记录会被删除；其他领读、私教、PDF 注释与便签不受影响。${lastSkimHint}`
+    );
+    if (!confirmed) return;
+
+    setSessionTabDeleting(true);
+    try {
+      if (managedSessionTab.kind === 'skim') {
+        if (currentSessionId && user) {
+          await deleteSkimSessionFromCloud(currentSessionId, managedSessionTab.id);
+        }
+        const nextIndex = getActiveIndexAfterDeletion(skimSessions, activeSkimIndex, managedSessionTab.id);
+        let remaining = skimSessions.filter(session => session.id !== managedSessionTab.id);
+        if (remaining.length === 0) {
+          const nextSequence = getNextDefaultSessionSequence(skimSessions.map(session => session.title), '领读');
+          remaining = [{ ...createEmptySkimSession(nextSequence), skipDiagnosis: true }];
+        }
+        migratedSkimBaselineRef.current = null;
+        setSkimSessions(remaining);
+        setActiveSkimIndex(Math.min(nextIndex, remaining.length - 1));
+        activeIdRef.current = remaining[Math.min(nextIndex, remaining.length - 1)]?.id ?? null;
+        if (currentSessionId && user) {
+          void updateCloudSessionState(currentSessionId, {
+            skimSessions: remaining,
+            activeSkimIndex: Math.min(nextIndex, remaining.length - 1),
+          });
+        }
+      } else {
+        const target = tutorSessions.find(session => session.id === managedSessionTab.id);
+        if (!target) return;
+        try {
+          if (user) await deleteTutorSessionFromCloud(user.uid, managedSessionTab.id);
+          await storageService.deleteTutorSession(managedSessionTab.id);
+        } catch (error) {
+          // 任一存储删除失败时尽力把两端恢复，避免出现“界面还在、某一端已半删”的状态。
+          await storageService.saveTutorSession(target).catch(() => {});
+          if (user) await saveTutorSessionToCloud(user, target).catch(() => {});
+          throw error;
+        }
+        const nextIndex = getActiveIndexAfterDeletion(tutorSessions, activeTutorIndex, managedSessionTab.id);
+        const remaining = tutorSessions.filter(session => session.id !== managedSessionTab.id);
+        setTutorSessions(remaining);
+        setActiveTutorIndex(nextIndex);
+        activeTutorIdRef.current = remaining[nextIndex]?.id ?? null;
+        setTutorMaterialMap(previous => {
+          const next = { ...previous };
+          delete next[managedSessionTab.id];
+          return next;
+        });
+        if (remaining.length === 0 && viewMode === 'tutor') setViewMode('skim');
+      }
+      setManagedSessionTab(null);
+    } catch (error) {
+      console.error('Delete session tab failed', error);
+      window.alert('删除失败，现有标签和内容没有改变。请检查网络后重试。');
+    } finally {
+      setSessionTabDeleting(false);
+    }
+  }, [
+    activeSkimIndex,
+    activeTutorIndex,
+    currentSessionId,
+    managedSessionTab,
+    sessionTabDeleting,
+    skimActiveLoading,
+    skimSessions,
+    tutorActiveLoading,
+    tutorSessions,
+    user,
+    viewMode,
+  ]);
+
+  const handleRunPageTool = useCallback((mode: SlideExplanationMode) => {
+      if (!slides.length || !slides[currentIndex]) return;
+      setActivePageToolMode(mode);
+      fetchExplanation(currentIndex, slides, fullPdfText, mode, false);
+  }, [slides, currentIndex, fetchExplanation, fullPdfText]);
 
   const handleRetryExplanation = useCallback(() => { 
       if (!slides.length || !slides[currentIndex]) return;
-      // 清除当前页面的解释，强制重新生成
       const slideId = slides[currentIndex].id;
+      const cacheKey = getPageToolCacheKey(slideId, activePageToolMode);
       setExplanations(prev => {
         const newExplanations = { ...prev };
-        delete newExplanations[slideId];
+        delete newExplanations[cacheKey];
+        if (activePageToolMode === 'explain') delete newExplanations[slideId];
         return newExplanations;
       });
-      // 重新生成解释
-      fetchExplanation(currentIndex, slides, fullPdfText); 
-  }, [slides, currentIndex, fetchExplanation, fullPdfText]);
+      setExplanationErrors(prev => {
+        const newErrors = { ...prev };
+        delete newErrors[cacheKey];
+        return newErrors;
+      });
+      fetchExplanation(currentIndex, slides, fullPdfText, activePageToolMode, true); 
+  }, [slides, currentIndex, activePageToolMode, fetchExplanation, fullPdfText]);
 
   const handleSendChat = async (text: string, images?: string[]) => {
     if (!slides[currentIndex]) return; const slide = slides[currentIndex]; const slideId = slide.id; const userMessage: ChatMessage = { role: 'user', text, ...(images && images.length > 0 ? { images } : {}), timestamp: Date.now() };
@@ -2522,11 +3478,31 @@ const App: React.FC = () => {
   const handleSendGalgameChat = async (text: string) => { if (!slides[currentIndex]) return; };
 
   const handleExportPDF = async () => {
-    if (slides.length === 0) return; const pdf = new jsPDF({ orientation: 'landscape', unit: 'px', format: [1280, 720] }); const pdfWidth = pdf.internal.pageSize.getWidth(); const pdfHeight = pdf.internal.pageSize.getHeight();
-    for (let i = 0; i < slides.length; i++) { const slide = slides[i]; const slideAnnos = annotations[slide.id] || []; if (i > 0) pdf.addPage(); try { const imgProps = pdf.getImageProperties(slide.imageUrl); const ratio = Math.min(pdfWidth / imgProps.width, pdfHeight / imgProps.height); const drawWidth = imgProps.width * ratio; const drawHeight = imgProps.height * ratio; const offsetX = (pdfWidth - drawWidth) / 2; const offsetY = (pdfHeight - drawHeight) / 2; pdf.addImage(slide.imageUrl, 'PNG', offsetX, offsetY, drawWidth, drawHeight, undefined, 'FAST'); } catch (e) { pdf.addImage(slide.imageUrl, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST'); } slideAnnos.forEach(anno => { const xPos = (anno.x / 100) * pdfWidth; const yPos = (anno.y / 100) * pdfHeight; pdf.setFillColor(255, 252, 235); pdf.setDrawColor(251, 191, 36); pdf.rect(xPos, yPos, anno.width || 240, anno.height || 100, 'FD'); pdf.setFontSize(anno.fontSize || 14); if (anno.color) { const r = parseInt(anno.color.substr(1, 2), 16); const g = parseInt(anno.color.substr(3, 2), 16); const b = parseInt(anno.color.substr(5, 2), 16); pdf.setTextColor(r, g, b); } else { pdf.setTextColor(50, 50, 50); } pdf.text(pdf.splitTextToSize(cleanHtmlToText(anno.text), (anno.width || 240) - 20), xPos + 10, yPos + (anno.fontSize || 14) + 5); }); } pdf.save(`${fileName || 'study-notes'}_annotated.pdf`);
+    if (slides.length === 0 || isExportingHandout) return;
+    setIsExportingHandout(true);
+    try {
+      await exportStudyHandoutPdf({
+        slides,
+        annotations,
+        pageComments,
+        fileName: fileName || 'study-notes',
+      });
+    } catch (error) {
+      console.error('Export study handout failed:', error);
+      alert('导出复习讲义失败了，可以稍后再试一次。');
+    } finally {
+      setIsExportingHandout(false);
+    }
   };
 
-  const handleAddNote = (text: string, category: 'deep' | 'skim' = 'deep') => { if (!fileName) { alert("请先上传课件"); return; } const currentPage = currentIndex + 1; const newNote: Note = { id: `note-${Date.now()}`, text, createdAt: Date.now(), category }; setNotebookData(prev => ({ ...prev, [fileName]: { ...(prev[fileName] || {}), [currentPage]: [...(prev[fileName]?.[currentPage] || []), newNote] } })); };
+  const handleAddNote = (text: string, category: 'deep' | 'skim' = 'deep') => { if (!fileName) { alert("请先上传课件"); return; } const currentPage = currentIndex + 1; const newNote: Note = { id: `note-${Date.now()}`, text: normalizeGeneratedLineBreaks(text), createdAt: Date.now(), category }; setNotebookData(prev => ({ ...prev, [fileName]: { ...(prev[fileName] || {}), [currentPage]: [...(prev[fileName]?.[currentPage] || []), newNote] } })); };
+  const handleSavePageToolResult = useCallback(() => {
+    if (!slides[currentIndex]) return;
+    const slide = slides[currentIndex];
+    const content = getCachedPageToolExplanation(slide.id, activePageToolMode);
+    if (!content) return;
+    handleAddNote(`【页面工具 · ${getPageToolLabel(activePageToolMode)}】\n${content}`, 'deep');
+  }, [slides, currentIndex, activePageToolMode, getCachedPageToolExplanation]);
   const handleUpdateNote = (page: number, noteId: string, newText: string) => { if (!fileName) return; setNotebookData(prev => { const fileNotes = prev[fileName]; if (!fileNotes) return prev; const pageNotes = fileNotes[page].map(note => note.id === noteId ? { ...note, text: newText } : note); return { ...prev, [fileName]: { ...fileNotes, [page]: pageNotes } }; }); };
   const handleDeleteNote = (page: number, noteId: string) => { if (!fileName) return; setNotebookData(prev => { const fileNotes = prev[fileName]; if (!fileNotes) return prev; const pageNotes = fileNotes[page].filter(note => note.id !== noteId); return { ...prev, [fileName]: { ...fileNotes, [page]: pageNotes } }; }); };
 
@@ -2633,7 +3609,7 @@ const App: React.FC = () => {
       studyTime={studyTime} 
       isTimerRunning={isTimerRunning} 
       onToggleTimer={handleToggleTimer} 
-      progressPercentage={slides.length > 0 ? (Object.keys(explanations).length / slides.length) * 100 : 0} 
+      progressPercentage={slides.length > 0 ? (new Set(Object.keys(explanations).map(key => key.split('::')[0])).size / slides.length) * 100 : 0} 
       isPlayingAudio={isPlayingAudio} 
       currentTrackName={currentTrackName} 
       volume={audioVolume} 
@@ -2645,9 +3621,15 @@ const App: React.FC = () => {
       onToggleImmersive={toggleImmersiveMode} 
       onLayoutPreset={setLeftPanelWidth} 
       viewMode={viewMode} 
-      onToggleSkim={() => setViewMode(prev => prev === 'skim' ? 'deep' : 'skim')}
-      onToggleLayered={() => setViewMode(prev => prev === 'layered' ? 'deep' : 'layered')}
-      hasStudyMap={!!studyMap} 
+      onToggleSkim={() => {
+        setIsClassroomPanelVisible(false);
+        setViewMode(prev => prev === 'skim' ? 'deep' : 'skim');
+      }}
+      onToggleLayered={() => {
+        setIsClassroomPanelVisible(false);
+        setViewMode(prev => prev === 'layered' ? 'skim' : 'layered');
+      }}
+      hasStudyMap={slides.length > 0} 
       onOpenHistory={handleOpenHistory} 
       onEnterGalgameMode={() => setIsGalgameMode(true)}
       user={user}
@@ -2657,9 +3639,9 @@ const App: React.FC = () => {
       onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
       onOpenDashboard={() => {
         if (activeStudyDraftRef.current) abandonActiveStudySession();
+        setDashboardInitialTab('library');
         setShellMode('dashboard');
       }}
-      onEnterEnergyMode={() => setIsEnergyMode(true)}
       onOpenMarkPanel={() => setIsMarkPanelOpen(true)}
       hasMarkOnCurrentPage={fileName && pageMarks[fileName] && pageMarks[fileName][currentIndex + 1] ? pageMarks[fileName][currentIndex + 1].length > 0 : false}
       musicPanelOpen={isMusicPanelOpen}
@@ -2667,7 +3649,9 @@ const App: React.FC = () => {
       hasLectureHistory={lectureHistory.length > 0}
       onOpenLectureTranscript={() => setLectureTranscriptPageOpen(true)}
       isClassroomMode={isClassroomMode}
+      isClassroomPanelVisible={isClassroomPanelVisible}
       onStartClass={handleStartClass}
+      onOpenClassroomPanel={() => setIsClassroomPanelVisible(true)}
       isTranscriptionSupported={transcriptionSupported}
       onOpenReview={() => setReviewPageOpen(true)}
       onOpenExamWorkspace={() => {
@@ -2699,80 +3683,107 @@ const App: React.FC = () => {
       onUpdateAnnotation={handleUpdateAnnotation} 
       onDeleteAnnotation={handleDeleteAnnotation} 
       onExportPDF={handleExportPDF} 
+      isExporting={isExportingHandout}
       onRequestUpload={() => hiddenFileInputRef.current?.click()} 
       isImmersive={isImmersive}
       leftPanelRef={leftPanelRef}
     />
   );
   
-  // 略读 + 私教共用的同一排标签栏（数据仍两套独立；点标签同时切 viewMode + 该套 activeIndex）。
+  // 领读 + 私教共用的同一排标签栏（数据仍两套独立；点标签同时切 viewMode + 该套 activeIndex）。
   // 任一套生成中即锁全排，避免切走时打断在途生成。仅在 viewMode==='skim' / 'tutor' 两态渲染。
   const tabsLocked = skimActiveLoading || tutorActiveLoading;
   const sessionTabBar = (
     <div className="flex items-center gap-1.5 px-3 py-2 border-b border-stone-100 bg-white shrink-0 overflow-x-auto custom-scrollbar">
-      {/* 略读标签（靛蓝系） */}
+      {/* 领读标签（靛蓝系） */}
       {skimSessions.map((s, i) => {
         const active = viewMode === 'skim' && i === activeSkimIndex;
         return (
-          <button
+          <div
             key={s.id}
-            type="button"
-            onClick={() => { if (!tabsLocked) { setViewMode('skim'); setActiveSkimIndex(i); } }}
-            disabled={tabsLocked}
-            title={tabsLocked ? '生成中，请等转圈结束再切换' : `略读 ${i + 1}`}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
+            className={`flex shrink-0 items-center rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
               active
                 ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
                 : 'bg-stone-50 text-stone-500 border-transparent hover:bg-stone-100'
-            } ${tabsLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            }`}
           >
-            略读 {i + 1}
-          </button>
+            <button
+              type="button"
+              onClick={() => { if (!tabsLocked) { setViewMode('skim'); setActiveSkimIndex(i); } }}
+              disabled={tabsLocked}
+              title={tabsLocked ? '生成中，请等转圈结束再切换' : s.title}
+              className={`min-w-0 max-w-32 truncate px-3 py-1.5 ${tabsLocked ? 'cursor-not-allowed opacity-50' : ''}`}
+            >
+              {s.title}
+            </button>
+            <button
+              type="button"
+              onClick={() => openSessionTabManager('skim', s.id, s.title)}
+              className="mr-1 rounded-md p-1 text-current opacity-55 hover:bg-white/70 hover:opacity-100"
+              aria-label={`管理${s.title}`}
+              title={`重命名或删除${s.title}`}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </div>
         );
       })}
-      {/* 私教标签（紫色系 + 对话图标，视觉区分于略读） */}
+      {/* 私教标签（紫色系 + 对话图标，视觉区分于领读） */}
       {tutorSessions.map((s, i) => {
         const active = viewMode === 'tutor' && i === activeTutorIndex;
         return (
-          <button
+          <div
             key={s.id}
-            type="button"
-            onClick={() => { if (!tabsLocked) { setViewMode('tutor'); setActiveTutorIndex(i); activeTutorIdRef.current = s.id; } }}
-            disabled={tabsLocked}
-            title={tabsLocked ? '生成中，请等转圈结束再切换' : s.title}
-            className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
+            className={`flex shrink-0 items-center rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
               active
                 ? 'bg-violet-100 text-violet-700 border-violet-200'
                 : 'bg-stone-50 text-violet-400 border-transparent hover:bg-violet-50'
-            } ${tabsLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            }`}
           >
-            <MessageCircle className="w-3 h-3 shrink-0" />
-            {s.title}
-          </button>
+            <button
+              type="button"
+              onClick={() => { if (!tabsLocked) { setViewMode('tutor'); setActiveTutorIndex(i); activeTutorIdRef.current = s.id; } }}
+              disabled={tabsLocked}
+              title={tabsLocked ? '生成中，请等转圈结束再切换' : s.title}
+              className={`flex min-w-0 max-w-32 items-center gap-1 px-3 py-1.5 ${tabsLocked ? 'cursor-not-allowed opacity-50' : ''}`}
+            >
+              <MessageCircle className="h-3 w-3 shrink-0" />
+              <span className="truncate">{s.title}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => openSessionTabManager('tutor', s.id, s.title)}
+              className="mr-1 rounded-md p-1 text-current opacity-55 hover:bg-white/70 hover:opacity-100"
+              aria-label={`管理${s.title}`}
+              title={`重命名或删除${s.title}`}
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </div>
         );
       })}
-      {/* 新建略读 */}
+      {/* 新建领读 */}
       <button
         type="button"
         onClick={() => { handleAddSkimSession(); setViewMode('skim'); }}
         disabled={tabsLocked || skimSessions.length >= MAX_SKIM_SESSIONS}
         title={
           skimSessions.length >= MAX_SKIM_SESSIONS
-            ? `最多 ${MAX_SKIM_SESSIONS} 段略读`
+            ? `最多 ${MAX_SKIM_SESSIONS} 段领读`
             : tabsLocked
               ? '生成中，请等转圈结束再新建'
-              : '新建一段空白略读'
+              : '新建一段空白领读'
         }
         className={`shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
           tabsLocked || skimSessions.length >= MAX_SKIM_SESSIONS
             ? 'bg-stone-50 text-stone-300 border-transparent cursor-not-allowed'
             : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'
         }`}
-        aria-label="新建略读会话"
+        aria-label="新建领读会话"
       >
         <Plus className="w-4 h-4" />
       </button>
-      {/* 新建私教（紫色 + 对话图标，区分于新建略读） */}
+      {/* 新建私教（紫色 + 对话图标，区分于新建领读） */}
       <button
         type="button"
         onClick={() => { handleAddTutorSession(); setViewMode('tutor'); }}
@@ -2794,17 +3805,105 @@ const App: React.FC = () => {
         <MessageCircle className="w-3.5 h-3.5" />
         <Plus className="w-3.5 h-3.5" />
       </button>
+
+      {managedSessionTab && (managedSkimSession || managedTutorSession) && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-slate-950/35 backdrop-blur-[1px]"
+            aria-label="关闭标签管理"
+            disabled={sessionTabDeleting}
+            onClick={() => setManagedSessionTab(null)}
+          />
+          <section className="relative w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="session-tab-manager-title">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">
+                  {managedSessionTab.kind === 'skim' ? '领读标签' : '私教标签'}
+                </p>
+                <h2 id="session-tab-manager-title" className="mt-1 text-base font-black text-slate-900">管理“{managedSessionTitle}”</h2>
+              </div>
+              <button type="button" disabled={sessionTabDeleting} onClick={() => setManagedSessionTab(null)} className="rounded-lg bg-stone-100 p-2 text-slate-500 hover:bg-stone-200 disabled:opacity-50" aria-label="关闭">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <label className="mt-5 block text-xs font-bold text-slate-600" htmlFor="session-tab-rename">标签名称</label>
+            <div className="mt-2 flex gap-2">
+              <input
+                id="session-tab-rename"
+                value={sessionRenameDraft}
+                maxLength={40}
+                disabled={sessionTabDeleting}
+                onChange={(event) => setSessionRenameDraft(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') handleRenameManagedSession(); }}
+                className="min-w-0 flex-1 rounded-xl border border-stone-200 px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-indigo-300 focus:ring-2 focus:ring-indigo-100 disabled:bg-stone-100"
+              />
+              <button
+                type="button"
+                onClick={handleRenameManagedSession}
+                disabled={sessionTabDeleting || !sessionRenameDraft.trim() || sessionRenameDraft.trim() === managedSessionTitle}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2 text-xs font-bold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-35"
+              >
+                <Pencil className="h-3.5 w-3.5" />保存
+              </button>
+            </div>
+
+            <div className="mt-5 border-t border-stone-200 pt-4">
+              <p className="text-xs leading-5 text-slate-500">
+                永久删除只会清除这个{managedSessionTab.kind === 'skim' ? '领读' : '私教'}标签里的对话、学习位置和模式记录，不影响另一类标签、PDF 注释或便签。
+              </p>
+              <button
+                type="button"
+                onClick={() => void handleDeleteManagedSession()}
+                disabled={managedSessionIsGenerating || sessionTabDeleting}
+                title={managedSessionIsGenerating ? '这个标签正在生成回答，暂时不能删除' : `永久删除${managedSessionTitle}`}
+                className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-black text-rose-700 hover:bg-rose-100 disabled:cursor-not-allowed disabled:border-stone-200 disabled:bg-stone-100 disabled:text-slate-400"
+              >
+                {sessionTabDeleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                {sessionTabDeleting
+                  ? '正在删除…'
+                  : managedSessionIsGenerating
+                    ? '生成中，暂时不能删除'
+                    : '永久删除这个标签'}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 
-  const commonRightPanel = isClassroomMode && currentLecture ? (
-    <ClassroomPanel
-      currentLecture={currentLecture}
-      onEndClass={handleEndClass}
-      transcriptLive={transcriptLive}
-    />
-  ) : viewMode === 'skim' ? (
-    // 标签栏（略读+私教同排，共享）+ SkimPanel 同框：SkimPanel 始终挂载，切换标签只换喂进去的「激活会话切片」。
+  const currentPageToolExplanation = currentSlide ? getCachedPageToolExplanation(currentSlide.id, activePageToolMode) : undefined;
+  const currentPageToolError = currentSlide ? explanationErrors[getPageToolCacheKey(currentSlide.id, activePageToolMode)] : undefined;
+  const isRecordShelfVisible = viewMode === 'skim'
+    && activeSkim.studyStyle === 'records'
+    && activeSkim.recordDeck?.view === 'shelf';
+
+  useEffect(() => {
+    if (!activeRecordCard || slides.length === 0) return;
+    const page = currentIndex + 1;
+    setSkimRecordDeck(previous => {
+      if (!previous?.activeCardId) return previous;
+      const card = previous.cards[previous.activeCardId];
+      if (!card || card.lastPage === page) return previous;
+      return {
+        ...previous,
+        cards: { ...previous.cards, [card.id]: { ...card, lastPage: page } },
+      };
+    });
+  }, [activeRecordCard?.id, currentIndex, setSkimRecordDeck, slides.length]);
+
+  useEffect(() => {
+    if ((activeSkim.studyStyle ?? 'continuous') !== 'continuous' || slides.length === 0) return;
+    const page = currentIndex + 1;
+    updateActiveSkimSession(session => session.continuousLastPage === page
+      ? session
+      : { ...session, continuousLastPage: page });
+  }, [activeSkim.studyStyle, currentIndex, slides.length, updateActiveSkimSession]);
+
+  const studyRightPanel = viewMode === 'skim' ? (
+    // 标签栏（领读+私教同排，共享）+ SkimPanel 同框：SkimPanel 始终挂载，切换标签只换喂进去的「激活会话切片」。
     <div className="flex flex-col h-full">
       {sessionTabBar}
       <div className="flex-1 min-h-0">
@@ -2836,6 +3935,29 @@ const App: React.FC = () => {
           setSkimPace={setSkimPaceValue}
           contentType={activeSkim.contentType ?? 'lecture'}
           onContentTypeChange={setSkimContentType}
+          auxiliaryMaterial={activeSkim.auxiliaryMaterial ?? null}
+          onAuxiliaryMaterialChange={setSkimAuxiliaryMaterial}
+          readingRoute={activeSkim.readingRoute ?? null}
+          onReadingRouteChange={setSkimReadingRoute}
+          studyStyle={activeSkim.studyStyle ?? 'continuous'}
+          onStudyStyleChange={setSkimStudyStyle}
+          explanationDepth={activeSkim.explanationDepth ?? 'normal'}
+          onExplanationDepthChange={setSkimExplanationDepth}
+          recordDeck={activeSkim.recordDeck ?? null}
+          onRecordDeckChange={setSkimRecordDeck}
+          activeRecordCard={activeRecordCard}
+          pdfPageTexts={pdfPageTexts}
+          onOpenRecordShelf={handleReturnToSkimRecordShelf}
+          onCompleteRecord={() => handleSetSkimRecordCompleted(true)}
+          onUndoRecordComplete={() => handleSetSkimRecordCompleted(false)}
+          onOpenNextRecord={handleOpenNextSkimRecord}
+          caseLearning={activeSkim.caseLearning ?? null}
+          onCaseLearningChange={setLectureCaseLearning}
+          caseSourceId={fileHash || currentSessionId || fileName || 'local-document'}
+          currentPage={slides.length > 0 ? currentIndex + 1 : undefined}
+          onJumpToPage={slides.length > 0 ? (page) => setCurrentIndex(Math.max(0, Math.min(page - 1, slides.length - 1))) : undefined}
+          cloudSessions={studyCloudSessions}
+          currentCloudSessionId={currentSessionId}
           pageRangeStart={activeSkim.pageRangeStart}
           setPageRangeStart={setSkimPageRangeStart}
           pageRangeEnd={activeSkim.pageRangeEnd}
@@ -2847,7 +3969,7 @@ const App: React.FC = () => {
       </div>
     </div>
   ) : viewMode === 'tutor' ? (
-    // 私教 = 右栏内一种视图，与略读共用左侧 PDF 与同排标签栏；返回略读靠点略读标签。
+    // 私教 = 右栏内一种视图，与领读共用左侧 PDF 与同排标签栏；返回领读靠点领读标签。
     <div className="flex flex-col h-full">
       {sessionTabBar}
       <div className="flex-1 min-h-0">
@@ -2858,6 +3980,8 @@ const App: React.FC = () => {
             docType={activeTutor.docType}
             materialContent={tutorMaterialMap[activeTutor.id] ?? ''}
             onLoadingChange={setTutorActiveLoading}
+            currentPage={slides.length > 0 ? currentIndex + 1 : undefined}
+            totalPages={slides.length || undefined}
           />
         )}
       </div>
@@ -2877,9 +4001,14 @@ const App: React.FC = () => {
     />
   ) : (
     <ExplanationPanel
-      explanation={currentSlide ? explanations[currentSlide.id] : undefined} 
+      explanation={currentPageToolExplanation} 
+      explanationError={currentPageToolError}
       isLoadingExplanation={isGeneratingAI} 
       onRetryExplanation={handleRetryExplanation} 
+      activeToolMode={activePageToolMode}
+      onRunPageTool={handleRunPageTool}
+      onSaveExplanation={handleSavePageToolResult}
+      onBackToGuidedReading={() => setViewMode('skim')}
       chatMessages={currentSlide ? (chatCache[currentSlide.id] || []) : []} 
       onSendChat={handleSendChat} 
       isChatLoading={isChatLoading} 
@@ -2889,21 +4018,99 @@ const App: React.FC = () => {
       onToggleCollapse={() => setIsSidePanelCollapsed(!isSidePanelCollapsed)} 
     />
   );
+
+  const commonRightPanel = isClassroomPanelVisible && isClassroomMode && currentLecture ? (
+    <ClassroomPanel
+      currentLecture={currentLecture}
+      onEndClass={handleEndClass}
+      isPaused={isClassroomPaused}
+      pausedAt={classroomPausedAt}
+      pausedDurationMs={classroomPausedDurationMs}
+      onPauseClass={handlePauseClass}
+      onResumeClass={handleResumeClass}
+      onShowGuidedReading={() => {
+        setViewMode('skim');
+        setIsClassroomPanelVisible(false);
+      }}
+      onShowPageTools={() => {
+        setViewMode('deep');
+        setIsClassroomPanelVisible(false);
+      }}
+      transcriptLive={transcriptLive}
+      realtimeStatus={lectureRealtimeStatus}
+      realtimeMessage={lectureRealtimeMessage}
+      liveLines={lectureRealtimeLines}
+      audioLevel={lectureAudioLevel}
+      onRetryRealtime={handleRetryLectureRealtime}
+    />
+  ) : (
+    <div className="flex h-full min-h-0 flex-col">
+      {isClassroomMode && currentLecture && (
+        <div className={`flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2.5 ${isClassroomPaused ? 'border-amber-100 bg-amber-50/80' : 'border-rose-100 bg-rose-50/80'}`}>
+          <div className={`flex min-w-0 items-center gap-2 text-xs font-semibold ${isClassroomPaused ? 'text-amber-700' : 'text-rose-700'}`}>
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              {!isClassroomPaused && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-400 opacity-50" />}
+              <span className={`relative inline-flex h-2.5 w-2.5 rounded-full ${isClassroomPaused ? 'bg-amber-400' : 'bg-rose-500'}`} />
+            </span>
+            <Mic className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">
+              {isClassroomPaused ? '课堂录音与 ElevenLabs 字幕已暂停' : '课堂录音与 ElevenLabs 字幕仍在继续'}
+            </span>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={isClassroomPaused ? handleResumeClass : handlePauseClass}
+              className={`flex h-8 items-center gap-1.5 rounded-lg border bg-white px-3 text-[11px] font-bold ${isClassroomPaused ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50' : 'border-amber-200 text-amber-700 hover:bg-amber-50'}`}
+            >
+              {isClassroomPaused ? <Play className="h-3.5 w-3.5" /> : <Pause className="h-3.5 w-3.5" />}
+              {isClassroomPaused ? '继续' : '暂停'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsClassroomPanelVisible(true)}
+              className="h-8 rounded-lg border border-rose-200 bg-white px-3 text-[11px] font-bold text-rose-700 hover:bg-rose-100"
+            >
+              查看课堂字幕
+            </button>
+            <button
+              type="button"
+              onClick={handleEndClass}
+              className="h-8 rounded-lg bg-rose-500 px-3 text-[11px] font-bold text-white hover:bg-rose-600"
+            >
+              下课
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="min-h-0 flex-1">{studyRightPanel}</div>
+    </div>
+  );
+
+  const rightPanelRailLabel = isClassroomPanelVisible && isClassroomMode && currentLecture
+    ? '上课'
+    : viewMode === 'skim'
+      ? '领读'
+      : viewMode === 'tutor'
+        ? '私教'
+        : viewMode === 'layered'
+          ? '递进'
+          : '页面工具';
   
   if (!hasStarted) {
-    return <WelcomeScreen onStart={() => { setHasStarted(true); setShellMode('dashboard'); }} />;
+    return <WelcomeScreen onStart={() => { setHasStarted(true); setDashboardInitialTab('library'); setShellMode('dashboard'); }} />;
   }
 
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-[#FFFBF7] flex-col space-y-4">
         <Loader2 className="w-10 h-10 animate-spin text-slate-400" />
-        <p className="text-sm font-bold text-slate-500">正在连接云端...</p>
+        <p className="text-sm font-bold text-slate-500">{uiText('正在连接云端...', 'Connecting to the cloud...')}</p>
       </div>
     );
   }
 
-  if (shellMode === 'dashboard') {
+  if (shellMode === 'dashboard' && !(appMode === 'examWorkspace' && user)) {
     return (
       <div className="min-h-screen bg-[#f7f8f6] font-sans">
         <LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
@@ -2917,8 +4124,18 @@ const App: React.FC = () => {
           onRestoreSession={handleRestoreCloudSession}
           onUpload={handleFileUpload}
           onOpenCurrentStudy={() => setShellMode('study')}
+          onOpenExamWorkspace={() => {
+            if (!user) {
+              setLoginModalOpen(true);
+              return;
+            }
+            setAppMode('examWorkspace');
+          }}
           profileNotebook={profileNotebook}
           onProfileNotebookChange={commitProfileNotebook}
+          language={appLanguage}
+          onLanguageChange={handleAppLanguageChange}
+          initialTab={dashboardInitialTab}
         />
       </div>
     );
@@ -3080,8 +4297,32 @@ const App: React.FC = () => {
           onClose={() => setLectureTranscriptPageOpen(false)}
           onOrganize={handleOrganizeLecture}
           organizingId={organizingLectureId}
+          onTranscribe={handleTranscribeLecture}
+          transcribingId={transcribingLectureId}
           onDelete={handleDeleteLecture}
           onRename={handleRenameLecture}
+          onImportAudio={handleImportLectureAudio}
+          onOpenSourcePage={(lecture, pageNumber) => {
+            const isSameMaterial = lecture.sourceFileHash
+              ? lecture.sourceFileHash === fileHash
+              : Boolean(
+                  lecture.sourceFileName &&
+                  fileName &&
+                  lecture.sourceFileName === fileName
+                );
+
+            if (!isSameMaterial || slides.length === 0) {
+              alert(
+                `请先打开关联课件「${lecture.sourceFileName || '未知课件'}」，再跳转到第 ${pageNumber} 页。`
+              );
+              return;
+            }
+
+            setCurrentIndex(
+              Math.max(0, Math.min(pageNumber - 1, slides.length - 1))
+            );
+            setLectureTranscriptPageOpen(false);
+          }}
         />
       )}
 
@@ -3537,32 +4778,6 @@ const App: React.FC = () => {
         />
       )}
 
-      {isEnergyMode && (
-        <div className="fixed inset-0 z-[200] bg-[#FFFBF7] overflow-y-auto animate-in fade-in duration-300">
-            <div className="sticky top-0 z-50 w-full flex justify-center py-6 bg-gradient-to-b from-[#FFFBF7] via-[#FFFBF7] to-transparent">
-              <button 
-                  onClick={() => setIsEnergyMode(false)}
-                  className="group flex items-center gap-2 px-8 py-3 bg-white border-2 border-stone-100 rounded-full shadow-lg hover:shadow-xl hover:scale-105 hover:border-orange-200 transition-all duration-300"
-              >
-                  <span className="text-xl group-hover:animate-bounce">😤</span>
-                  <span className="font-bold text-stone-700 group-hover:text-orange-500 text-base">满血复活，回去学习！</span>
-              </button>
-            </div>
-
-            <div className="flex flex-col items-center justify-start p-4 min-h-[80vh] max-w-5xl mx-auto w-full">
-                <div className="flex flex-col items-center gap-4 mb-12 text-center mt-4">
-                   <h2 className="text-4xl font-extrabold text-slate-800 tracking-tight">AI 能量补给站</h2>
-                   <p className="text-lg text-slate-500 font-medium max-w-lg">学习累了？迷茫了？在这里，我们不谈分数，<br/>只谈你的感受和下一步。</p>
-                </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 w-full">
-                    <div className="flex justify-center transform hover:-translate-y-2 transition-transform duration-500"><TaskHug /></div>
-                    <div className="flex justify-center transform hover:-translate-y-2 transition-transform duration-500 delay-100"><ChatHug /></div>
-                </div>
-            </div>
-        </div>
-      )}
-
       <input
         type="file"
         ref={hiddenFileInputRef}
@@ -3597,15 +4812,17 @@ const App: React.FC = () => {
           workspaceAtomsGenerating={workspaceAtomsGenerating}
           onWorkspaceAtomCoverageChange={handleWorkspaceAtomCoverageChange}
           workspaceDialogueTranscript={workspaceDialogueTranscript}
+          workspaceEvidenceAnnotations={workspaceEvidenceAnnotations}
           workspaceLsapKey={workspaceLsapKey}
           onWorkspaceDialogueTranscriptChange={handleWorkspaceDialogueTranscriptChange}
+          onWorkspaceEvidenceAnnotationsChange={handleWorkspaceEvidenceAnnotationsChange}
           workspaceKcGlossary={workspaceKcGlossary}
           onWorkspaceGlossaryAppend={handleWorkspaceGlossaryAppend}
           resolveExamMaterialPdf={resolveExamMaterialPdf}
         />
       ) : (
         <>
-      <section className={`h-screen flex flex-col relative z-20 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] ${isImmersive ? 'bg-[#F3F4F6]' : 'bg-[#FFFBF7]'}`}>
+      <section className={`craft-learning-shell h-screen flex flex-col relative z-20 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] ${isImmersive ? 'bg-[#F3F4F6]' : ''}`}>
         {isEmbeddedDev && !devBannerDismissed && (
           <div className="flex items-center justify-between gap-4 px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-800 text-sm shrink-0">
             <span>上传 PDF 在 Cursor 预览中可能受限，建议用 Chrome 打开 <strong>http://localhost:3000</strong> 进行开发调试。</span>
@@ -3615,7 +4832,7 @@ const App: React.FC = () => {
         {commonHeader}
 
         {fileName && slides.length > 0 && (
-          <div className="shrink-0 border-b border-emerald-100 bg-gradient-to-r from-emerald-50 via-white to-sky-50 px-6 py-3">
+          <div className="craft-study-strip shrink-0 border-b px-6 py-3">
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -3661,6 +4878,17 @@ const App: React.FC = () => {
         )}
 
         <main className="flex-1 flex overflow-hidden relative">
+          {isOpeningStudyFile && (
+            <div className="absolute inset-0 z-[170] flex items-center justify-center bg-white/85 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-3 rounded-2xl border border-stone-100 bg-white px-8 py-6 shadow-xl shadow-stone-200/60">
+                <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+                <div className="text-center">
+                  <p className="text-sm font-black text-slate-800">正在打开资料</p>
+                  <p className="mt-1 text-xs font-medium text-slate-400">正在恢复页面、笔记和领读状态...</p>
+                </div>
+              </div>
+            </div>
+          )}
           
           <Sidebar 
             isOpen={isSidebarOpen}
@@ -3684,14 +4912,21 @@ const App: React.FC = () => {
           
           <div
             ref={leftPanelRef}
-            className="relative flex flex-col border-r border-stone-200 bg-[#E5E7EB] transition-[width] duration-0 ease-linear h-full"
-            style={{ width: isImmersive ? (isSidePanelCollapsed ? '98%' : `${leftPanelWidth}%`) : '60%' }}
+            className={`craft-reader-canvas relative flex min-w-0 flex-col border-r border-stone-200 transition-[width] duration-0 ease-linear h-full ${isImmersive ? '' : 'flex-1'}`}
+            style={isImmersive ? { width: isSidePanelCollapsed ? 'calc(100% - 48px)' : `${leftPanelWidth}%` } : undefined}
           >
               <div className="flex-1 min-h-0 relative overflow-hidden flex flex-col">
-                  {commonSlideViewer}
+                  {isRecordShelfVisible && activeSkim.recordDeck ? (
+                    <SkimRecordShelf
+                      deck={activeSkim.recordDeck}
+                      pageThumbnails={pageThumbnails}
+                      onOpenRecord={handleOpenSkimRecord}
+                      onFocusRecord={handleFocusSkimRecord}
+                    />
+                  ) : commonSlideViewer}
                   {renderVideoOverlay()}
               </div>
-              {currentSlide && (
+              {currentSlide && !isRecordShelfVisible && (
                 <>
                   {notesPanelCollapsed ? (
                     <button
@@ -3745,19 +4980,56 @@ const App: React.FC = () => {
             ></div>
           )}
 
-          <div className={`flex flex-col h-full relative z-20 bg-white transition-all duration-300 ${isImmersive ? (isSidePanelCollapsed ? 'w-[40px] border-l border-stone-200' : 'flex-1 min-w-[300px]') : 'flex-1'}`}>
-            {studioExpandedId ? (() => {
-              const artifact = savedArtifacts.find((a) => a.id === studioExpandedId);
-              return artifact ? (
-                <ArtifactFullView
-                  artifact={artifact}
-                  onClose={() => setStudioExpandedId(null)}
-                  onOpenQuiz={() => { setStudioExpandedId(null); setReviewPanel('quiz'); }}
-                  onOpenFlashcard={() => { setStudioExpandedId(null); setReviewPanel('flashcard'); }}
-                  onOpenTrapList={() => { setStudioExpandedId(null); setTrapListPanelOpen(true); }}
-                />
-              ) : commonRightPanel;
-            })() : commonRightPanel}
+          <div
+            className={`craft-reader-panel flex flex-col h-full relative z-20 transition-all duration-300 ${
+              isSidePanelCollapsed
+                ? 'w-12 shrink-0 border-l border-stone-200'
+                : isImmersive
+                  ? 'flex-1 min-w-[300px]'
+                  : 'shrink-0 border-l border-stone-100 shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.03)]'
+            }`}
+            style={!isImmersive && !isSidePanelCollapsed ? { width: 'clamp(400px, 34vw, 560px)' } : undefined}
+          >
+            {isSidePanelCollapsed ? (
+              <div className="h-full w-full flex flex-col items-center bg-stone-50">
+                <button
+                  type="button"
+                  onClick={() => setIsSidePanelCollapsed(false)}
+                  className="mt-3 flex h-9 w-9 items-center justify-center rounded-xl bg-white text-slate-500 shadow-sm ring-1 ring-stone-200 hover:bg-indigo-50 hover:text-indigo-600 hover:ring-indigo-200 transition-colors"
+                  title="展开右侧面板"
+                  aria-label="展开右侧面板"
+                >
+                  <PanelRightOpen className="h-4 w-4" />
+                </button>
+                <div className="mt-5 select-none text-[11px] font-black tracking-[0.25em] text-slate-400 [writing-mode:vertical-rl]">
+                  {rightPanelRailLabel}
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setIsSidePanelCollapsed(true)}
+                  className="absolute -left-4 top-4 z-[90] flex h-8 w-8 items-center justify-center rounded-xl bg-white/90 text-slate-400 shadow-sm ring-1 ring-stone-200 backdrop-blur hover:bg-indigo-50 hover:text-indigo-600 hover:ring-indigo-200 transition-colors"
+                  title="收起右侧面板"
+                  aria-label="收起右侧面板"
+                >
+                  <PanelRightClose className="h-4 w-4" />
+                </button>
+                {studioExpandedId ? (() => {
+                  const artifact = savedArtifacts.find((a) => a.id === studioExpandedId);
+                  return artifact ? (
+                    <ArtifactFullView
+                      artifact={artifact}
+                      onClose={() => setStudioExpandedId(null)}
+                      onOpenQuiz={() => { setStudioExpandedId(null); setReviewPanel('quiz'); }}
+                      onOpenFlashcard={() => { setStudioExpandedId(null); setReviewPanel('flashcard'); }}
+                      onOpenTrapList={() => { setStudioExpandedId(null); setTrapListPanelOpen(true); }}
+                    />
+                  ) : commonRightPanel;
+                })() : commonRightPanel}
+              </>
+            )}
           </div>
 
           {fileName && slides.length > 0 && !isClassroomMode && (
@@ -3788,7 +5060,7 @@ const App: React.FC = () => {
 
       {!isImmersive && (
         <>
-          <section className="bg-[#FFFBF7] pt-10 pb-24 relative z-10">
+          <section className="craft-notebook-section pt-10 pb-24 relative z-10">
              <Notebook fileName={fileName} notes={fileName ? (notebookData[fileName] || {}) : {}} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />
              <footer className="mt-10 text-center text-stone-300 text-sm font-bold tracking-widest">逃课神器 · POWERED BY GEMINI 3.0 PRO</footer>
           </section>

@@ -55,7 +55,7 @@ export const Notebook: React.FC<NotebookProps> = ({ fileName, notes, onUpdateNot
     
     // SECTION 1: Deep Notes
     if (hasDeepNotes) {
-        htmlBody += `<h2 style="font-size: 20px; color: #e11d48; margin-top: 30px; border-bottom: 2px solid #e11d48;">第一部分：精读笔记 (Deep Dive)</h2>`;
+        htmlBody += `<h2 style="font-size: 20px; color: #e11d48; margin-top: 30px; border-bottom: 2px solid #e11d48;">第一部分：页面笔记</h2>`;
         pageNumbers.forEach(page => {
             const pageNotes = notes[page].filter(n => !n.category || n.category === 'deep');
             if (pageNotes.length === 0) return;
@@ -70,7 +70,7 @@ export const Notebook: React.FC<NotebookProps> = ({ fileName, notes, onUpdateNot
 
     // SECTION 2: Skim Notes
     if (hasSkimNotes) {
-        htmlBody += `<h2 style="font-size: 20px; color: #4f46e5; margin-top: 30px; border-bottom: 2px solid #4f46e5;">第二部分：略读笔记 (Skim & Macro)</h2>`;
+        htmlBody += `<h2 style="font-size: 20px; color: #4f46e5; margin-top: 30px; border-bottom: 2px solid #4f46e5;">第二部分：领读笔记</h2>`;
         // Flatten skim notes but keep page reference in text potentially?
         // Let's just list them by page or aggregate. Grouping by page is still useful context.
         pageNumbers.forEach(page => {
@@ -140,7 +140,7 @@ export const Notebook: React.FC<NotebookProps> = ({ fileName, notes, onUpdateNot
                 }`}
             >
                 <Rocket className="w-4 h-4" />
-                <span>精读笔记 (Deep)</span>
+                <span>页面笔记</span>
                 {hasDeepNotes && <div className="w-1.5 h-1.5 rounded-full bg-rose-400 ml-1"></div>}
             </button>
             <button
@@ -152,7 +152,7 @@ export const Notebook: React.FC<NotebookProps> = ({ fileName, notes, onUpdateNot
                 }`}
             >
                 <Layers className="w-4 h-4" />
-                <span>略读笔记 (Skim)</span>
+                <span>领读笔记</span>
                 {hasSkimNotes && <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 ml-1"></div>}
             </button>
         </div>

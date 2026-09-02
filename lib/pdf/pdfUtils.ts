@@ -76,13 +76,18 @@ export const convertPdfToImages = async (file: File): Promise<string[]> => {
   return images;
 };
 
-export const renderPdfFirstPagePreview = async (file: File, scale = 0.8): Promise<string> => {
+export const renderPdfPagePreview = async (
+  file: File,
+  pageNumber1Based: number,
+  scale = 0.8
+): Promise<string> => {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({
     data: arrayBuffer,
     ...getDocumentOptions(),
   }).promise;
-  const page = await pdf.getPage(1);
+  const safePageNumber = Math.min(pdf.numPages, Math.max(1, Math.trunc(pageNumber1Based) || 1));
+  const page = await pdf.getPage(safePageNumber);
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
@@ -101,6 +106,10 @@ export const renderPdfFirstPagePreview = async (file: File, scale = 0.8): Promis
 
   return canvas.toDataURL('image/png');
 };
+
+export const renderPdfFirstPagePreview = async (file: File, scale = 0.8): Promise<string> => (
+  renderPdfPagePreview(file, 1, scale)
+);
 
 export const renderPdfFirstPagePreviewFromUrl = async (url: string, filename: string, scale = 0.8): Promise<string> => {
   const pdf = await pdfjsLib.getDocument({

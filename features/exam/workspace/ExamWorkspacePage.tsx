@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { User } from 'firebase/auth';
 import {
   ArrowLeft,
+  ArrowRight,
   BookMarked,
   BookOpen,
   Calendar,
@@ -21,12 +22,17 @@ import {
   Database,
   Search,
   ChevronDown,
+  CheckCircle2,
+  Circle,
+  Layers3,
+  ListChecks,
 } from 'lucide-react';
 import type {
   AtomCoverageByKc,
   DisciplineBand,
   Exam,
   ExamMaterialLink,
+  ExamReviewScope,
   KcGlossaryEntry,
   LSAPContentMap,
   LSAPKnowledgeComponent,
@@ -35,15 +41,19 @@ import type {
 } from '@/types';
 import { listExams, listExamMaterialLinks } from '@/services/firebase';
 import { ExamWorkspaceSocraticChat, type ExamWorkspaceSocraticChatHandle } from '@/features/exam/workspace/ExamWorkspaceSocraticChat';
+import { ExamWorkspaceGlobalChat } from '@/features/exam/workspace/ExamWorkspaceGlobalChat';
 import { KcGlossarySidebar } from '@/features/exam/workspace/KcGlossarySidebar';
 import { KnowledgePointInspectPanel } from '@/features/exam/workspace/KnowledgePointInspectPanel';
 import { WorkspaceKcProbeModal } from '@/features/exam/workspace/WorkspaceKcProbeModal';
 import { WorkspaceEvidenceReportModal } from '@/features/exam/workspace/WorkspaceEvidenceReportModal';
+import { KnowledgeBlockEvidenceDrawer } from '@/features/exam/workspace/KnowledgeBlockEvidenceDrawer';
 import { ExamWorkspaceMaterialPreview } from '@/features/exam/workspace/ExamWorkspaceMaterialPreview';
-import type { WorkspaceDialogueTurn } from '@/features/exam/lib/examWorkspaceLsapKey';
+import type { WorkspaceDialogueTurn, WorkspaceEvidenceAnnotation } from '@/features/exam/lib/examWorkspaceLsapKey';
+import { pendingRevisitCount } from '@/features/exam/lib/examLearningEvidence';
 import { buildExamMaterialChunkIndexForLinks, findChunkById } from '@/features/exam/lib/examChunkIndex';
 import { getExamChunkIndexStats, loadExamMaterialChunkIndex, saveExamMaterialChunkIndex } from '@/services/examChunkIndexStorage';
 import { DEFAULT_TOP_K, retrieveCandidateChunks } from '@/features/exam/lib/examChunkRetrieval';
+import type { ExamGlobalKnowledgeBlockOption } from '@/features/exam/lib/examGlobalChat';
 
 export interface ExamWorkspacePageProps {
   user: User;
@@ -67,7 +77,7 @@ export interface ExamWorkspacePageProps {
   workspaceAtomsProgress: { current: number; total: number; fileName: string } | null;
   /** M2：逻辑原子覆盖（只读展示 x/y） */
   workspaceAtomCoverage: AtomCoverageByKc;
-  onExtractLogicAtoms: () => Promise<void>;
+  onExtractLogicAtoms: (options?: { preserveExistingAtoms?: boolean }) => Promise<void>;
   workspaceAtomsGenerating: boolean;
   /** M3：原子覆盖更新（持久化由 App 完成） */
   onWorkspaceAtomCoverageChange: (next: AtomCoverageByKc) => void;
@@ -75,8 +85,10 @@ export interface ExamWorkspacePageProps {
   onWorkspaceLsapStateCommit: (next: LSAPState) => void;
   /** M5：对话留痕 + 报告 */
   workspaceDialogueTranscript: WorkspaceDialogueTurn[];
+  workspaceEvidenceAnnotations: WorkspaceEvidenceAnnotation[];
   workspaceLsapKey: string | null;
   onWorkspaceDialogueTranscriptChange: (turns: WorkspaceDialogueTurn[], chatSessionKey: string) => void;
+  onWorkspaceEvidenceAnnotationsChange: (next: WorkspaceEvidenceAnnotation[]) => void;
   /** KC 考点释义（按 kcId 存于 App，此处按当前考点过滤展示） */
   workspaceKcGlossary: Record<string, KcGlossaryEntry[]>;
   onWorkspaceGlossaryAppend: (entries: KcGlossaryEntry[]) => void;
@@ -93,7 +105,12 @@ function sortMaterialLinks(links: ExamMaterialLink[]): ExamMaterialLink[] {
 }
 
 function kcListOrdered(kcs: LSAPKnowledgeComponent[]): LSAPKnowledgeComponent[] {
-  return [...kcs].sort((a, b) => (b.examWeight || 0) - (a.examWeight || 0));
+  return [...kcs].sort((a, b) => {
+    const ap = getKcPageRange(a)?.start ?? Number.MAX_SAFE_INTEGER;
+    const bp = getKcPageRange(b)?.start ?? Number.MAX_SAFE_INTEGER;
+    if (ap !== bp) return ap - bp;
+    return (b.examWeight || 0) - (a.examWeight || 0);
+  });
 }
 
 /**
@@ -115,6 +132,431 @@ function atomCoverageCounts(kc: LSAPKnowledgeComponent, cov: AtomCoverageByKc): 
     if (cov[kc.id]?.[a.id] === true) covered++;
   }
   return { covered, total };
+}
+
+type UnderstandingStatus = 'not_started' | 'recognition' | 'explanation' | 'transfer' | 'mastered';
+type KnowledgeBlockFilter = 'all' | 'todo' | 'ready';
+type PageWindow = { start: number; end: number };
+
+interface ReviewKnowledgeBlock {
+  id: string;
+  materialKey: string;
+  title: string;
+  materialTitle: string;
+  sourceKcs: LSAPKnowledgeComponent[];
+  pageWindows: PageWindow[];
+  pageLabel: string | null;
+}
+
+interface KnowledgeBlockLectureGroup {
+  key: string;
+  title: string;
+  blocks: ReviewKnowledgeBlock[];
+  total: number;
+  ready: number;
+}
+
+const UNDERSTANDING_STATUS_META: Record<UnderstandingStatus, { label: string; nextAction: string; className: string }> = {
+  not_started: {
+    label: '未开始',
+    nextAction: '先关掉材料讲一遍',
+    className: 'bg-stone-100 text-slate-500 border-stone-200',
+  },
+  recognition: {
+    label: '看起来懂',
+    nextAction: '确认能不能自己解释',
+    className: 'bg-amber-50 text-amber-700 border-amber-200',
+  },
+  explanation: {
+    label: '能解释',
+    nextAction: '换个例子验证',
+    className: 'bg-sky-50 text-sky-700 border-sky-200',
+  },
+  transfer: {
+    label: '能连接/迁移',
+    nextAction: '找边界或做输出',
+    className: 'bg-violet-50 text-violet-700 border-violet-200',
+  },
+  mastered: {
+    label: '已掌握',
+    nextAction: '保持回炉即可',
+    className: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  },
+};
+
+const KNOWLEDGE_BLOCK_FILTERS: Array<{ id: KnowledgeBlockFilter; label: string }> = [
+  { id: 'all', label: '全部' },
+  { id: 'todo', label: '待理解' },
+  { id: 'ready', label: '可输出' },
+];
+
+function isBlockReady(status: UnderstandingStatus): boolean {
+  return status === 'transfer' || status === 'mastered';
+}
+
+const REVIEW_BLOCK_TARGET_PAGE_SPAN = 12;
+const REVIEW_BLOCK_HARD_PAGE_SPAN = 15;
+const REVIEW_BLOCK_SOFT_MAX_KCS = 6;
+const REVIEW_BLOCK_LARGE_GAP = 4;
+
+function normalizePageList(pages: Array<number | undefined> | undefined): number[] {
+  return Array.from(
+    new Set(
+      (pages ?? [])
+        .map((page) => Number(page))
+        .filter((page) => Number.isFinite(page) && page >= 1)
+        .map((page) => Math.round(page))
+    )
+  ).sort((a, b) => a - b);
+}
+
+function getEvidencePagesForKc(kc: LSAPKnowledgeComponent): number[] {
+  const anchorPages = normalizePageList(kc.anchorPages);
+  const sourcePages = normalizePageList(kc.sourcePages);
+  const directPages = normalizePageList([...anchorPages, ...sourcePages]);
+  if (directPages.length > 0) return directPages;
+  return normalizePageList(kc.relatedPages);
+}
+
+function buildPageWindowsFromPages(pages: number[]): PageWindow[] {
+  const normalized = normalizePageList(pages);
+  if (normalized.length === 0) return [];
+  const windows: PageWindow[] = [];
+  for (const page of normalized) {
+    const last = windows[windows.length - 1];
+    if (last && page <= last.end + 1) {
+      last.end = Math.max(last.end, page);
+    } else {
+      windows.push({ start: page, end: page });
+    }
+  }
+  return windows;
+}
+
+function getPageWindowsFromKcs(kcs: LSAPKnowledgeComponent[]): PageWindow[] {
+  return buildPageWindowsFromPages(kcs.flatMap(getEvidencePagesForKc));
+}
+
+function formatPageWindowsLabel(windows: PageWindow[]): string | null {
+  if (windows.length === 0) return null;
+  const visible = windows.slice(0, 5);
+  const label = visible
+    .map((w) => (w.start === w.end ? `${w.start}` : `${w.start}-${w.end}`))
+    .join('、');
+  const suffix = windows.length > visible.length ? ' 等' : '';
+  return `第 ${label}${suffix} 页`;
+}
+
+function getKcPageRange(kc: LSAPKnowledgeComponent): PageWindow | null {
+  const pages = getEvidencePagesForKc(kc);
+  if (pages.length === 0) return null;
+  return { start: Math.min(...pages), end: Math.max(...pages) };
+}
+
+function getKcStartPage(kc: LSAPKnowledgeComponent): number {
+  return getKcPageRange(kc)?.start ?? Number.MAX_SAFE_INTEGER;
+}
+
+function getKcEndPage(kc: LSAPKnowledgeComponent): number {
+  return getKcPageRange(kc)?.end ?? getKcStartPage(kc);
+}
+
+function getPageSpanFromKcs(kcs: LSAPKnowledgeComponent[]): number | null {
+  const ranges = kcs.map(getKcPageRange).filter((r): r is { start: number; end: number } => Boolean(r));
+  if (ranges.length === 0) return null;
+  const start = Math.min(...ranges.map((r) => r.start));
+  const end = Math.max(...ranges.map((r) => r.end));
+  return end - start + 1;
+}
+
+function getPageRangeFromKcs(kcs: LSAPKnowledgeComponent[]): PageWindow | null {
+  const ranges = kcs.map(getKcPageRange).filter((r): r is { start: number; end: number } => Boolean(r));
+  if (ranges.length === 0) return null;
+  return {
+    start: Math.min(...ranges.map((r) => r.start)),
+    end: Math.max(...ranges.map((r) => r.end)),
+  };
+}
+
+function buildKnowledgeBlockTitle(kcs: LSAPKnowledgeComponent[], fallbackIndex: number): string {
+  const concepts = kcs.map((kc) => kc.concept.trim()).filter(Boolean);
+  if (concepts.length === 0) return `知识块 ${fallbackIndex + 1}`;
+  if (concepts.length === 1) return concepts[0];
+  if (concepts.length === 2) return `${concepts[0]} / ${concepts[1]}`;
+  return `${concepts[0]} 等 ${concepts.length} 个关键点`;
+}
+
+function buildKnowledgeBlocksFromGroups(
+  groups: Array<{ key: string; title: string; kcs: LSAPKnowledgeComponent[]; kind: 'material' | 'unassigned' }>
+): ReviewKnowledgeBlock[] {
+  const blocks: ReviewKnowledgeBlock[] = [];
+  for (const group of groups) {
+    const ordered = [...group.kcs].sort((a, b) => {
+      const ap = getKcStartPage(a);
+      const bp = getKcStartPage(b);
+      if (ap !== bp) return ap - bp;
+      return (b.examWeight || 0) - (a.examWeight || 0);
+    });
+
+    let current: LSAPKnowledgeComponent[] = [];
+    const flush = () => {
+      if (current.length === 0) return;
+      const blockIndex = blocks.length;
+      const ids = current.map((kc) => kc.id).join('__');
+      const pageWindows = getPageWindowsFromKcs(current);
+      blocks.push({
+        id: `kb__${group.key}__${blockIndex}__${ids}`,
+        materialKey: group.key,
+        title: buildKnowledgeBlockTitle(current, blockIndex),
+        materialTitle: group.title,
+        sourceKcs: current,
+        pageWindows,
+        pageLabel: formatPageWindowsLabel(pageWindows),
+      });
+      current = [];
+    };
+
+    for (const kc of ordered) {
+      const firstPage = getKcPageRange(kc)?.start ?? null;
+      const currentRange = getPageRangeFromKcs(current);
+      const currentStart = currentRange?.start ?? null;
+      const currentEnd = currentRange?.end ?? null;
+      const currentSpan = getPageSpanFromKcs(current);
+      const nextSpan =
+        currentStart != null && currentEnd != null && firstPage != null
+          ? Math.max(currentEnd, getKcEndPage(kc)) - Math.min(currentStart, firstPage) + 1
+          : null;
+      const gapFromCurrent = currentEnd != null && firstPage != null ? firstPage - currentEnd : 0;
+      const exceedsHardSpan = nextSpan != null && nextSpan > REVIEW_BLOCK_HARD_PAGE_SPAN;
+      const hasReachedComfortSpan = currentSpan != null && currentSpan >= REVIEW_BLOCK_TARGET_PAGE_SPAN;
+      const shouldRespectTopicGap =
+        current.length >= 2 && hasReachedComfortSpan && gapFromCurrent > REVIEW_BLOCK_LARGE_GAP;
+      const tooManyKcsForOneReviewBlock = current.length >= REVIEW_BLOCK_SOFT_MAX_KCS && (currentSpan == null || currentSpan >= 6);
+
+      if (current.length > 0 && (exceedsHardSpan || shouldRespectTopicGap || tooManyKcsForOneReviewBlock)) {
+        flush();
+      }
+      current.push(kc);
+    }
+    flush();
+  }
+  return blocks;
+}
+
+function getBlockCoverage(block: ReviewKnowledgeBlock, cov: AtomCoverageByKc): { covered: number; total: number; ratio: number } {
+  let covered = 0;
+  let total = 0;
+  for (const kc of block.sourceKcs) {
+    const counts = atomCoverageCounts(kc, cov);
+    covered += counts.covered;
+    total += counts.total;
+  }
+  return { covered, total, ratio: total > 0 ? covered / total : 0 };
+}
+
+function getBlockUnderstandingStatus(
+  block: ReviewKnowledgeBlock,
+  cov: AtomCoverageByKc,
+  state: LSAPState | null
+): UnderstandingStatus {
+  const coverage = getBlockCoverage(block, cov);
+  const bktValues = block.sourceKcs
+    .map((kc) => state?.bktState[kc.id])
+    .filter((v): v is number => typeof v === 'number');
+  const avgBkt = bktValues.length ? bktValues.reduce((sum, v) => sum + v, 0) / bktValues.length : 0;
+  const probeCount = state?.probeHistory.filter((p) => block.sourceKcs.some((kc) => kc.id === p.kcId)).length ?? 0;
+
+  if (avgBkt >= 0.78) return 'mastered';
+  if (coverage.ratio >= 0.75 || avgBkt >= 0.58) return 'transfer';
+  if (coverage.ratio >= 0.4 || avgBkt >= 0.35) return 'explanation';
+  if (coverage.covered > 0 || probeCount > 0) return 'recognition';
+  return 'not_started';
+}
+
+function uniqueNonEmpty(items: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of items) {
+    const trimmed = item?.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+function getBlockMasteryGoals(block: ReviewKnowledgeBlock): string[] {
+  const concepts = block.sourceKcs.map((kc) => kc.concept).filter(Boolean);
+  const reviewFocuses = block.sourceKcs.map((kc) => kc.reviewFocus).filter(Boolean);
+  const atomLabels = block.sourceKcs.flatMap((kc) => kc.atoms ?? []).map((atom) => atom.label);
+
+  return uniqueNonEmpty([
+    concepts.length > 1
+      ? `能说清 ${concepts.slice(0, 3).join('、')} 之间的关系`
+      : concepts[0]
+        ? `能用自己的话解释「${concepts[0]}」`
+        : null,
+    reviewFocuses[0] ? `能抓住：${reviewFocuses[0]}` : null,
+    atomLabels[0] ? `能补上关键机制：${atomLabels.slice(0, 2).join('；')}` : null,
+    block.pageLabel ? `能回到材料 ${block.pageLabel} 找到依据` : null,
+  ]).slice(0, 3);
+}
+
+function getClosedBookRebuildPrompt(block: ReviewKnowledgeBlock): string {
+  const title = block.title;
+  const pageHint = block.pageLabel ? `，来源页码是${block.pageLabel}` : '';
+  return `请进入「闭卷重建」模式，围绕「${title}」${pageHint}来验证我是不是真的懂。
+
+本轮你不要讲解、不要给答案、不要提示、不要总结材料，也不要先列知识点。
+请只用不超过 120 字告诉我：先关掉材料和提示，然后用自己的话复述这一块，至少包括：
+1. 这一块在解决什么问题；
+2. 核心关系或机制是什么；
+3. 一个我自己能举出的例子。`;
+}
+
+function getBlockQuickPrompts(block: ReviewKnowledgeBlock) {
+  const title = block.title;
+  return [
+    {
+      id: 'closed-book-rebuild',
+      label: '闭卷讲一遍',
+      description: '先不看材料、不听提示，用自己的话重建这一块。',
+      text: getClosedBookRebuildPrompt(block),
+    },
+    {
+      id: 'probe',
+      label: '先问我一个问题',
+      description: '让 AI 先提问，不直接讲答案。',
+      text: `请围绕「${title}」先不要讲答案，只问我一个最能暴露我懂没懂的问题。等我回答后，再指出我哪里没讲清。`,
+    },
+    {
+      id: 'transfer',
+      label: '换个例子考我',
+      description: '用新情境检查是不是只会背材料。',
+      text: `请基于「${title}」给我一个新情境或小反例，让我判断应该怎么解释。先出题，不要直接给答案。`,
+    },
+    {
+      id: 'answer-outline',
+      label: '整理成答案骨架',
+      description: '不猜题，只把这一块变成可写出来的结构。',
+      text: `请把「${title}」整理成考试里可以写出来的答案骨架。不要猜老师会怎么考，只基于材料告诉我应该怎样组织解释。`,
+    },
+  ];
+}
+
+function getMiniIntegrationPrompt(
+  blocks: ReviewKnowledgeBlock[],
+  activeIndex: number
+): { id: string; label: string; text: string; description: string } | null {
+  if (blocks.length < 3 || activeIndex < 2) return null;
+  const endIndex = Math.min(blocks.length - 1, Math.floor((activeIndex + 1) / 3) * 3 - 1);
+  if (endIndex < 2) return null;
+  const startIndex = Math.max(0, endIndex - 2);
+  const group = blocks.slice(startIndex, endIndex + 1);
+  if (group.length < 3) return null;
+  const routeLines = group
+    .map((block, index) => `${startIndex + index + 1}. ${block.title}${block.pageLabel ? `（${block.pageLabel}）` : ''}`)
+    .join('\n');
+
+  return {
+    id: `mini-integration-${startIndex}-${endIndex}`,
+    label: '小整合',
+    description: '把最近 3 个知识块串成一个更大的问题，防止只会单块。',
+    text: `请进入「小整合」模式，围绕下面 3 个知识块，验证我是否知道它们之间的关系。
+
+${routeLines}
+
+本轮你不要替我总结，不要讲答案，不要提示，也不要展开材料。
+请只用不超过 120 字让我闭卷回答：
+1. 这 3 块合起来在解决什么更大的问题；
+2. 它们之间是什么顺序或关系；
+3. 如果考试要求我写一段综合解释，我会怎么开头。`,
+  };
+}
+
+function getRouteClosureReference(blocks: ReviewKnowledgeBlock[]): string {
+  return blocks
+    .map((block, index) => `${index + 1}. ${block.title}${block.pageLabel ? `（${block.pageLabel}）` : ''}`)
+    .join('\n');
+}
+
+function getRouteWrapUpPrompt(blocks: ReviewKnowledgeBlock[], remainingCount: number): { id: string; label: string; text: string; description: string } | null {
+  if (blocks.length === 0 || remainingCount > 0) return null;
+  return {
+    id: 'route-closed-book-wrap-up',
+    label: '整场收束',
+    description: '所有知识块可输出后，不看路线重建整场材料的大图。',
+    text: `请进入「整场闭卷收束」模式，验证我是否真的能把整场材料串起来。
+
+本轮你不要替我总结，不要展示路线，不要给答案，不要提示，也不要预测考试。
+请只用不超过 120 字让我关闭材料、关闭路线，然后闭卷回答：
+1. 整场材料到底在讲一个什么大问题；
+2. 主要知识块之间如何一步步连起来；
+3. 哪几处最容易混淆；
+4. 如果考试让我写一段总述，我会怎么开头。`,
+  };
+}
+
+function getBlockCompletionChecks(status: UnderstandingStatus, coverage: { covered: number; total: number }) {
+  const ready = isBlockReady(status);
+  return [
+    {
+      label: '能不看材料讲出这块在整场里的作用',
+      done: status !== 'not_started' && status !== 'recognition',
+    },
+    {
+      label: '能换一个例子或反例仍然解释得通',
+      done: ready,
+    },
+    {
+      label: '能整理成考试里可写出来的答案骨架',
+      done: ready || (coverage.total > 0 && coverage.covered / coverage.total >= 0.6),
+    },
+  ];
+}
+
+function UnderstandingProgressDisplay({
+  blocks,
+  cov,
+  state,
+}: {
+  blocks: ReviewKnowledgeBlock[];
+  cov: AtomCoverageByKc;
+  state: LSAPState | null;
+}) {
+  const counts: Record<UnderstandingStatus, number> = {
+    not_started: 0,
+    recognition: 0,
+    explanation: 0,
+    transfer: 0,
+    mastered: 0,
+  };
+  for (const block of blocks) counts[getBlockUnderstandingStatus(block, cov, state)] += 1;
+  const ready = counts.transfer + counts.mastered;
+  return (
+    <div className="rounded-xl border border-emerald-100 bg-gradient-to-r from-emerald-50/90 to-white p-3">
+      <div className="flex items-start gap-2">
+        <Layers3 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-bold leading-tight text-slate-800">理解进度</p>
+          <p className="mt-0.5 text-[11px] leading-snug text-slate-500">
+            {blocks.length > 0
+              ? `${ready} / ${blocks.length} 个复习块达到迁移或掌握`
+              : '生成知识块路线后，这里会显示真正理解进度。'}
+          </p>
+        </div>
+      </div>
+      {blocks.length > 0 && (
+        <div className="mt-3 grid grid-cols-2 gap-1.5 text-[10px] font-bold text-slate-600">
+          <span>未开始 {counts.not_started}</span>
+          <span>看起来懂 {counts.recognition}</span>
+          <span>能解释 {counts.explanation}</span>
+          <span>能迁移 {counts.transfer}</span>
+          <span className="col-span-2 text-emerald-700">已掌握 {counts.mastered}</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** 只读预测分：紧凑横条（小圆环 + 两行文案，高度较旧版明显降低） */
@@ -183,8 +625,10 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
   onWorkspaceAtomCoverageChange,
   onWorkspaceLsapStateCommit,
   workspaceDialogueTranscript,
+  workspaceEvidenceAnnotations,
   workspaceLsapKey,
   onWorkspaceDialogueTranscriptChange,
+  onWorkspaceEvidenceAnnotationsChange,
   workspaceKcGlossary,
   onWorkspaceGlossaryAppend,
   resolveExamMaterialPdf,
@@ -206,6 +650,10 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
    * 详见 docs/plans/MULTISELECT_KC_PLAN.md §3 阶段 1。
    */
   const [selectedKcIds, setSelectedKcIds] = useState<string[]>([]);
+  const [selectedKnowledgeBlockId, setSelectedKnowledgeBlockId] = useState<string | null>(null);
+  const [selectedKnowledgeBlockLectureKey, setSelectedKnowledgeBlockLectureKey] = useState<string | null>(null);
+  const [knowledgeBlockFilter, setKnowledgeBlockFilter] = useState<KnowledgeBlockFilter>('all');
+  const [activeKnowledgeBlockBriefCollapsed, setActiveKnowledgeBlockBriefCollapsed] = useState(false);
   const isMultiSelectMode = selectedKcIds.length >= 2;
   /** Tier3「满分细节」列表默认折叠；选中 Tier3 考点时自动展开以便看到选中态 */
   const [maxScoreDetailsOpen, setMaxScoreDetailsOpen] = useState(false);
@@ -213,7 +661,10 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
   /** M4：结业探测弹窗 */
   const [probeKc, setProbeKc] = useState<LSAPKnowledgeComponent | null>(null);
   const [evidenceReportOpen, setEvidenceReportOpen] = useState(false);
+  const [knowledgeBlockEvidenceOpen, setKnowledgeBlockEvidenceOpen] = useState(false);
   const [mobileTab, setMobileTab] = useState<'sidebar' | 'chat' | 'glossary'>('chat');
+  const [workspaceMode, setWorkspaceMode] = useState<'knowledge' | 'global'>('knowledge');
+  const [pendingKnowledgeDraft, setPendingKnowledgeDraft] = useState<{ blockId: string; text: string } | null>(null);
   /** 大屏（lg+）是否展开右侧考点释义侧栏；与 mobileTab 独立，小屏仍用 tab 切换 */
   const [glossaryDesktopOpen, setGlossaryDesktopOpen] = useState(false);
   /** P0：大屏默认折叠讲义预览列，避免挤占对话区 */
@@ -236,7 +687,8 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
   const [scoreDeltaToast, setScoreDeltaToast] = useState<number | null>(null);
   const prevPredictedRef = useRef<number | null>(null);
 
-  /** 备考引用 1-1：DEV 或 ?debug=1 时显示 chunk 索引重建与查询 */
+  /** 备考引用 1-1：DEV 或 ?debug=1 时允许打开 chunk 索引调试；默认不展开，避免挤占工作台 */
+  const [chunkDebugAvailable, setChunkDebugAvailable] = useState(false);
   const [showChunkDebug, setShowChunkDebug] = useState(false);
   const [chunkIndexBusy, setChunkIndexBusy] = useState(false);
   const [chunkIndexMsg, setChunkIndexMsg] = useState<string | null>(null);
@@ -257,9 +709,10 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
   const [chunkIndexStats, setChunkIndexStats] = useState<Awaited<ReturnType<typeof getExamChunkIndexStats>>>(null);
   /** 1-4：仅检索当前预览对应材料（需已有一次预览/链钮定位的 linkId） */
   const [chunkSearchOnlyPreviewMaterial, setChunkSearchOnlyPreviewMaterial] = useState(false);
+  const autoChunkIndexKeyRef = useRef<string | null>(null);
 
   useEffect(() => {
-    setShowChunkDebug(
+    setChunkDebugAvailable(
       import.meta.env.DEV ||
         (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1')
     );
@@ -414,6 +867,219 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
     return groups;
   }, [workspaceLsapContentMap, materialsForActive]);
 
+  const knowledgeBlocks = useMemo(
+    () => buildKnowledgeBlocksFromGroups(kcsGroupedByMaterial),
+    [kcsGroupedByMaterial]
+  );
+
+  const globalKnowledgeBlockOptions = useMemo<ExamGlobalKnowledgeBlockOption[]>(() => knowledgeBlocks.map((block) => ({
+    id: block.id,
+    title: block.title,
+    materialLinkId: materialsForActive.some((material) => material.id === block.materialKey)
+      ? block.materialKey
+      : null,
+    pageWindows: block.pageWindows,
+  })), [knowledgeBlocks, materialsForActive]);
+
+  const activeKnowledgeBlock = useMemo(
+    () => knowledgeBlocks.find((block) => block.id === selectedKnowledgeBlockId) ?? null,
+    [knowledgeBlocks, selectedKnowledgeBlockId]
+  );
+
+  const activeKnowledgeBlockIndex = useMemo(
+    () => knowledgeBlocks.findIndex((block) => block.id === selectedKnowledgeBlockId),
+    [knowledgeBlocks, selectedKnowledgeBlockId]
+  );
+
+  useEffect(() => {
+    setKnowledgeBlockEvidenceOpen(false);
+  }, [activeKnowledgeBlock?.id]);
+
+  useEffect(() => {
+    if (workspaceMode !== 'knowledge' || !pendingKnowledgeDraft) return;
+    if (selectedKnowledgeBlockId !== pendingKnowledgeDraft.blockId) return;
+    const timer = window.setTimeout(() => {
+      chatRef.current?.setDraft(pendingKnowledgeDraft.text);
+      setPendingKnowledgeDraft(null);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [workspaceMode, pendingKnowledgeDraft, selectedKnowledgeBlockId]);
+
+  const activeReviewScope = useMemo<ExamReviewScope | null>(() => {
+    if (!activeKnowledgeBlock) return null;
+    const materialLinkId = materialsForActive.some((m) => m.id === activeKnowledgeBlock.materialKey)
+      ? activeKnowledgeBlock.materialKey
+      : null;
+    return {
+      title: activeKnowledgeBlock.title,
+      materialLinkId,
+      materialTitle: activeKnowledgeBlock.materialTitle,
+      pageRange: getPageRangeFromKcs(activeKnowledgeBlock.sourceKcs),
+      pageWindows: activeKnowledgeBlock.pageWindows,
+      pageLabel: activeKnowledgeBlock.pageLabel,
+      sourceKcs: activeKnowledgeBlock.sourceKcs,
+    };
+  }, [activeKnowledgeBlock, materialsForActive]);
+
+  const filteredKnowledgeBlocks = useMemo(() => {
+    if (knowledgeBlockFilter === 'all') return knowledgeBlocks;
+    return knowledgeBlocks.filter((block) => {
+      const status = getBlockUnderstandingStatus(block, workspaceAtomCoverage, workspaceLsapState);
+      const ready = isBlockReady(status);
+      return knowledgeBlockFilter === 'ready' ? ready : !ready;
+    });
+  }, [knowledgeBlocks, knowledgeBlockFilter, workspaceAtomCoverage, workspaceLsapState]);
+
+  const knowledgeBlockLectureProgress = useMemo(() => {
+    const progress = new Map<string, { total: number; ready: number }>();
+    for (const block of knowledgeBlocks) {
+      const prev = progress.get(block.materialKey) ?? { total: 0, ready: 0 };
+      const status = getBlockUnderstandingStatus(block, workspaceAtomCoverage, workspaceLsapState);
+      progress.set(block.materialKey, {
+        total: prev.total + 1,
+        ready: prev.ready + (isBlockReady(status) ? 1 : 0),
+      });
+    }
+    return progress;
+  }, [knowledgeBlocks, workspaceAtomCoverage, workspaceLsapState]);
+
+  const knowledgeBlockLectureGroups = useMemo<KnowledgeBlockLectureGroup[]>(() => {
+    const groups: KnowledgeBlockLectureGroup[] = [];
+    const indexByKey = new Map<string, number>();
+    for (const block of knowledgeBlocks) {
+      const key = block.materialKey;
+      let groupIndex = indexByKey.get(key);
+      if (groupIndex == null) {
+        const progress = knowledgeBlockLectureProgress.get(key) ?? { total: 0, ready: 0 };
+        groupIndex = groups.length;
+        indexByKey.set(key, groupIndex);
+        groups.push({
+          key,
+          title: block.materialTitle,
+          blocks: [],
+          total: progress.total,
+          ready: progress.ready,
+        });
+      }
+      groups[groupIndex].blocks.push(block);
+    }
+    return groups;
+  }, [knowledgeBlocks, knowledgeBlockLectureProgress]);
+
+  const filteredKnowledgeBlockGroups = useMemo<KnowledgeBlockLectureGroup[]>(() => {
+    const groups: KnowledgeBlockLectureGroup[] = [];
+    const indexByKey = new Map<string, number>();
+    for (const block of filteredKnowledgeBlocks) {
+      const key = block.materialKey;
+      let groupIndex = indexByKey.get(key);
+      if (groupIndex == null) {
+        const progress = knowledgeBlockLectureProgress.get(key) ?? { total: 0, ready: 0 };
+        groupIndex = groups.length;
+        indexByKey.set(key, groupIndex);
+        groups.push({
+          key,
+          title: block.materialTitle,
+          blocks: [],
+          total: progress.total,
+          ready: progress.ready,
+        });
+      }
+      groups[groupIndex].blocks.push(block);
+    }
+    return groups;
+  }, [filteredKnowledgeBlocks, knowledgeBlockLectureProgress]);
+
+  const activeKnowledgeBlockLectureGroup = useMemo(() => {
+    return (
+      knowledgeBlockLectureGroups.find((group) => group.key === selectedKnowledgeBlockLectureKey) ??
+      (activeKnowledgeBlock
+        ? knowledgeBlockLectureGroups.find((group) => group.key === activeKnowledgeBlock.materialKey)
+        : null) ??
+      knowledgeBlockLectureGroups[0] ??
+      null
+    );
+  }, [knowledgeBlockLectureGroups, selectedKnowledgeBlockLectureKey, activeKnowledgeBlock]);
+
+  const activeLectureBlocks = activeKnowledgeBlockLectureGroup?.blocks ?? [];
+  const activeKnowledgeBlockLectureIndex = activeKnowledgeBlock
+    ? activeLectureBlocks.findIndex((block) => block.id === activeKnowledgeBlock.id)
+    : -1;
+
+  const nextRecommendedBlock = useMemo(() => {
+    if (knowledgeBlocks.length === 0) return null;
+    return (
+      knowledgeBlocks.find((block) => {
+        const status = getBlockUnderstandingStatus(block, workspaceAtomCoverage, workspaceLsapState);
+        return !isBlockReady(status);
+      }) ?? knowledgeBlocks[0]
+    );
+  }, [knowledgeBlocks, workspaceAtomCoverage, workspaceLsapState]);
+
+  const remainingKnowledgeBlockCount = useMemo(
+    () =>
+      knowledgeBlocks.filter((block) => {
+        const status = getBlockUnderstandingStatus(block, workspaceAtomCoverage, workspaceLsapState);
+        return !isBlockReady(status);
+      }).length,
+    [knowledgeBlocks, workspaceAtomCoverage, workspaceLsapState]
+  );
+
+  const readyKnowledgeBlockCount = knowledgeBlocks.length - remainingKnowledgeBlockCount;
+  const routeCompletionPercent =
+    knowledgeBlocks.length > 0 ? Math.round((readyKnowledgeBlockCount / knowledgeBlocks.length) * 100) : 0;
+  const activeLectureRemainingBlockCount = useMemo(
+    () =>
+      activeLectureBlocks.filter((block) => {
+        const status = getBlockUnderstandingStatus(block, workspaceAtomCoverage, workspaceLsapState);
+        return !isBlockReady(status);
+      }).length,
+    [activeLectureBlocks, workspaceAtomCoverage, workspaceLsapState]
+  );
+  const activeLectureReadyBlockCount = activeLectureBlocks.length - activeLectureRemainingBlockCount;
+  const activeLectureCompletionPercent =
+    activeLectureBlocks.length > 0 ? Math.round((activeLectureReadyBlockCount / activeLectureBlocks.length) * 100) : 0;
+
+  const nextRecommendedBlockInLecture = useMemo(() => {
+    if (activeLectureBlocks.length === 0) return null;
+    return (
+      activeLectureBlocks.find((block) => {
+        const status = getBlockUnderstandingStatus(block, workspaceAtomCoverage, workspaceLsapState);
+        return !isBlockReady(status);
+      }) ?? activeLectureBlocks[0]
+    );
+  }, [activeLectureBlocks, workspaceAtomCoverage, workspaceLsapState]);
+
+  const activeKnowledgeBlockGoals = useMemo(
+    () => (activeKnowledgeBlock ? getBlockMasteryGoals(activeKnowledgeBlock) : []),
+    [activeKnowledgeBlock]
+  );
+
+  const activeKnowledgeBlockQuickPrompts = useMemo(
+    () => (activeKnowledgeBlock ? getBlockQuickPrompts(activeKnowledgeBlock) : []),
+    [activeKnowledgeBlock]
+  );
+
+  const miniIntegrationPrompt = useMemo(
+    () => getMiniIntegrationPrompt(activeLectureBlocks, activeKnowledgeBlockLectureIndex),
+    [activeLectureBlocks, activeKnowledgeBlockLectureIndex]
+  );
+
+  const routeClosureReference = useMemo(() => getRouteClosureReference(knowledgeBlocks), [knowledgeBlocks]);
+
+  const routeWrapUpPrompt = useMemo(
+    () => getRouteWrapUpPrompt(knowledgeBlocks, remainingKnowledgeBlockCount),
+    [knowledgeBlocks, remainingKnowledgeBlockCount]
+  );
+
+  const examWorkspaceQuickPrompts = useMemo(
+    () => [
+      ...activeKnowledgeBlockQuickPrompts,
+      ...(miniIntegrationPrompt ? [miniIntegrationPrompt] : []),
+      ...(routeWrapUpPrompt ? [routeWrapUpPrompt] : []),
+    ],
+    [activeKnowledgeBlockQuickPrompts, miniIntegrationPrompt, routeWrapUpPrompt]
+  );
+
   /** 渲染层拆分 Tier12 / Tier3；组内顺序与 `group.kcs`（kcListOrdered）一致 */
   const kcsGroupedWithTiers = useMemo(
     () =>
@@ -475,6 +1141,35 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
     }
   }, [selectedKcId, workspaceLsapContentMap]);
 
+  useEffect(() => {
+    if (knowledgeBlocks.length === 0) {
+      setSelectedKnowledgeBlockId((prev) => (prev == null ? prev : null));
+      return;
+    }
+    setSelectedKnowledgeBlockId((prev) =>
+      prev && knowledgeBlocks.some((block) => block.id === prev) ? prev : knowledgeBlocks[0].id
+    );
+  }, [knowledgeBlocks]);
+
+  useEffect(() => {
+    if (knowledgeBlockLectureGroups.length === 0) {
+      setSelectedKnowledgeBlockLectureKey((prev) => (prev == null ? prev : null));
+      return;
+    }
+    setSelectedKnowledgeBlockLectureKey((prev) =>
+      prev && knowledgeBlockLectureGroups.some((group) => group.key === prev) ? prev : knowledgeBlockLectureGroups[0].key
+    );
+  }, [knowledgeBlockLectureGroups]);
+
+  useEffect(() => {
+    if (!activeKnowledgeBlock) return;
+    const ids = activeKnowledgeBlock.sourceKcs.map((kc) => kc.id);
+    setSelectedKcIds((prev) => {
+      if (prev.length === ids.length && prev.every((id, index) => id === ids[index])) return prev;
+      return ids;
+    });
+  }, [activeKnowledgeBlock]);
+
   /**
    * 多选 KC：默认 seed + 失效项过滤。
    * - 当 kcsOrdered 为空时清空 selectedKcIds
@@ -489,11 +1184,15 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
     setSelectedKcIds((prev) => {
       const validIds = new Set(kcsOrdered.map((k) => k.id));
       const filtered = prev.filter((id) => validIds.has(id));
+      if (knowledgeBlocks.length > 0) {
+        if (filtered.length === prev.length) return prev;
+        return filtered;
+      }
       if (filtered.length === 0) return [kcsOrdered[0].id];
       if (filtered.length === prev.length) return prev;
       return filtered;
     });
-  }, [kcsOrdered]);
+  }, [kcsOrdered, knowledgeBlocks.length]);
 
   /**
    * selectedKcIds → selectedKcId 兼容同步（PLAN §2.1 兼容策略）。
@@ -655,6 +1354,44 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
     }
   }, [workspaceLsapKey, materialsForActive, resolveExamMaterialPdf, refreshChunkIndexStats]);
 
+  useEffect(() => {
+    if (!workspaceLsapKey || materialsForActive.length === 0 || !workspaceLsapContentMap) return;
+    const materialSignature = materialsForActive
+      .map((m) => `${m.id}:${m.fileHash ?? m.cloudSessionId ?? m.addedAt}`)
+      .join('|');
+    const runKey = `${workspaceLsapKey}:${materialSignature}`;
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const stats = await getExamChunkIndexStats(workspaceLsapKey);
+        const indexedIds = new Set(stats?.distinctMaterialLinkIds ?? []);
+        const hasMissingMaterial = materialsForActive.some((m) => !indexedIds.has(m.id));
+        if (stats && stats.totalChunks > 0 && !hasMissingMaterial) return;
+        if (autoChunkIndexKeyRef.current === runKey) return;
+        autoChunkIndexKeyRef.current = runKey;
+
+        const { chunks, skippedLinks } = await buildExamMaterialChunkIndexForLinks(
+          materialsForActive,
+          resolveExamMaterialPdf
+        );
+        if (cancelled) return;
+        await saveExamMaterialChunkIndex(workspaceLsapKey, chunks);
+        if (cancelled) return;
+        if (chunks.length > 0 || skippedLinks.length > 0) {
+          setChunkIndexMsg(`已自动准备 ${chunks.length} 条材料索引（跳过 ${skippedLinks.length} 份材料）`);
+        }
+        void refreshChunkIndexStats();
+      } catch (e) {
+        console.warn('[examChunkIndex] auto build failed', e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceLsapKey, materialsForActive, workspaceLsapContentMap, resolveExamMaterialPdf, refreshChunkIndexStats]);
+
   const handleChunkDebugLookup = useCallback(async () => {
     if (!workspaceLsapKey || !chunkDebugId.trim()) return;
     setChunkIndexMsg(null);
@@ -713,6 +1450,456 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
   const contextBlockedHint = !activeExamId
     ? '请先选择一场考试。'
     : '本场尚未关联材料。请打开「考试中心」为该考试添加 PDF。';
+
+  const selectKnowledgeBlock = (block: ReviewKnowledgeBlock) => {
+    setSelectedKnowledgeBlockLectureKey(block.materialKey);
+    setSelectedKnowledgeBlockId(block.id);
+    setSelectedKcIds(block.sourceKcs.map((kc) => kc.id));
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches) {
+      setMobileTab('chat');
+    }
+  };
+
+  const handleGlobalHandoffToKnowledgeBlock = (blockId: string, draft: string) => {
+    const block = knowledgeBlocks.find((candidate) => candidate.id === blockId);
+    if (!block) return;
+    setPendingKnowledgeDraft({ blockId, text: draft });
+    selectKnowledgeBlock(block);
+    setWorkspaceMode('knowledge');
+    setMobileTab('chat');
+  };
+
+  const selectKnowledgeBlockLecture = (lectureKey: string) => {
+    const group = knowledgeBlockLectureGroups.find((item) => item.key === lectureKey);
+    if (!group || group.blocks.length === 0) return;
+    const target =
+      group.blocks.find((block) => {
+        const status = getBlockUnderstandingStatus(block, workspaceAtomCoverage, workspaceLsapState);
+        return !isBlockReady(status);
+      }) ?? group.blocks[0];
+    selectKnowledgeBlock(target);
+  };
+
+  const openKnowledgeBlockSource = (block: ReviewKnowledgeBlock) => {
+    const sourceKc = block.sourceKcs.find((kc) => kc.sourceLinkId && getEvidencePagesForKc(kc)[0] != null);
+    const page = sourceKc ? getEvidencePagesForKc(sourceKc)[0] : null;
+    if (!sourceKc?.sourceLinkId || page == null) return;
+    onOpenMaterialPage(sourceKc.sourceLinkId, page);
+  };
+
+  const jumpKnowledgeBlockByOffset = (offset: number) => {
+    const scope = activeLectureBlocks.length > 0 ? activeLectureBlocks : knowledgeBlocks;
+    if (scope.length === 0) return;
+    const currentIndex =
+      activeLectureBlocks.length > 0 && activeKnowledgeBlockLectureIndex >= 0
+        ? activeKnowledgeBlockLectureIndex
+        : activeKnowledgeBlockIndex >= 0
+          ? activeKnowledgeBlockIndex
+          : 0;
+    const nextIndex = Math.min(scope.length - 1, Math.max(0, currentIndex + offset));
+    const next = scope[nextIndex];
+    if (next) selectKnowledgeBlock(next);
+  };
+
+  const startClosedBookRebuild = (block: ReviewKnowledgeBlock) => {
+    chatRef.current?.usePrompt(getClosedBookRebuildPrompt(block), {
+      id: `closed-book-${block.id}`,
+      label: '闭卷讲一遍',
+      description: '先不看材料、不听提示，用自己的话重建这一块。',
+    });
+    if (typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches) {
+      setMobileTab('chat');
+    }
+  };
+
+  const renderRouteStatusPanel = () => {
+    if (knowledgeBlocks.length === 0) return null;
+    const lectureScoped = Boolean(activeKnowledgeBlockLectureGroup && activeLectureBlocks.length > 0);
+    const allReady = lectureScoped ? activeLectureRemainingBlockCount === 0 : remainingKnowledgeBlockCount === 0;
+    const focusBlock = allReady ? null : lectureScoped ? nextRecommendedBlockInLecture : nextRecommendedBlock;
+    const status = focusBlock
+      ? getBlockUnderstandingStatus(focusBlock, workspaceAtomCoverage, workspaceLsapState)
+      : null;
+    const statusMeta = status ? UNDERSTANDING_STATUS_META[status] : null;
+    const selected = focusBlock?.id === selectedKnowledgeBlockId;
+    const routeIndex = focusBlock
+      ? lectureScoped
+        ? activeLectureBlocks.findIndex((block) => block.id === focusBlock.id)
+        : knowledgeBlocks.findIndex((block) => block.id === focusBlock.id)
+      : -1;
+    const statusScopeLabel = lectureScoped ? '本节状态' : '路线状态';
+    const totalInScope = lectureScoped ? activeLectureBlocks.length : knowledgeBlocks.length;
+    const readyInScope = lectureScoped ? activeLectureReadyBlockCount : readyKnowledgeBlockCount;
+    const remainingInScope = lectureScoped ? activeLectureRemainingBlockCount : remainingKnowledgeBlockCount;
+    const completionInScope = lectureScoped ? activeLectureCompletionPercent : routeCompletionPercent;
+
+    return (
+      <section className="rounded-2xl border border-emerald-100 bg-gradient-to-br from-emerald-50/80 to-white p-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-start gap-2">
+            <ListChecks className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700" />
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-wide text-emerald-700">{statusScopeLabel}</p>
+              <h3 className="mt-0.5 line-clamp-2 text-sm font-black leading-snug text-slate-900">
+                {allReady
+                  ? lectureScoped
+                    ? '这一节已可输出'
+                    : '所有知识块已可输出'
+                  : `下一步：${focusBlock?.title ?? '继续推进路线'}`}
+              </h3>
+              <p className="mt-1 text-[10px] leading-snug text-slate-500">
+                {routeIndex >= 0 ? `${lectureScoped ? '本节' : '全场'}第 ${routeIndex + 1} / ${totalInScope} 块 · ` : ''}
+                可输出 {readyInScope} · 待理解 {remainingInScope}
+              </p>
+            </div>
+          </div>
+          <span className="shrink-0 rounded-xl bg-slate-900 px-2.5 py-1 text-[11px] font-black tabular-nums text-white">
+            {completionInScope}%
+          </span>
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white">
+          <div
+            className="h-full rounded-full bg-emerald-500 transition-[width] duration-300"
+            style={{ width: `${completionInScope}%` }}
+          />
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {statusMeta && status && focusBlock ? (
+            <>
+              <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusMeta.className}`}>
+                {isBlockReady(status) ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+                {statusMeta.label}
+              </span>
+              <button
+                type="button"
+                disabled={selected}
+                onClick={() => selectKnowledgeBlock(focusBlock)}
+                className="inline-flex items-center gap-1 rounded-xl bg-emerald-700 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-800 disabled:cursor-default disabled:bg-emerald-200"
+              >
+                {selected ? '正在看' : '跳到这一块'}
+                {!selected && <ArrowRight className="h-3 w-3" />}
+              </button>
+            </>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+              <CheckCircle2 className="h-3 w-3" />
+              {lectureScoped ? '本节可以收尾' : '可以整场收尾'}
+            </span>
+          )}
+        </div>
+      </section>
+    );
+  };
+
+  const renderActiveKnowledgeBlockBrief = () => {
+    if (!activeKnowledgeBlock) return null;
+    const status = getBlockUnderstandingStatus(activeKnowledgeBlock, workspaceAtomCoverage, workspaceLsapState);
+    const statusMeta = UNDERSTANDING_STATUS_META[status];
+    const coverage = getBlockCoverage(activeKnowledgeBlock, workspaceAtomCoverage);
+    const pendingCount = pendingRevisitCount(workspaceEvidenceAnnotations, activeKnowledgeBlock.sourceKcs.map((kc) => kc.id));
+    const completionChecks = getBlockCompletionChecks(status, coverage);
+    const canOpenSource = activeKnowledgeBlock.sourceKcs.some((kc) => kc.sourceLinkId && getEvidencePagesForKc(kc)[0] != null);
+    const currentLectureTitle = activeKnowledgeBlockLectureGroup?.title ?? activeKnowledgeBlock.materialTitle;
+    const lecturePositionLabel =
+      activeKnowledgeBlockLectureIndex >= 0 && activeLectureBlocks.length > 0
+        ? `本节第 ${activeKnowledgeBlockLectureIndex + 1} / ${activeLectureBlocks.length} 块`
+        : null;
+    const globalPositionLabel =
+      activeKnowledgeBlockIndex >= 0 ? `全场第 ${activeKnowledgeBlockIndex + 1} / ${knowledgeBlocks.length} 块` : null;
+    const canGoPrevInLecture = activeKnowledgeBlockLectureIndex > 0;
+    const canGoNextInLecture =
+      activeKnowledgeBlockLectureIndex >= 0 && activeKnowledgeBlockLectureIndex < activeLectureBlocks.length - 1;
+
+    if (activeKnowledgeBlockBriefCollapsed) {
+      return (
+        <section className="shrink-0 rounded-2xl border border-indigo-100 bg-white px-3 py-2 shadow-sm">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-center gap-2">
+                <p className="shrink-0 text-[10px] font-black uppercase tracking-wide text-indigo-500">当前知识块</p>
+                <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusMeta.className}`}>
+                  {status === 'transfer' || status === 'mastered' ? (
+                    <CheckCircle2 className="h-3 w-3" />
+                  ) : (
+                    <Circle className="h-3 w-3" />
+                  )}
+                  {statusMeta.label}
+                </span>
+              </div>
+              <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                <h2 className="min-w-0 max-w-full truncate text-sm font-black leading-snug text-slate-900">
+                  {activeKnowledgeBlock.title}
+                </h2>
+                <span className="shrink-0 text-[11px] font-medium text-slate-500">
+                  {lecturePositionLabel ?? globalPositionLabel}
+                  {activeKnowledgeBlock.pageLabel ? ` · ${activeKnowledgeBlock.pageLabel}` : ''}
+                </span>
+              </div>
+              <p className="mt-0.5 truncate text-[10px] font-medium text-slate-400" title={currentLectureTitle}>
+                {currentLectureTitle}
+              </p>
+            </div>
+            <button type="button" onClick={() => setKnowledgeBlockEvidenceOpen(true)} className="hidden shrink-0 rounded-lg px-2 py-1 text-[10px] font-bold tabular-nums text-indigo-600 hover:bg-indigo-50 sm:inline-flex">
+              证据 {coverage.covered}/{coverage.total || '—'}{pendingCount > 0 ? ` · 待回看 ${pendingCount}` : ''}
+            </button>
+            <button
+              type="button"
+              disabled={!canGoPrevInLecture}
+              onClick={() => jumpKnowledgeBlockByOffset(-1)}
+              className="rounded-xl border border-stone-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              上一块
+            </button>
+            <button
+              type="button"
+              disabled={!canGoNextInLecture}
+              onClick={() => jumpKnowledgeBlockByOffset(1)}
+              className="inline-flex items-center gap-1 rounded-xl border border-stone-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              下一块
+              <ArrowRight className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              aria-expanded={false}
+              onClick={() => setActiveKnowledgeBlockBriefCollapsed(false)}
+              className="inline-flex items-center gap-1 rounded-xl bg-indigo-50 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100"
+            >
+              展开
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </section>
+      );
+    }
+
+    return (
+      <section className="shrink-0 rounded-2xl border border-indigo-100 bg-white p-3 shadow-sm">
+        {knowledgeBlockLectureGroups.length > 1 && (
+          <div className="mb-3 rounded-xl border border-stone-100 bg-stone-50/70 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="shrink-0 text-[11px] font-black uppercase tracking-wide text-slate-500">当前 lecture</span>
+              <select
+                value={activeKnowledgeBlockLectureGroup?.key ?? ''}
+                onChange={(e) => selectKnowledgeBlockLecture(e.target.value)}
+                className="min-w-0 flex-1 rounded-lg border border-stone-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-800"
+              >
+                {knowledgeBlockLectureGroups.map((group) => (
+                  <option key={group.key} value={group.key}>
+                    {group.title}（{group.ready}/{group.total} 可输出）
+                  </option>
+                ))}
+              </select>
+              <span className="shrink-0 rounded-full bg-white px-2 py-0.5 text-[10px] font-black tabular-nums text-slate-600">
+                {activeKnowledgeBlockLectureGroup?.total
+                  ? Math.round((activeKnowledgeBlockLectureGroup.ready / activeKnowledgeBlockLectureGroup.total) * 100)
+                  : 0}
+                %
+              </span>
+            </div>
+          </div>
+        )}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-black uppercase tracking-wide text-indigo-500">当前知识块</p>
+            <h2 className="mt-1 line-clamp-2 text-base font-black leading-snug text-slate-900">
+              {activeKnowledgeBlock.title}
+            </h2>
+            <p className="mt-1 truncate text-[11px] font-medium text-slate-500" title={activeKnowledgeBlock.materialTitle}>
+              {lecturePositionLabel ?? globalPositionLabel}
+              {globalPositionLabel && lecturePositionLabel ? ` · ${globalPositionLabel}` : ''}
+              {' · '}
+              {currentLectureTitle}
+              {activeKnowledgeBlock.pageLabel ? ` · ${activeKnowledgeBlock.pageLabel}` : ''}
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            <div className="flex items-center gap-1">
+              <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-bold ${statusMeta.className}`}>
+                {status === 'transfer' || status === 'mastered' ? (
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                ) : (
+                  <Circle className="h-3.5 w-3.5" />
+                )}
+                {statusMeta.label}
+              </span>
+              <button
+                type="button"
+                aria-expanded={true}
+                onClick={() => setActiveKnowledgeBlockBriefCollapsed(true)}
+                className="inline-flex items-center gap-1 rounded-xl border border-stone-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-500 hover:bg-stone-50"
+              >
+                收起
+                <ChevronDown className="h-3.5 w-3.5 rotate-180" />
+              </button>
+            </div>
+            <button type="button" onClick={() => setKnowledgeBlockEvidenceOpen(true)} className="rounded-lg px-2 py-1 text-[10px] font-bold tabular-nums text-indigo-600 hover:bg-indigo-50">
+              证据 {coverage.covered}/{coverage.total || '—'}{pendingCount > 0 ? ` · 待回看 ${pendingCount}` : ''}
+            </button>
+          </div>
+        </div>
+
+        {activeKnowledgeBlockGoals.length > 0 && (
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {activeKnowledgeBlockGoals.map((goal) => (
+              <div key={goal} className="rounded-xl border border-stone-100 bg-stone-50 px-3 py-2">
+                <p className="text-xs leading-relaxed text-slate-700">{goal}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-3 rounded-xl border border-stone-100 bg-stone-50/70 px-3 py-2">
+          <p className="mb-2 text-[11px] font-black uppercase tracking-wide text-slate-500">本块完成标准</p>
+          <div className="grid gap-1.5 sm:grid-cols-3">
+            {completionChecks.map((check) => (
+              <div key={check.label} className="flex items-start gap-1.5 text-[11px] leading-snug text-slate-600">
+                {check.done ? (
+                  <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                ) : (
+                  <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-300" />
+                )}
+                <span>{check.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            disabled={!canOpenSource}
+            onClick={() => openKnowledgeBlockSource(activeKnowledgeBlock)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-stone-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            打开材料依据
+          </button>
+          <button
+            type="button"
+            disabled={!workspaceLsapState || !mergedContent.trim() || mergedLoading || !!mergedError || !activeKnowledgeBlock.sourceKcs[0]}
+            onClick={() => activeKnowledgeBlock.sourceKcs[0] && setProbeKc(activeKnowledgeBlock.sourceKcs[0])}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-1.5 text-xs font-bold text-violet-700 hover:bg-violet-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ClipboardCheck className="h-3.5 w-3.5" />
+            做一次理解探测
+          </button>
+          <button
+            type="button"
+            disabled={!mergedContent.trim() || mergedLoading || !!mergedError}
+            onClick={() => startClosedBookRebuild(activeKnowledgeBlock)}
+            className="inline-flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <ClipboardCheck className="h-3.5 w-3.5" />
+            闭卷讲一遍
+          </button>
+          <span className="text-[11px] text-slate-400">{statusMeta.nextAction}</span>
+          <div className="ml-auto flex items-center gap-1">
+            <button
+              type="button"
+              disabled={!canGoPrevInLecture}
+              onClick={() => jumpKnowledgeBlockByOffset(-1)}
+              className="rounded-xl border border-stone-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              上一块
+            </button>
+            <button
+              type="button"
+              disabled={!canGoNextInLecture}
+              onClick={() => jumpKnowledgeBlockByOffset(1)}
+              className="inline-flex items-center gap-1 rounded-xl border border-stone-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              下一块
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      </section>
+    );
+  };
+
+  const renderKnowledgeBlockCard = (block: ReviewKnowledgeBlock, index: number) => {
+    const selected = block.id === selectedKnowledgeBlockId;
+    const status = getBlockUnderstandingStatus(block, workspaceAtomCoverage, workspaceLsapState);
+    const statusMeta = UNDERSTANDING_STATUS_META[status];
+    const coverage = getBlockCoverage(block, workspaceAtomCoverage);
+    const ready = status === 'transfer' || status === 'mastered';
+    const keyConcepts = block.sourceKcs.slice(0, 3);
+    return (
+      <article
+        key={block.id}
+        className={`rounded-2xl border p-3 transition-colors ${
+          selected
+            ? 'border-indigo-400 bg-indigo-50/80 ring-1 ring-indigo-200'
+            : 'border-stone-200 bg-white hover:border-indigo-200 hover:bg-indigo-50/30'
+        }`}
+      >
+        <button type="button" onClick={() => selectKnowledgeBlock(block)} className="w-full text-left">
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-slate-900 text-[11px] font-black text-white">
+              {index + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex min-w-0 items-start justify-between gap-2">
+                <h3 className="line-clamp-2 text-sm font-black leading-snug text-slate-900">{block.title}</h3>
+                <span
+                  className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusMeta.className}`}
+                >
+                  {ready ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+                  {statusMeta.label}
+                </span>
+              </div>
+              <p className="mt-1 truncate text-[11px] font-medium text-slate-500" title={block.materialTitle}>
+                {block.materialTitle}
+                {block.pageLabel ? ` · ${block.pageLabel}` : ''}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-1.5">
+            {keyConcepts.map((kc) => (
+              <p key={kc.id} className="line-clamp-1 text-[11px] leading-snug text-slate-600">
+                <span className="font-bold text-slate-800">{kc.concept}</span>
+                {kc.reviewFocus ? `：${kc.reviewFocus}` : ''}
+              </p>
+            ))}
+            {block.sourceKcs.length > keyConcepts.length && (
+              <p className="text-[10px] font-bold text-slate-400">另含 {block.sourceKcs.length - keyConcepts.length} 个相关关键点</p>
+            )}
+          </div>
+
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-stone-100 pt-2">
+            <span className="text-[10px] font-bold text-slate-500">{statusMeta.nextAction}</span>
+            <span className="text-[10px] tabular-nums text-slate-500">
+              证据 {coverage.covered}/{coverage.total || '—'}
+            </span>
+          </div>
+        </button>
+        <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+          {block.sourceKcs[0] && (
+            <button
+              type="button"
+              onClick={() => setInspectKc(block.sourceKcs[0])}
+              className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 hover:underline"
+            >
+              查看组成
+            </button>
+          )}
+          {block.sourceKcs[0] && (
+            <button
+              type="button"
+              disabled={!workspaceLsapState || !mergedContent.trim() || mergedLoading || !!mergedError}
+              onClick={() => setProbeKc(block.sourceKcs[0])}
+              className="inline-flex items-center gap-0.5 text-[10px] font-bold text-violet-700 hover:text-violet-900 hover:underline disabled:cursor-not-allowed disabled:opacity-40 disabled:no-underline"
+            >
+              <ClipboardCheck className="h-3 w-3 shrink-0" aria-hidden />
+              理解探测
+            </button>
+          )}
+        </div>
+      </article>
+    );
+  };
 
   const renderWorkspaceKcCard = (kc: LSAPKnowledgeComponent) => {
     const selected = selectedKcIds.includes(kc.id);
@@ -816,247 +2003,229 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
       </section>
 
       <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-stone-200 bg-white p-4 shadow-sm">
-        <div className="mb-2 flex shrink-0 flex-col gap-1">
-          <PredictedScoreDisplay score={predictedScore} hasMap={!!workspaceLsapContentMap?.kcs?.length} />
+        <div className="mb-3 shrink-0 space-y-3">
+          <UnderstandingProgressDisplay
+            blocks={knowledgeBlocks}
+            cov={workspaceAtomCoverage}
+            state={workspaceLsapState}
+          />
           {scoreDeltaToast != null && scoreDeltaToast > 0 && (
             <p className="self-end text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-0.5 shadow-sm animate-pulse">
-              预测分 +{scoreDeltaToast}
+              理解预测 +{scoreDeltaToast}
             </p>
           )}
-        </div>
-        <div className="mb-1 flex shrink-0 items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <h2 className="text-[11px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1.5">
-              <ListTree className="w-3.5 h-3.5 shrink-0" aria-hidden />
-              考点列表（KC）
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+              <ListTree className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              知识块路线
             </h2>
-            {kcPanelSummaryLine ? (
-              <p className="text-[10px] text-slate-500 mt-1 leading-snug">{kcPanelSummaryLine}</p>
-            ) : null}
-          </div>
-        </div>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {workspaceLsapContentMap && kcsGroupedByMaterial.length > 0 ? (
-            <p className="mb-1 shrink-0 px-0.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-              优先掌握（核心 + 重要）
+            <p className="mt-1 text-[10px] leading-snug text-slate-500">
+              {workspaceLsapContentMap
+                ? `本场 ${materialsForActive.length} 份材料 · ${knowledgeBlocks.length} 个复习块 · 后台 ${kcsOrdered.length} 个关键点`
+                : '先生成路线，系统会把细碎考点合并成更适合复习的一块块内容。'}
             </p>
-          ) : null}
-          {kcsOrdered.length > 0 && (
-            <div className="mb-2 flex shrink-0 items-center gap-2 text-[10px] text-slate-600">
-              <button
-                type="button"
-                onClick={() => setSelectedKcIds(kcsOrdered.map((k) => k.id))}
-                className="px-2 py-0.5 rounded-md border border-stone-300 bg-white text-slate-700 hover:bg-stone-50"
-                aria-label="全选所有考点"
-              >
-                全选
-              </button>
+          </div>
+          {renderRouteStatusPanel()}
+          {knowledgeBlocks.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {KNOWLEDGE_BLOCK_FILTERS.map((filter) => (
+                <button
+                  key={filter.id}
+                  type="button"
+                  onClick={() => setKnowledgeBlockFilter(filter.id)}
+                  className={`rounded-full px-3 py-1 text-[11px] font-bold transition-colors ${
+                    knowledgeBlockFilter === filter.id
+                      ? 'bg-slate-900 text-white'
+                      : 'border border-stone-200 bg-white text-slate-600 hover:bg-stone-50'
+                  }`}
+                >
+                  {filter.label}
+                </button>
+              ))}
             </div>
           )}
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {!workspaceLsapContentMap ? (
-            <p className="shrink-0 py-2 text-xs text-slate-500">生成本场考点图谱后将在此列出考点。</p>
-          ) : kcsGroupedByMaterial.length === 0 ? (
-            <p className="shrink-0 py-2 text-xs text-slate-500">生成本场考点图谱后将在此列出考点。</p>
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 p-5 text-center">
+              <Layers3 className="mb-2 h-7 w-7 text-slate-300" />
+              <p className="text-sm font-bold text-slate-700">还没有知识块路线</p>
+              <p className="mt-1 max-w-[220px] text-xs leading-relaxed text-slate-500">
+                选择考试和材料后，先生成一条能拿来复习的路线。
+              </p>
+            </div>
+          ) : knowledgeBlocks.length === 0 ? (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 p-5 text-center">
+              <p className="text-sm font-bold text-slate-700">这场考试暂时没有可用知识块</p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">可以重新生成路线，或检查材料是否成功关联。</p>
+            </div>
+          ) : filteredKnowledgeBlocks.length === 0 ? (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 p-5 text-center">
+              <p className="text-sm font-bold text-slate-700">
+                {knowledgeBlockFilter === 'ready' ? '还没有可输出的知识块' : '当前筛选下没有知识块'}
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                可以切回“全部”，或者先做一轮理解验证。
+              </p>
+            </div>
           ) : (
             <div
-              className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-y-contain pr-1"
+              className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-y-contain pr-1"
               role="region"
-              aria-label="按材料分组的考点列表"
+              aria-label="知识块路线"
             >
-              {globalAllTier3 ? (
-                <p className="text-[10px] text-slate-500 leading-relaxed px-0.5">
-                  当前图谱考点均落在细节档。请展开下方「满分细节」浏览并选择考点；对话仍可正常锚定已选考点。
-                </p>
-              ) : (
-                kcsGroupedWithTiers.map((group) => {
-                  const headingId = `kc-pri-${String(group.key).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-                  const showEmptyHint = group.kind === 'material' && group.kcs.length === 0;
-                  return (
-                    <section key={`pri-${group.key}`} aria-labelledby={headingId} className="space-y-1.5">
-                      <h3
-                        id={headingId}
-                        className="text-[11px] font-bold text-slate-500 uppercase tracking-wide truncate px-0.5 sticky top-0 z-10 bg-white/95 backdrop-blur-sm py-1 -mx-0.5 border-b border-stone-100/90"
-                        title={group.title}
-                      >
-                        {group.title}
-                      </h3>
-                      {showEmptyHint ? (
-                        <p className="text-[10px] text-slate-400 leading-relaxed px-0.5">
-                          暂无考点。可重新点击「生成本场考点图谱」，或检查材料是否过长被截断。
-                        </p>
-                      ) : group.kcsTier12.length === 0 && group.kcsTier3.length > 0 ? (
-                        <p className="text-[10px] text-slate-400 leading-relaxed px-0.5">
-                          暂无核心/重要考点，见下方「满分细节」。
-                        </p>
-                      ) : (
-                        <div role="list" className="space-y-1.5">
-                          {group.kcsTier12.map((kc) => renderWorkspaceKcCard(kc))}
-                        </div>
-                      )}
-                    </section>
-                  );
-                })
-              )}
-
-              {totalTier3Count > 0 ? (
-                <div className="mt-1 space-y-2 border-t border-stone-100 pt-3">
+              {filteredKnowledgeBlockGroups.map((group) => (
+                <section key={group.key} className="space-y-2" aria-label={`${group.title} 的知识块`}>
                   <button
                     type="button"
-                    aria-expanded={maxScoreDetailsOpen}
-                    aria-controls="workspace-kc-tier3-panel"
-                    onClick={() => setMaxScoreDetailsOpen((o) => !o)}
-                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-stone-200 bg-stone-50/90 px-2.5 py-2 text-left hover:bg-stone-100/90 transition-colors"
+                    onClick={() => selectKnowledgeBlockLecture(group.key)}
+                    className={`sticky top-0 z-10 w-full rounded-xl border px-3 py-2 text-left shadow-sm backdrop-blur transition-[background-color,border-color,transform] duration-150 ease-out active:scale-[0.99] ${
+                      activeKnowledgeBlockLectureGroup?.key === group.key
+                        ? 'border-indigo-200 bg-indigo-50/95'
+                        : 'border-stone-100 bg-white/95 hover:border-indigo-100 hover:bg-indigo-50/40'
+                    }`}
                   >
-                    <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                      <span className="text-[11px] font-bold text-slate-600">满分细节</span>
-                      <span className="text-[10px] text-slate-500 tabular-nums">共 {totalTier3Count} 个</span>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="line-clamp-2 text-xs font-black leading-snug text-slate-800" title={group.title}>
+                          {group.title}
+                        </p>
+                        <p className="mt-0.5 text-[10px] font-medium text-slate-500">
+                          本节 {group.total} 块 · 可输出 {group.ready}
+                          {knowledgeBlockFilter !== 'all' ? ` · 当前显示 ${group.blocks.length}` : ''}
+                        </p>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black tabular-nums text-slate-600">
+                        {group.total > 0 ? Math.round((group.ready / group.total) * 100) : 0}%
+                      </span>
                     </div>
-                    <ChevronDown
-                      className={`h-4 w-4 shrink-0 text-slate-500 transition-transform ${maxScoreDetailsOpen ? 'rotate-180' : ''}`}
-                      aria-hidden
-                    />
+                    {activeKnowledgeBlockLectureGroup?.key === group.key && (
+                      <p className="mt-1 text-[10px] font-bold text-indigo-700">正在复习这一节</p>
+                    )}
                   </button>
-                  <p className="text-[10px] text-slate-400 leading-relaxed px-0.5">
-                    以下为相对细枝末节或低频点；建议先掌握上方核心与重要考点，再按需浏览。
-                  </p>
-                  {maxScoreDetailsOpen ? (
-                    <div id="workspace-kc-tier3-panel" className="space-y-3 pt-1">
-                      {kcsGroupedWithTiers.map((group) => {
-                        if (group.kcsTier3.length === 0) return null;
-                        const headingId = `kc-t3-${String(group.key).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-                        return (
-                          <section key={`t3-${group.key}`} aria-labelledby={headingId} className="space-y-1.5">
-                            <h3
-                              id={headingId}
-                              className="text-[11px] font-bold text-slate-500 uppercase tracking-wide truncate px-0.5 sticky top-0 z-10 bg-white/95 backdrop-blur-sm py-1 -mx-0.5 border-b border-stone-100/90"
-                              title={group.title}
-                            >
-                              {group.title}
-                            </h3>
-                            <div role="list" className="space-y-1.5">
-                              {group.kcsTier3.map((kc) => renderWorkspaceKcCard(kc))}
-                            </div>
-                          </section>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+                  <div className="space-y-3">
+                    {group.blocks.map((block) =>
+                      renderKnowledgeBlockCard(
+                        block,
+                        Math.max(0, knowledgeBlocks.findIndex((candidate) => candidate.id === block.id))
+                      )
+                    )}
+                  </div>
+                </section>
+              ))}
             </div>
           )}
         </div>
-        <div className="mt-2 shrink-0 space-y-2 border-t border-stone-100 pt-3">
-          <p className="text-[10px] text-slate-500 leading-snug px-0.5">
-            考前预测优先第一份本地 fileHash；仅云端时将尝试恢复。
-          </p>
-          {hasCloudOnly && (
-            <p className="text-[10px] text-amber-900 bg-amber-50 rounded-lg px-2 py-1.5 border border-amber-200 leading-snug">
-              关联均为云端时，请先恢复 PDF 或检查网络。
-            </p>
-          )}
-          {materialsForActive.length > 0 && firstLink?.sourceType === 'fileHash' && (
-            <p className="text-[10px] text-slate-500 px-0.5 truncate" title={firstLink.fileName}>
-              优先：{firstLink.fileName}
-            </p>
+
+        <div className="mt-3 shrink-0 space-y-2 border-t border-stone-100 pt-3">
+          {activeExamId && materialsForActive.length === 0 && (
+            <p className="text-xs text-amber-800 bg-amber-50 rounded-lg p-2">本场暂无材料，请到考试中心关联。</p>
           )}
           <button
             type="button"
-            disabled={!activeExamId || materialsForActive.length === 0 || predictionBusy}
-            aria-busy={predictionBusy}
-            onClick={handlePredictionClick}
-            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl bg-amber-500 text-white font-bold text-xs hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={!activeExamId || materialsForActive.length === 0 || workspaceLsapGenerating || mergedLoading}
+            onClick={() => onGenerateWorkspaceLsap()}
+            aria-busy={workspaceLsapGenerating}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {predictionBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-            进入考前预测
+            {workspaceLsapGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+            {workspaceLsapContentMap ? '重新生成知识块路线' : '生成知识块路线'}
           </button>
+          {workspaceLsapGenerating && workspaceLsapProgress && (
+            <div
+              className="rounded-xl border border-violet-200 bg-violet-50/80 px-3 py-2 space-y-1.5"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-[11px] font-bold text-violet-900 leading-snug">
+                正在生成路线：第 {workspaceLsapProgress.current} / {workspaceLsapProgress.total} 份 ·{' '}
+                <span className="font-medium break-all">{workspaceLsapProgress.fileName}</span>
+              </p>
+              <div className="h-1.5 overflow-hidden rounded-full bg-violet-200">
+                <div
+                  className="h-full bg-violet-600 transition-[width] duration-300"
+                  style={{
+                    width: `${Math.min(100, Math.round((100 * workspaceLsapProgress.current) / workspaceLsapProgress.total))}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            disabled={
+              !workspaceLsapContentMap ||
+              !workspaceLsapContentMap.kcs?.length ||
+              workspaceAtomsGenerating ||
+              workspaceLsapGenerating ||
+              mergedLoading
+            }
+            onClick={() => onExtractLogicAtoms()}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-xs font-bold text-indigo-900 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {workspaceAtomsGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Braces className="h-4 w-4" />}
+            增强理解检查
+          </button>
+          {workspaceAtomsGenerating && workspaceAtomsProgress && (
+            <div
+              className="rounded-xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 space-y-1.5"
+              role="status"
+              aria-live="polite"
+            >
+              <p className="text-[11px] font-bold text-indigo-900 leading-snug">
+                正在增强理解检查：第 {workspaceAtomsProgress.current} / {workspaceAtomsProgress.total} 份 ·{' '}
+                <span className="font-medium break-all">{workspaceAtomsProgress.fileName}</span>
+              </p>
+              <div className="h-1.5 overflow-hidden rounded-full bg-indigo-200">
+                <div
+                  className="h-full bg-indigo-600 transition-[width] duration-300"
+                  style={{
+                    width: `${Math.min(100, Math.round((100 * workspaceAtomsProgress.current) / workspaceAtomsProgress.total))}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          <details className="rounded-xl border border-stone-200 bg-stone-50/70 px-3 py-2">
+            <summary className="cursor-pointer text-[11px] font-bold text-slate-500">旧版工具（暂放旁边）</summary>
+            <div className="mt-2 space-y-2">
+              <PredictedScoreDisplay score={predictedScore} hasMap={!!workspaceLsapContentMap?.kcs?.length} />
+              <p className="text-[10px] text-slate-500 leading-snug px-0.5">
+                这部分还保留，但不再作为主复习路径。
+              </p>
+              {hasCloudOnly && (
+                <p className="text-[10px] text-amber-900 bg-amber-50 rounded-lg px-2 py-1.5 border border-amber-200 leading-snug">
+                  关联均为云端时，请先恢复 PDF 或检查网络。
+                </p>
+              )}
+              {materialsForActive.length > 0 && firstLink?.sourceType === 'fileHash' && (
+                <p className="text-[10px] text-slate-500 px-0.5 truncate" title={firstLink.fileName}>
+                  优先：{firstLink.fileName}
+                </p>
+              )}
+              <button
+                type="button"
+                disabled={!activeExamId || materialsForActive.length === 0 || predictionBusy}
+                aria-busy={predictionBusy}
+                onClick={handlePredictionClick}
+                className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-3 py-2 text-xs font-bold text-white hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {predictionBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpen className="h-4 w-4" />}
+                进入旧版考前预测
+              </button>
+            </div>
+          </details>
         </div>
       </section>
 
-      <div className="space-y-2 shrink-0">
-        {activeExamId && materialsForActive.length === 0 && (
-          <p className="text-xs text-amber-800 bg-amber-50 rounded-lg p-2">本场暂无材料，请到考试中心关联。</p>
-        )}
-        <button
-          type="button"
-          disabled={!activeExamId || materialsForActive.length === 0 || workspaceLsapGenerating || mergedLoading}
-          onClick={() => onGenerateWorkspaceLsap()}
-          aria-busy={workspaceLsapGenerating}
-          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-violet-600 text-white font-bold text-xs hover:bg-violet-700 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {workspaceLsapGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-          生成本场考点图谱
-        </button>
-        {workspaceLsapGenerating && workspaceLsapProgress && (
-          <div
-            className="rounded-xl border border-violet-200 bg-violet-50/80 px-3 py-2 space-y-1.5"
-            role="status"
-            aria-live="polite"
-          >
-            <p className="text-[11px] font-bold text-violet-900 leading-snug">
-              正在生成本场考点图谱：第 {workspaceLsapProgress.current} / {workspaceLsapProgress.total} 份 ·{' '}
-              <span className="font-medium break-all">{workspaceLsapProgress.fileName}</span>
-            </p>
-            <div className="h-1.5 rounded-full bg-violet-200 overflow-hidden">
-              <div
-                className="h-full bg-violet-600 transition-[width] duration-300"
-                style={{
-                  width: `${Math.min(100, Math.round((100 * workspaceLsapProgress.current) / workspaceLsapProgress.total))}%`,
-                }}
-              />
-            </div>
-            <p className="text-[10px] text-violet-800/90">
-              进度 {Math.min(100, Math.round((100 * workspaceLsapProgress.current) / workspaceLsapProgress.total))}%
-            </p>
-          </div>
-        )}
-        <button
-          type="button"
-          disabled={
-            !workspaceLsapContentMap ||
-            !workspaceLsapContentMap.kcs?.length ||
-            workspaceAtomsGenerating ||
-            workspaceLsapGenerating ||
-            mergedLoading
-          }
-          onClick={() => onExtractLogicAtoms()}
-          className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-900 font-bold text-xs hover:bg-indigo-100 disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {workspaceAtomsGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Braces className="w-4 h-4" />}
-          提取逻辑原子
-        </button>
-        {workspaceAtomsGenerating && workspaceAtomsProgress && (
-          <div
-            className="rounded-xl border border-indigo-200 bg-indigo-50/80 px-3 py-2 space-y-1.5"
-            role="status"
-            aria-live="polite"
-          >
-            <p className="text-[11px] font-bold text-indigo-900 leading-snug">
-              正在提取逻辑原子：第 {workspaceAtomsProgress.current} / {workspaceAtomsProgress.total} 份 ·{' '}
-              <span className="font-medium break-all">{workspaceAtomsProgress.fileName}</span>
-            </p>
-            <div className="h-1.5 rounded-full bg-indigo-200 overflow-hidden">
-              <div
-                className="h-full bg-indigo-600 transition-[width] duration-300"
-                style={{
-                  width: `${Math.min(100, Math.round((100 * workspaceAtomsProgress.current) / workspaceAtomsProgress.total))}%`,
-                }}
-              />
-            </div>
-            <p className="text-[10px] text-indigo-800/90">
-              进度 {Math.min(100, Math.round((100 * workspaceAtomsProgress.current) / workspaceAtomsProgress.total))}%
-            </p>
-          </div>
-        )}
-        <p className="text-[10px] text-slate-500 leading-snug px-0.5">
-          说明：考点图谱与逻辑原子均按每份关联材料分别抽取（旧版无材料归属的考点仍用整包合并）；单讲超长时正文上限已放宽。
-        </p>
-      </div>
     </div>
   );
 
   const chatColumn = (
     <div className="flex min-h-0 flex-1 min-w-0 flex-col gap-2 overflow-hidden">
+      {renderActiveKnowledgeBlockBrief()}
       <div className="flex min-h-0 flex-1 min-w-0 flex-col gap-2 overflow-hidden lg:flex-row lg:gap-3">
         <div
           className={`flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden xl:min-w-[min(100%,360px)] ${
@@ -1068,6 +2237,8 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
             key={chatSessionKey}
             sessionKey={chatSessionKey}
             workspaceDialogueTranscript={workspaceDialogueTranscript}
+            evidenceAnnotations={workspaceEvidenceAnnotations}
+            onEvidenceAnnotationsChange={onWorkspaceEvidenceAnnotationsChange}
             mergedContent={mergedContent}
             mergedLoading={mergedLoading}
             mergedError={mergedError}
@@ -1075,6 +2246,10 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
             contextBlockedHint={contextBlockedHint}
             disciplineBand={disciplineBand}
             examTitle={activeExam?.title ?? ''}
+            focusLabel={activeKnowledgeBlock?.title}
+            focusKeyPoints={activeKnowledgeBlockGoals}
+            routeClosureReference={routeClosureReference}
+            quickPrompts={examWorkspaceQuickPrompts}
             activeKc={activeKcForChat}
             workspaceAtomCoverage={workspaceAtomCoverage}
             onAtomCoverageChange={onWorkspaceAtomCoverageChange}
@@ -1091,6 +2266,7 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
             chunkRetrievalMaterialLinkIdFilter={
               chunkSearchOnlyPreviewMaterial && previewJumpRequest?.linkId ? previewJumpRequest.linkId : null
             }
+            reviewScope={activeReviewScope}
             noKcSelected={selectedKcIds.length === 0}
             selectedKcs={selectedKcs}
             workspaceLsapContentMap={workspaceLsapContentMap}
@@ -1124,6 +2300,36 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
     </div>
   );
 
+  const globalChatColumn = activeExamId && activeExam ? (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 overflow-hidden lg:flex-row lg:gap-3">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        <ExamWorkspaceGlobalChat
+          key={`exam-global-${activeExamId}`}
+          user={user}
+          examId={activeExamId}
+          examTitle={activeExam.title}
+          materials={materialsForActive}
+          workspaceKey={workspaceLsapKey}
+          contentMap={workspaceLsapContentMap}
+          knowledgeBlocks={globalKnowledgeBlockOptions}
+          resolveExamMaterialPdf={resolveExamMaterialPdf}
+          onOpenMaterialPage={onOpenMaterialPage}
+          onHandoffToKnowledgeBlock={handleGlobalHandoffToKnowledgeBlock}
+        />
+      </div>
+      {materialPreviewDesktopOpen && (
+        <div className="hidden h-full min-h-0 w-full shrink-0 flex-col overflow-hidden lg:flex lg:w-[min(100%,420px)] lg:min-w-[280px] lg:max-w-[420px] lg:flex-none">
+          <ExamWorkspaceMaterialPreview
+            materials={materialsForActive}
+            resolveExamMaterialPdf={resolveExamMaterialPdf}
+            previewJumpRequest={previewJumpRequest}
+            className="min-h-0 flex-1 flex flex-col"
+          />
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
     /* 视口高度 + overflow-hidden：避免对话撑开整页；main 内 flex-1 min-h-0 链传递到消息列表 */
     <div
@@ -1143,9 +2349,33 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
         <div className="flex items-center gap-2 text-slate-800 min-w-0">
           <GraduationCap className="w-6 h-6 text-indigo-600 shrink-0" />
           <div className="min-w-0">
-            <h1 className="text-lg font-bold truncate">考试复习 · 备考工作台</h1>
-            <p className="text-xs text-slate-500 hidden sm:block">本场合并讲义 · 考点 · 预测分（只读）· 苏格拉底对话</p>
+            <h1 className="text-lg font-bold truncate">
+              备考工作台 · {workspaceMode === 'knowledge' ? '知识块理解' : '整场考试对话'}
+            </h1>
+            <p className="text-xs text-slate-500 hidden sm:block">
+              {workspaceMode === 'knowledge' ? '知识块路线 · 理解验证 · 材料证据' : '全部考试材料 · 自由提问 · 原文页码'}
+            </p>
           </div>
+        </div>
+        <div className="flex rounded-xl border border-stone-200 bg-stone-100 p-1" role="tablist" aria-label="备考工作台模式">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === 'knowledge'}
+            onClick={() => setWorkspaceMode('knowledge')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-black transition-colors ${workspaceMode === 'knowledge' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            知识块理解
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === 'global'}
+            onClick={() => setWorkspaceMode('global')}
+            className={`rounded-lg px-3 py-1.5 text-xs font-black transition-colors ${workspaceMode === 'global' ? 'bg-white text-violet-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+          >
+            整场考试对话
+          </button>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2 shrink-0">
           <button
@@ -1169,19 +2399,19 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
             <FileText className="w-4 h-4 shrink-0" />
             讲义预览
           </button>
-          <button
+          {workspaceMode === 'knowledge' && <button
             type="button"
             disabled={!activeKcForChat}
-            title={!activeKcForChat ? '请先锚定考点后再查看考点释义' : undefined}
+            title={!activeKcForChat ? '请选择单个关键点后再查看术语释义' : undefined}
             aria-expanded={glossaryDesktopOpen}
             aria-controls="exam-workspace-kc-glossary-panel"
             onClick={() => setGlossaryDesktopOpen((o) => !o)}
             className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-bold text-amber-800 bg-amber-50 border border-amber-200 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-amber-50"
           >
             <BookMarked className="w-4 h-4 shrink-0" />
-            {glossaryDesktopOpen ? '收起考点释义' : '展开考点释义'}
-          </button>
-          <button
+            {glossaryDesktopOpen ? '收起术语释义' : '展开术语释义'}
+          </button>}
+          {workspaceMode === 'knowledge' && <button
             type="button"
             disabled={!workspaceLsapContentMap || !workspaceLsapState}
             title={!workspaceLsapContentMap ? '请先生成本场考点图谱' : undefined}
@@ -1190,7 +2420,7 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
           >
             <FileText className="w-4 h-4" />
             学习证据
-          </button>
+          </button>}
           <button
             type="button"
             onClick={onOpenExamHub}
@@ -1198,22 +2428,51 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
           >
             考试中心
           </button>
-          {showChunkDebug && (
+          {chunkDebugAvailable && (
             <button
               type="button"
-              disabled={chunkIndexBusy || !workspaceLsapKey || materialsForActive.length === 0}
-              onClick={() => void handleRebuildChunkIndex()}
-              title="备考引用 1-1：按本场材料重建 PDF 文本 chunk 索引（IndexedDB）"
-              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-bold text-slate-700 bg-stone-100 border border-stone-200 hover:bg-stone-200 disabled:opacity-40 disabled:cursor-not-allowed"
+              onClick={() => setShowChunkDebug((open) => !open)}
+              aria-expanded={showChunkDebug}
+              title={showChunkDebug ? '收起 chunk 调试面板' : '打开 chunk 调试面板'}
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-sm font-bold text-slate-700 bg-stone-100 border border-stone-200 hover:bg-stone-200"
             >
-              {chunkIndexBusy ? <Loader2 className="w-4 h-4 animate-spin shrink-0" /> : <Database className="w-4 h-4 shrink-0" />}
-              重建 chunk 索引
+              <Database className="w-4 h-4 shrink-0" />
+              {showChunkDebug ? '收起 chunk 调试' : 'chunk 调试'}
             </button>
           )}
         </div>
       </header>
 
       <KnowledgePointInspectPanel kc={inspectKc} open={!!inspectKc} onClose={() => setInspectKc(null)} />
+
+      {activeKnowledgeBlock && (
+        <KnowledgeBlockEvidenceDrawer
+          open={knowledgeBlockEvidenceOpen}
+          title={activeKnowledgeBlock.title}
+          kcs={activeKnowledgeBlock.sourceKcs}
+          coverage={workspaceAtomCoverage}
+          transcript={workspaceDialogueTranscript}
+          annotations={workspaceEvidenceAnnotations}
+          currentUserTurnCount={workspaceDialogueTranscript.filter((turn) => turn.role === 'user' && turn.sessionKey === chatSessionKey).length}
+          onAnnotationsChange={onWorkspaceEvidenceAnnotationsChange}
+          onClose={() => setKnowledgeBlockEvidenceOpen(false)}
+          onJumpToTurn={(turnId) => {
+            setKnowledgeBlockEvidenceOpen(false);
+            requestAnimationFrame(() => chatRef.current?.scrollToTurn(turnId));
+          }}
+          onAskNow={(annotation) => {
+            setKnowledgeBlockEvidenceOpen(false);
+            requestAnimationFrame(() => chatRef.current?.askRevisitNow(annotation.id));
+          }}
+          onOpenSourcePage={(kc, page) => {
+            if (!kc.sourceLinkId) return;
+            setKnowledgeBlockEvidenceOpen(false);
+            onOpenMaterialPage(kc.sourceLinkId, page);
+          }}
+          onEnhanceEvidence={() => onExtractLogicAtoms({ preserveExistingAtoms: true })}
+          enhancingEvidence={workspaceAtomsGenerating}
+        />
+      )}
 
       {evidenceReportOpen && workspaceLsapContentMap && workspaceLsapState && (
         <WorkspaceEvidenceReportModal
@@ -1261,6 +2520,10 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
               去创建考试并关联 PDF
             </button>
           </div>
+        ) : workspaceMode === 'global' ? (
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {globalChatColumn}
+          </div>
         ) : (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <div className="flex gap-1.5 lg:hidden mb-2 shrink-0 flex-wrap">
@@ -1269,23 +2532,23 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
                 onClick={() => setMobileTab('sidebar')}
                 className={`flex-1 min-w-[100px] py-2 rounded-xl text-[11px] font-bold ${mobileTab === 'sidebar' ? 'bg-indigo-600 text-white' : 'bg-stone-100 text-slate-600'}`}
               >
-                考点与材料
+                知识块路线
               </button>
               <button
                 type="button"
                 onClick={() => setMobileTab('chat')}
                 className={`flex-1 min-w-[100px] py-2 rounded-xl text-[11px] font-bold ${mobileTab === 'chat' ? 'bg-indigo-600 text-white' : 'bg-stone-100 text-slate-600'}`}
               >
-                预测分与对话
+                理解验证
               </button>
               {activeKcForChat && (
                 <button
                   type="button"
                   onClick={() => setMobileTab('glossary')}
-                  aria-label="考点释义"
+                  aria-label="术语释义"
                   className={`flex-1 min-w-[100px] py-2 rounded-xl text-[11px] font-bold ${mobileTab === 'glossary' ? 'bg-indigo-600 text-white' : 'bg-stone-100 text-slate-600'}`}
                 >
-                  考点释义
+                  术语释义
                 </button>
               )}
             </div>
@@ -1319,6 +2582,14 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <Database className="h-4 w-4 text-slate-500 shrink-0" />
               <span className="font-bold text-slate-700">chunk 索引（debug）</span>
+              <button
+                type="button"
+                onClick={() => setShowChunkDebug(false)}
+                className="inline-flex items-center gap-1 rounded-lg border border-stone-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-stone-50"
+              >
+                <X className="h-3 w-3" />
+                收起
+              </button>
               <button
                 type="button"
                 disabled={chunkIndexBusy || !workspaceLsapKey || materialsForActive.length === 0}

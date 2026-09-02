@@ -162,6 +162,8 @@ export interface RetrieveCandidateChunksInput {
   topK?: number;
   /** 1-4：仅在该 `ExamMaterialLink.id` 的 chunk 上检索；不设则检索本场索引内全部材料 */
   materialLinkIdFilter?: string | null;
+  /** 当前复习块页码范围；用于把主证据锁在当前页附近。 */
+  pageRangeFilter?: { start: number; end: number; padding?: number } | null;
 }
 
 /**
@@ -183,6 +185,15 @@ export async function retrieveCandidateChunks(
     if (fid) {
       chunks = chunks.filter((c) => c.materialLinkId === fid);
       /** 筛选后无块：等同「本轮无候选」，不抛错，由调用方走 1-4 文末 JSON 降级 */
+      if (chunks.length === 0) return [];
+    }
+
+    const range = input.pageRangeFilter;
+    if (range && Number.isFinite(range.start) && Number.isFinite(range.end)) {
+      const pad = Math.max(0, Math.floor(range.padding ?? 0));
+      const start = Math.max(1, Math.floor(Math.min(range.start, range.end)) - pad);
+      const end = Math.max(start, Math.floor(Math.max(range.start, range.end)) + pad);
+      chunks = chunks.filter((c) => c.page >= start && c.page <= end);
       if (chunks.length === 0) return [];
     }
 

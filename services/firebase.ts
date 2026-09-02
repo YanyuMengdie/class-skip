@@ -17,6 +17,7 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -30,7 +31,7 @@ import {
   enableIndexedDbPersistence 
 } from 'firebase/firestore';
 
-import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, Exam, ExamMaterialLink, DailyPlanCacheDoc, DailySegment, TutorSession, PersistedSkimSession, type DisciplineBand } from '@/types';
+import { ChatCache, ExplanationCache, AnnotationCache, ChatMessage, StudyMap, ViewMode, SkimStage, QuizData, DocType, NotebookData, CloudSession, CalendarEvent, Memo, Exam, ExamMaterialLink, DailyPlanCacheDoc, DailySegment, TutorSession, PersistedSkimSession, JointReviewPack, JointReviewMaterial, TinyStudyEntrySession, type DisciplineBand } from '@/types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyC0_saRd3L2zIxOfG1FQinjYpyCGs_B9ls",
@@ -123,7 +124,8 @@ const uploadToFirebaseREST = async (user: User, data: Blob | File, filename: str
     
     const bucketName = firebaseConfig.storageBucket;
     const safeFileName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const objectPath = `users/${user.uid}/uploads/${safeFileName}`;
+    const uniquePrefix = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const objectPath = `users/${user.uid}/uploads/${uniquePrefix}_${safeFileName}`;
     const encodedPath = encodeURIComponent(objectPath);
     
     const uploadEndpoint = `https://firebasestorage.googleapis.com/v0/b/${bucketName}/o?name=${encodedPath}`;
@@ -199,7 +201,12 @@ const splitUpdateData = (data: Partial<CloudSession>) => {
 
 // --- Firestore Session Functions ---
 
-export const createCloudSession = async (user: User, fileName: string, fileUrl: string): Promise<string> => {
+export const createCloudSession = async (
+  user: User,
+  fileName: string,
+  fileUrl: string,
+  parentId: string | null = null
+): Promise<string> => {
   console.group("📝 [Firestore] Session Creation");
   try {
     const sessionsRef = collection(db, "sessions");
@@ -215,7 +222,7 @@ export const createCloudSession = async (user: User, fileName: string, fileUrl: 
       sortIndex: Date.now(),
       updatedAt: now,
       type: 'file', // Default
-      parentId: null // Default root
+      parentId
     };
 
     const heavyData = {
@@ -285,7 +292,29 @@ export const readSkimSessions = async (sessionId: string): Promise<PersistedSkim
         const skimsRef = collection(db, "sessions", sessionId, "skims");
         const snapshot = await getDocs(skimsRef);
         if (snapshot.empty) return [];
-        return snapshot.docs.map(d => d.data() as PersistedSkimSession);
+        return await Promise.all(snapshot.docs.map(async (skimDoc) => {
+            const session = skimDoc.data() as PersistedSkimSession;
+            const deck = session.recordDeck;
+            if (!deck || deck.orderedCardIds.length === 0) return session;
+
+            const cardsSnapshot = await getDocs(collection(skimDoc.ref, 'cards'));
+            if (cardsSnapshot.empty) return session;
+            const cards = { ...deck.cards };
+            cardsSnapshot.docs.forEach((cardDoc) => {
+                const stored = cardDoc.data() as {
+                    messages?: PersistedSkimSession['messages'];
+                    digest?: typeof cards[string]['digest'];
+                };
+                const existing = cards[cardDoc.id];
+                if (!existing) return;
+                cards[cardDoc.id] = {
+                    ...existing,
+                    messages: stored.messages ?? existing.messages ?? [],
+                    ...(stored.digest ? { digest: stored.digest } : {}),
+                };
+            });
+            return { ...session, recordDeck: { ...deck, cards } };
+        }));
     } catch (error) {
         console.error("[Firestore] Read Skims Failed:", error);
         return [];
@@ -298,10 +327,64 @@ export const readSkimSessions = async (sessionId: string): Promise<PersistedSkim
  * 删除清理留待「删除略读 session」功能落地时一并处理（见 deleteDoc 待办）。
  */
 export const writeSkimSessions = async (sessionId: string, skimSessions: PersistedSkimSession[]) => {
-    const batch = writeBatch(db);
     for (const s of skimSessions) {
+        const batch = writeBatch(db);
         const ref = doc(db, "sessions", sessionId, "skims", s.id);
-        batch.set(ref, JSON.parse(JSON.stringify(s)));   // 清掉 undefined，Firestore 不接受
+        const deck = s.recordDeck;
+        const rootSession = deck
+            ? {
+                ...s,
+                recordDeck: {
+                    ...deck,
+                    cards: Object.fromEntries(Object.entries(deck.cards).map(([cardId, card]) => [
+                        cardId,
+                        { ...card, messages: [], digest: undefined },
+                    ])),
+                },
+            }
+            : s;
+        batch.set(ref, JSON.parse(JSON.stringify(rootSession)));
+
+        const cardsRef = collection(ref, 'cards');
+        const existingCards = await getDocs(cardsRef);
+        const desiredCardIds = new Set(deck?.orderedCardIds ?? []);
+        existingCards.docs.forEach((cardDoc) => {
+            if (!desiredCardIds.has(cardDoc.id)) batch.delete(cardDoc.ref);
+        });
+        if (deck) {
+            deck.orderedCardIds.forEach((cardId) => {
+                const card = deck.cards[cardId];
+                if (!card) return;
+                batch.set(doc(cardsRef, cardId), JSON.parse(JSON.stringify({
+                    messages: card.messages ?? [],
+                    digest: card.digest ?? null,
+                    updatedAt: Date.now(),
+                })));
+            });
+        }
+        await batch.commit();
+    }
+};
+
+/** 永久删除一条领读会话及其唱片对话子文档；不会触碰同文件下的其他领读或私教。 */
+export const deleteSkimSessionFromCloud = async (sessionId: string, skimId: string) => {
+    const ref = doc(db, "sessions", sessionId, "skims", skimId);
+    const legacyRef = doc(db, "sessions", sessionId, "data", "main");
+    const [cardsSnapshot, legacySnapshot] = await Promise.all([
+        getDocs(collection(ref, 'cards')),
+        getDoc(legacyRef),
+    ]);
+    const batch = writeBatch(db);
+    cardsSnapshot.docs.forEach((cardDoc) => batch.delete(cardDoc.ref));
+    batch.delete(ref);
+    if (legacySnapshot.exists()) {
+        const legacySessions = legacySnapshot.data().skimSessions;
+        if (Array.isArray(legacySessions)) {
+            const remaining = legacySessions.filter((session: PersistedSkimSession) => session?.id !== skimId);
+            batch.update(legacyRef, remaining.length > 0
+                ? { skimSessions: remaining }
+                : { skimSessions: deleteField() });
+        }
     }
     await batch.commit();
 };
@@ -531,6 +614,74 @@ export const deleteTutorSessionFromCloud = async (userId: string, sessionId: str
     }
 };
 
+// --- Joint Review Packs (Dashboard multi-material review) ---
+
+export const createJointReviewPack = async (
+    user: User,
+    input: { title: string; materials: JointReviewMaterial[] }
+): Promise<JointReviewPack> => {
+    try {
+        const now = Date.now();
+        const packsRef = collection(db, "users", user.uid, "jointReviewPacks");
+        const payload = {
+            userId: user.uid,
+            title: input.title.trim(),
+            materials: input.materials,
+            summaryMarkdown: '',
+            guideMessages: [],
+            examPrepMarkdown: '',
+            createdAt: now,
+            updatedAt: now,
+            generatedAt: null,
+            examPrepGeneratedAt: null,
+        };
+        const ref = await addDoc(packsRef, payload);
+        return { id: ref.id, ...payload };
+    } catch (e) {
+        console.error("Create Joint Review Pack Failed", e);
+        throw e;
+    }
+};
+
+export const getJointReviewPacks = async (user: User): Promise<JointReviewPack[]> => {
+    try {
+        const packsRef = collection(db, "users", user.uid, "jointReviewPacks");
+        const q = query(packsRef, orderBy("updatedAt", "desc"));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(d => ({ id: d.id, ...d.data() } as JointReviewPack));
+    } catch (e) {
+        console.error("Get Joint Review Packs Failed", e);
+        return [];
+    }
+};
+
+export const updateJointReviewPack = async (
+    user: User,
+    packId: string,
+    partial: Partial<Pick<JointReviewPack, 'title' | 'materials' | 'summaryMarkdown' | 'guideMessages' | 'examPrepMarkdown' | 'generatedAt' | 'examPrepGeneratedAt'>>
+): Promise<void> => {
+    try {
+        const ref = doc(db, "users", user.uid, "jointReviewPacks", packId);
+        await updateDoc(ref, {
+            ...partial,
+            updatedAt: Date.now(),
+        });
+    } catch (e) {
+        console.error("Update Joint Review Pack Failed", e);
+        throw e;
+    }
+};
+
+export const deleteJointReviewPack = async (userId: string, packId: string): Promise<void> => {
+    try {
+        const ref = doc(db, "users", userId, "jointReviewPacks", packId);
+        await deleteDoc(ref);
+    } catch (e) {
+        console.error("Delete Joint Review Pack Failed", e);
+        throw e;
+    }
+};
+
 // --- Exam Hub (exams / examMaterials / dailyPlanCache) ---
 
 const examAtToMillis = (v: unknown): number | null => {
@@ -732,6 +883,25 @@ export const deleteDailyPlanCache = async (user: User, dateStr: string): Promise
     } catch (e) {
         console.error('deleteDailyPlanCache failed', e);
     }
+};
+
+export const saveTinyStudyEntrySessionToCloud = async (
+    user: User,
+    session: TinyStudyEntrySession
+): Promise<void> => {
+    const ref = doc(db, 'users', user.uid, 'tinyStudyEntrySessions', session.cloudSessionId);
+    const payload = JSON.parse(JSON.stringify({ ...session, userId: user.uid }));
+    await setDoc(ref, payload);
+};
+
+export const getTinyStudyEntrySessionFromCloud = async (
+    user: User,
+    cloudSessionId: string
+): Promise<TinyStudyEntrySession | null> => {
+    const ref = doc(db, 'users', user.uid, 'tinyStudyEntrySessions', cloudSessionId);
+    const snap = await getDoc(ref);
+    if (!snap.exists()) return null;
+    return snap.data() as TinyStudyEntrySession;
 };
 
 export { auth, db };

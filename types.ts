@@ -1,4 +1,17 @@
 
+/** 全局应用语言。只控制固定界面与未来生成内容，不改写任何既有学习数据。 */
+export type AppLanguage = 'zh-CN' | 'en';
+
+export interface AppPreferences {
+  version: 1;
+  language: AppLanguage;
+  updatedAt: number;
+}
+
+export interface GenerationLocaleContext {
+  outputLanguage: AppLanguage;
+}
+
 export interface Slide {
   id: string;
   imageUrl: string;
@@ -14,7 +27,86 @@ export interface ExamChunkCitationSnapshot {
   chunks: Record<string, { materialLinkId: string; page: number }>;
 }
 
+export type SkimReadingAnchorKind =
+  | 'module'
+  | 'part'
+  | 'section'
+  | 'stage'
+  | 'naturalPart'
+  | 'paragraphGroup';
+
+/**
+ * 领读目录锚点只绑定“正式推进”产生的助手消息。
+ * 路线负责规划下一步，锚点负责把用户带回已经读过的那条消息。
+ */
+export interface SkimReadingMessageAnchor {
+  id: string;
+  kind: SkimReadingAnchorKind;
+  index: number;
+  parentIndex?: number;
+  title: string;
+  pageLabel?: string;
+  routeNodeId?: string;
+}
+
+/** 普通 Lecture 整段式/分段唱片式领读的讲解深度；旧会话缺省为 normal。 */
+export type SkimExplanationDepth = 'simple' | 'normal';
+export type SkimExplanationStyle = 'standard' | 'interesting';
+export type SkimExplanationVariantKey =
+  | 'simple-standard'
+  | 'simple-interesting'
+  | 'normal-standard'
+  | 'normal-interesting';
+export type SkimExplanationSpineKind = 'concept' | 'relationship' | 'mechanism' | 'evidence' | 'boundary' | 'example';
+
+/** 一条讲解所有版本共用、不可随表达方式变化的内容骨架。 */
+export interface SkimExplanationSpineItem {
+  id: string;
+  titleZh: string;
+  titleEn?: string;
+  kind: SkimExplanationSpineKind;
+  summary: string;
+  pageRefs: number[];
+}
+
+export interface SkimExplanationVariant {
+  key: SkimExplanationVariantKey;
+  depth: SkimExplanationDepth;
+  style: SkimExplanationStyle;
+  messageMarkdown: string;
+  coveredSpineItemIds: string[];
+  deferredSpineItemIds: string[];
+  pageRefs: number[];
+  createdAt: number;
+}
+
+/** 仅挂在适用的 model 消息上；其他消息没有此字段，保持原行为。 */
+export interface SkimExplanationState {
+  version: 1;
+  activeVariantKey: SkimExplanationVariantKey;
+  spineItems: SkimExplanationSpineItem[];
+  variants: Partial<Record<SkimExplanationVariantKey, SkimExplanationVariant>>;
+  sourcePageRefs: number[];
+}
+
+export type SkimModuleTakeawayStatus = 'explained' | 'deferred';
+
+/** “看要点”临时生成的展示项；不参与掌握、证据或进度计算。 */
+export interface SkimModuleTakeaway {
+  id: string;
+  titleZh: string;
+  titleEn?: string;
+  plainLanguage: string;
+  connection: string;
+  pageRefs: number[];
+  status: SkimModuleTakeawayStatus;
+  /** 对应连接式讲解骨架，或唱片式当前消息级来源；旧整段式消息可能为空。 */
+  sourceIds: string[];
+}
+
 export interface ChatMessage {
+  /** 新消息使用稳定 id；旧持久化消息缺省时由界面用 timestamp/index 兼容。 */
+  id?: string;
   role: 'user' | 'model';
   text: string;
   /** @deprecated 用 images 数组,本字段仅为历史数据兼容保留;读取请走 getMessageImages() */
@@ -22,9 +114,23 @@ export interface ChatMessage {
   /** 新写入路径只填这个字段;读取请走 getMessageImages() 兼容旧 image */
   images?: string[];
   timestamp: number;
+  /** 仅记录生成当时的语言；旧消息缺省时原样显示。 */
+  generatedLanguage?: AppLanguage;
   isQuiz?: boolean; // Flag for Phase 2 intercepts
+  /** 领读：标记该助手回复由正式开始/继续产生，即使它没有输出可解析的标题。 */
+  skimReadingFormal?: boolean;
+  /** 领读：本条正式讲解在“领读目录”中的一个或多个可跳转位置。 */
+  skimReadingAnchors?: SkimReadingMessageAnchor[];
   /** 备考台：仅 model 消息；有快照时优先按 chunk 协议解析链钮 */
   examChunkCitationSnapshot?: ExamChunkCitationSnapshot;
+  /** 案件式领读：本条回复关联的应用内页码，可点击跳回原页。 */
+  casePageRefs?: number[];
+  /** 普通 Lecture 整段式/分段唱片式领读：同一卡片内的连接式讲解版本。 */
+  skimExplanation?: SkimExplanationState;
+  /** 普通领读“看要点”触发的一次性提取题；仅用于避免把题面再次当成学习内容。 */
+  skimKnowledgeExtraction?: boolean;
+  /** 用户回答临时提取题后的即时核对；不应被再次整理成学习要点。 */
+  skimKnowledgeExtractionFeedback?: boolean;
 }
 
 export interface ChatCache {
@@ -163,9 +269,16 @@ export interface MindMapEvaluateResult {
 export interface LogicAtom {
   id: string;
   kcId: string;
+  /** 课程材料中的原始术语/命题标题，通常保留英文 */
   label: string;
   /** 一句说明，便于 UI 与后续对齐讲义 */
   description: string;
+  /** 面向学习者的中文标题；旧 bundle 可能没有 */
+  labelZh?: string;
+  /** 面向学习者的中文解释；旧 bundle 可能没有 */
+  descriptionZh?: string;
+  /** 直接支持该原子的原 PDF 页码；旧 bundle 回退到 KC 页码 */
+  sourcePages?: number[];
 }
 
 /** 每个 KC 下原子覆盖：atomId -> 是否已在教学对话中被判定覆盖（M2 可全 false） */
@@ -176,7 +289,14 @@ export interface LSAPKnowledgeComponent {
   id: string;
   concept: string;
   definition: string;
+  /** 中文概念名与解释；旧 bundle 可能没有 */
+  conceptZh?: string;
+  definitionZh?: string;
   sourcePages: number[];
+  /** 该 KC 最核心的证据页；比 sourcePages 更适合用来核查页码 */
+  anchorPages?: number[];
+  /** 只作背景/承接的关联页，不应被当成主证据页 */
+  relatedPages?: number[];
   sourceExcerpt?: string;
   /** 复习重点（一句话，用于复习模式清单展示） */
   reviewFocus?: string;
@@ -208,6 +328,18 @@ export interface LSAPContentMap {
   sourceKey: string;
   kcs: LSAPKnowledgeComponent[];
   createdAt: number;
+}
+
+/** 备考工作台当前复习块边界：给模型看的“主回答范围”。 */
+export interface ExamReviewScope {
+  title: string;
+  materialLinkId: string | null;
+  materialTitle: string;
+  pageRange: { start: number; end: number } | null;
+  /** 由 KC 证据页聚合出的检索窗口；不连续页码不会被揉成一个大范围 */
+  pageWindows?: Array<{ start: number; end: number }>;
+  pageLabel?: string | null;
+  sourceKcs: LSAPKnowledgeComponent[];
 }
 
 /** 单轮探测记录（证据链） */
@@ -262,6 +394,8 @@ export interface SavedArtifactBase {
   title: string;
   createdAt: number;
   sourceLabel?: string;
+  /** 新生成内容的语言；旧数据缺省时按原文展示，不触发迁移。 */
+  generatedLanguage?: AppLanguage;
 }
 
 export type SavedArtifact =
@@ -562,6 +696,131 @@ export interface PersonaSettings {
 }
 
 // --- 上课模式（路径 A：录音 + 转写 + 课后整理）---
+export type LectureAudioStatus = 'recording' | 'ready' | 'interrupted' | 'error';
+export type LectureAudioSource = 'microphone' | 'upload';
+export type LectureTranscriptionStatus = 'idle' | 'transcribing' | 'ready' | 'error';
+export type LectureAudioQualityRating = 'good' | 'fair' | 'poor';
+export type LectureRealtimeStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'error';
+export type LectureTranslationStatus = 'pending' | 'ready' | 'error';
+
+export interface LectureRealtimeLine {
+  id: string;
+  text: string;
+  translation?: string;
+  timestamp: number;
+  translationStatus: LectureTranslationStatus;
+}
+
+export interface LectureAudioQuality {
+  rating: LectureAudioQualityRating;
+  score: number;
+  message: string;
+  metrics?: {
+    averageLogprob?: number;
+    languageProbability?: number;
+    speechCoverage?: number;
+    speakerCount?: number;
+  };
+}
+
+export interface LectureTranscriptSegment {
+  id: string;
+  speakerId: string;
+  speakerLabel: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
+export interface LectureNoteEvidence {
+  segmentId: string;
+  speakerLabel: string;
+  startMs: number;
+  endMs: number;
+  quote: string;
+}
+
+export interface LectureNoteSection {
+  title: string;
+  summary: string;
+  evidence: LectureNoteEvidence[];
+}
+
+export interface LectureNoteKeyPoint {
+  title: string;
+  explanation: string;
+  evidence: LectureNoteEvidence[];
+}
+
+export interface LectureNoteQuestionAnswer {
+  question: string;
+  answer: string;
+  evidence: LectureNoteEvidence[];
+}
+
+export interface LectureNoteTerm {
+  term: string;
+  explanation: string;
+  evidence: LectureNoteEvidence[];
+}
+
+export interface LectureNoteUncertainMoment {
+  description: string;
+  evidence: LectureNoteEvidence[];
+}
+
+export type LectureTeacherSignalKind =
+  | 'emphasis'
+  | 'assignment'
+  | 'exam'
+  | 'deadline'
+  | 'correction'
+  | 'limitation';
+
+export interface LectureTeacherSignal extends LectureNoteKeyPoint {
+  kind: LectureTeacherSignalKind;
+}
+
+export interface LectureStructuredNotes {
+  version: 3 | 4;
+  generatedAt: number;
+  overview: string;
+  /** V4: ten-minute catch-up route, grounded in transcript evidence. */
+  catchUp?: LectureNoteSection[];
+  outline: LectureNoteSection[];
+  keyPoints: LectureNoteKeyPoint[];
+  /** V4: material the teacher added, reframed or corrected beyond the linked slides. */
+  teacherAdditions?: LectureNoteKeyPoint[];
+  /** V4: examples and demonstrations used during class. */
+  examples?: LectureNoteKeyPoint[];
+  /** V4: explicit signals only; never inferred exam predictions. */
+  teacherSignals?: LectureTeacherSignal[];
+  questions: LectureNoteQuestionAnswer[];
+  terms: LectureNoteTerm[];
+  uncertainMoments: LectureNoteUncertainMoment[];
+  /** True only when the organizer received a safely matched slide text source. */
+  comparedWithSlides?: boolean;
+}
+
+export interface LectureAudioRecording {
+  id: string;
+  source: LectureAudioSource;
+  createdAt: number;
+  endedAt?: number;
+  durationMs?: number;
+  mimeType: string;
+  sizeBytes: number;
+  chunkCount: number;
+  status: LectureAudioStatus;
+  originalFileName?: string;
+}
+
+/** V4：录音期间真实发生的课件翻页事件，用于把转写证据定位回课件。 */
+export interface LecturePageVisit {
+  pageNumber: number;
+  elapsedMs: number;
+}
+
 export interface LectureRecord {
   id: string;
   startedAt: number;
@@ -570,8 +829,34 @@ export interface LectureRecord {
   transcript: { text: string; timestamp: number }[];
   /** AI 整理结果（讲课逻辑、重点、风格），可选持久化 */
   organizedSummary?: string;
+  /** V3 课堂复习笔记。每条内容只能引用真实转写段落。 */
+  structuredNotes?: LectureStructuredNotes;
   /** 自定义名称（可选，默认使用时间） */
   name?: string;
+  /** 原始音频保存在 IndexedDB 中，课堂记录只持有轻量索引。 */
+  audioRecordingId?: string;
+  audioSource?: LectureAudioSource;
+  audioStatus?: LectureAudioStatus;
+  audioMimeType?: string;
+  audioSizeBytes?: number;
+  audioChunkCount?: number;
+  audioDurationMs?: number;
+  transcriptionStatus?: LectureTranscriptionStatus;
+  transcriptionError?: string;
+  transcriptionProvider?: 'elevenlabs-scribe-v2';
+  transcriptionLanguageCode?: string;
+  transcriptionLanguageProbability?: number;
+  transcriptSegments?: LectureTranscriptSegment[];
+  transcribedAt?: number;
+  audioQuality?: LectureAudioQuality;
+  transcriptionKeyterms?: string[];
+  transcriptionSpeakerCount?: number;
+  /** V4：直播录音开始时关联的课件。上传的独立音频可以没有这些字段。 */
+  sourceFileName?: string;
+  sourceFileHash?: string;
+  sourceStartedPage?: number;
+  /** V4：按录音经过时间记录的翻页轨迹。 */
+  pageVisits?: LecturePageVisit[];
 }
 
 // --- PERSISTENCE TYPES ---
@@ -579,12 +864,238 @@ export interface LectureRecord {
 /** 略读内容类型（阶段一 UI 三选一；阶段二提升为导出类型并入持久化）。缺省视为 'lecture'。 */
 export type SkimContentType = 'lecture' | 'paper' | 'article';
 
+export type SkimAuxiliaryMaterialRole = 'reading' | 'paper' | 'article' | 'textbook' | 'other';
+export type SkimAuxiliaryUseMode = 'necessary' | 'active';
+
+export interface SkimAuxiliaryMaterial {
+  cloudSessionId: string;
+  fileName: string;
+  role: SkimAuxiliaryMaterialRole;
+  useMode?: SkimAuxiliaryUseMode;
+}
+
+export type SkimReadingRouteNodeKind =
+  | 'module'
+  | 'part'
+  | 'section'
+  | 'naturalPart'
+  | 'stage'
+  | 'paragraphGroup';
+
+export interface SkimReadingRouteNode {
+  id: string;
+  kind: SkimReadingRouteNodeKind;
+  index: number;
+  title: string;
+  pageStart?: number;
+  pageEnd?: number;
+  pageLabel?: string;
+  summary?: string;
+  children?: SkimReadingRouteNode[];
+}
+
+export interface SkimReadingRoute {
+  id: string;
+  version: 1;
+  kind: SkimContentType;
+  title: string;
+  sourceLabel?: string;
+  generatedAt: number;
+  pageRangeLabel?: string;
+  moduleCount?: number;
+  skimPace?: 'module' | 'part';
+  nodes: SkimReadingRouteNode[];
+}
+
+/** Lecture 领读的呈现方式。旧会话缺省为 continuous。 */
+export type SkimStudyStyle = 'continuous' | 'records' | 'case';
+
+export type LectureCaseAnalysisStatus =
+  | 'idle'
+  | 'analyzing'
+  | 'planning'
+  | 'suitable'
+  | 'unsuitable'
+  | 'error';
+
+export type LectureCasePageDispositionKind =
+  | 'substantive'
+  | 'duplicate'
+  | 'transition'
+  | 'title'
+  | 'visual_only';
+
+export type LectureCaseUnitKind =
+  | 'concept'
+  | 'claim'
+  | 'evidence'
+  | 'method'
+  | 'critique'
+  | 'example'
+  | 'conclusion'
+  | 'context';
+
+export type LectureCaseCoverageLevel =
+  | 'unseen'
+  | 'introduced'
+  | 'engaged'
+  | 'verified'
+  | 'needs_review';
+
+export interface LectureCasePageDisposition {
+  page: number;
+  kind: LectureCasePageDispositionKind;
+  unitIds: string[];
+  reason: string;
+}
+
+export interface LectureCaseContentUnit {
+  id: string;
+  title: string;
+  kind: LectureCaseUnitKind;
+  summary: string;
+  pageRefs: number[];
+  importance: 'core' | 'supporting' | 'context';
+  narrativeRole: 'spine' | 'toolkit' | 'evidence' | 'supplement';
+}
+
+export interface LectureCaseManifest {
+  version: 1;
+  pageStart: number;
+  pageEnd: number;
+  pages: LectureCasePageDisposition[];
+  units: LectureCaseContentUnit[];
+}
+
+export interface LectureCaseEpisode {
+  id: string;
+  index: number;
+  title: string;
+  role: string;
+  guidingQuestion: string;
+  pageRefs: number[];
+  unitIds: string[];
+  prerequisiteEpisodeIds: string[];
+  openingPrompt: string;
+  bridgeToNext?: string;
+  status: SkimRecordStatus;
+  lastPage: number;
+  messages: ChatMessage[];
+  unresolvedQuestions: string[];
+  readyToComplete?: boolean;
+}
+
+export interface LectureCasePlan {
+  version: 1;
+  caseTitle: string;
+  centralQuestion: string;
+  spineSummary: string;
+  episodes: LectureCaseEpisode[];
+}
+
+export interface LectureCaseSuitabilityReport {
+  suitabilityScore: number;
+  mappableRate: number;
+  centralQuestion: string;
+  fitReasons: string[];
+  unsuitableReasons: string[];
+  detectedClaims: string[];
+  detectedEvidenceGroups: string[];
+  episodePreviews: Array<{ title: string; role: string; pageRefs: number[] }>;
+  recommendedFallback: 'continuous' | 'records';
+}
+
+export interface LectureCaseUnitProgress {
+  level: LectureCaseCoverageLevel;
+  selfReportedUnderstood?: boolean;
+  evidence?: string;
+  updatedAt: number;
+}
+
+export interface LectureCaseProgress {
+  units: Record<string, LectureCaseUnitProgress>;
+}
+
+export interface LectureCaseLearningState {
+  version: 1;
+  analysisVersion: string;
+  sourceSignature: string;
+  pageStart: number;
+  pageEnd: number;
+  status: LectureCaseAnalysisStatus;
+  report?: LectureCaseSuitabilityReport;
+  manifest?: LectureCaseManifest;
+  plan?: LectureCasePlan;
+  progress?: LectureCaseProgress;
+  activeEpisodeId?: string | null;
+  errorMessage?: string;
+}
+
+export interface LectureCaseCoverageUpdate {
+  unitId: string;
+  level: Exclude<LectureCaseCoverageLevel, 'unseen'>;
+  evidence?: string;
+  selfReportedUnderstood?: boolean;
+}
+
+export interface LectureCaseTurnResult {
+  messageMarkdown: string;
+  focusPages: number[];
+  interactionKind: 'prediction' | 'judgment' | 'distinction' | 'reconstruction' | 'reveal' | 'none';
+  coverageUpdates: LectureCaseCoverageUpdate[];
+  unresolvedQuestions: string[];
+  episodeReadyToComplete: boolean;
+}
+
+export type SkimRecordStatus = 'not_started' | 'in_progress' | 'completed';
+export type SkimRecordDeckView = 'shelf' | 'reader';
+
+/** 离开唱片时生成的轻量上下文，供下次续读和跨唱片关联使用。 */
+export interface SkimRecordDigest {
+  clarified: string[];
+  unresolved: string[];
+  updatedAt: number;
+}
+
+export interface SkimRecordCardState {
+  id: string;
+  routeNodeId: string;
+  parentRouteNodeId?: string;
+  moduleIndex: number;
+  partIndex?: number;
+  moduleTitle: string;
+  title: string;
+  summary: string;
+  pageStart: number;
+  pageEnd: number;
+  pageLabel: string;
+  status: SkimRecordStatus;
+  lastPage: number;
+  lastOpenedAt?: number;
+  completedAt?: number;
+  messages: ChatMessage[];
+  digest?: SkimRecordDigest;
+}
+
+export interface SkimRecordDeck {
+  version: 1;
+  routeId: string;
+  createdAt: number;
+  orderedCardIds: string[];
+  cards: Record<string, SkimRecordCardState>;
+  activeCardId?: string | null;
+  selectedModuleIndex?: number | null;
+  view: SkimRecordDeckView;
+}
+
 /**
  * 略读「一段会话」的本地持久化形态（阶段二新增，仅本地 IndexedDB；云端 CloudSession 不动）。
  * 与 App 运行时的 SkimSession 同形——独立列出，避免持久化层耦合 App 内部类型。
  */
 export interface PersistedSkimSession {
   id: string;
+  /** 稳定的用户可编辑标签名；旧会话缺省时按恢复时的位置补“领读 N” */
+  title?: string;
   studyMap: StudyMap | null;
   messages: ChatMessage[];
   stage: SkimStage;
@@ -599,6 +1110,20 @@ export interface PersistedSkimSession {
   skipDiagnosis: boolean;
   /** 内容类型（阶段二新增，可选）。旧 session 无此字段 → 读取时按 'lecture' 兜底。 */
   contentType?: SkimContentType;
+  /** 学习页领读：可选联合一个云端辅助 PDF；AI 只在相关时作为补充引用。 */
+  auxiliaryMaterial?: SkimAuxiliaryMaterial | null;
+  /** V1：可导航主线的结构化路线。旧 session 无此字段 → 读取时按 null 兜底。 */
+  readingRoute?: SkimReadingRoute | null;
+  /** Lecture 专用：整段式或分段唱片式；旧数据缺省为整段式。 */
+  studyStyle?: SkimStudyStyle;
+  /** 普通 Lecture 整段式/分段唱片式领读的后续讲解深度；旧数据缺省为 normal。 */
+  explanationDepth?: SkimExplanationDepth;
+  /** 整段式领读独立保存的 PDF 停留页；旧数据缺省为第 1 页。 */
+  continuousLastPage?: number;
+  /** 唱片式路线、状态和各唱片轻量元数据。 */
+  recordDeck?: SkimRecordDeck | null;
+  /** Lecture 案件式领读：适配报告、完整内容账本、章节与学习证据。 */
+  caseLearning?: LectureCaseLearningState | null;
   /** paper/文章模式：AI 是否已讲过梗概（阶段四才真正写它，此处先占位存储）。 */
   briefingDone?: boolean;
 }
@@ -742,6 +1267,44 @@ export interface ProfileNotebookUpdateSuggestion {
   proposedNotebook: LearnerProfileNotebook;
 }
 
+export type TinyStudyEntryType = 'question' | 'experiment' | 'counterintuitive' | 'debate' | 'real_life';
+export type TinyStudyEntryStatus = 'unseen' | 'seen';
+export type TinyStudyEntryAction = 'start' | 'simpler' | 'interesting' | 'deeper';
+
+export interface TinyStudyEntryTurn {
+  id: string;
+  action: TinyStudyEntryAction;
+  text: string;
+  createdAt: number;
+}
+
+export interface TinyStudyEntry {
+  id: string;
+  type: TinyStudyEntryType;
+  title: string;
+  teaser: string;
+  pageStart: number;
+  pageEnd: number;
+  evidence: string;
+  status: TinyStudyEntryStatus;
+  turns: TinyStudyEntryTurn[];
+  lastReadAt?: number;
+  scrollTop?: number;
+}
+
+export interface TinyStudyEntrySession {
+  version: 1;
+  fingerprintVersion?: 2;
+  cloudSessionId: string;
+  fileName: string;
+  fileFingerprint: string;
+  documentSummary: string;
+  pageCount: number;
+  entries: TinyStudyEntry[];
+  activeEntryId?: string;
+  updatedAt: number;
+}
+
 // --- CLOUD SESSION TYPES ---
 export interface CloudSession {
   id: string;
@@ -792,6 +1355,29 @@ export interface CloudSession {
   pageComments?: PageCommentsCache;
   lsapContentMap?: LSAPContentMap;
   lsapState?: LSAPState;
+}
+
+export type JointReviewMaterialRole = 'lecture' | 'reading' | 'article' | 'textbook' | 'other';
+
+export interface JointReviewMaterial {
+  cloudSessionId: string;
+  fileName: string;
+  role: JointReviewMaterialRole;
+  sortIndex: number;
+}
+
+export interface JointReviewPack {
+  id: string;
+  userId: string;
+  title: string;
+  materials: JointReviewMaterial[];
+  summaryMarkdown?: string;
+  guideMessages?: ChatMessage[];
+  examPrepMarkdown?: string;
+  createdAt: number;
+  updatedAt: number;
+  generatedAt?: number | null;
+  examPrepGeneratedAt?: number | null;
 }
 
 // --- NEW: CALENDAR & MEMO TYPES ---
@@ -847,6 +1433,8 @@ export interface KCScopedTutorContext extends TutorScaffoldingContext {
   kcId: string;
   kcConcept: string;
   kcDefinition: string;
+  /** 当前 UI 锚定的复习块边界；主回答必须先锁在这里。 */
+  reviewScope?: ExamReviewScope | null;
   /** 当前 KC 下的原子；可为空数组 */
   atoms: LogicAtom[];
   probeMode: SocraticProbeMode;
@@ -868,6 +1456,8 @@ export interface KCScopedTutorContext extends TutorScaffoldingContext {
 export interface MultiKCScopedTutorContext extends TutorScaffoldingContext {
   /** 选中的 KC 列表（≥2 项） */
   kcs: LSAPKnowledgeComponent[];
+  /** 当前 UI 锚定的复习块边界；主回答必须先锁在这里。 */
+  reviewScope?: ExamReviewScope | null;
   /** 可选：上一轮模型推断的各 KC 缺失原子 id（按 kcId 分组） */
   gapAtomIdsByKcId?: Record<string, string[]>;
 }

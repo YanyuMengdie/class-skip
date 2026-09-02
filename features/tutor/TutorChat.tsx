@@ -3,7 +3,7 @@ import ReactMarkdown, { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { Send, Square, ImagePlus, X, MessageCircle } from 'lucide-react';
+import { Send, Square, ImagePlus, X, MessageCircle, PencilLine } from 'lucide-react';
 import type { ChatMessage, DocType } from '@/types';
 import { chatWithSkimAdaptiveTutor } from '@/services/geminiService';
 import { getMessageImages } from '@/lib/chat/messageUtils';
@@ -61,6 +61,8 @@ export interface TutorChatProps {
    * 缺省 '' = 纯对话（无文件 / 取不到）。
    */
   materialContent?: string;
+  currentPage?: number;
+  totalPages?: number;
 }
 
 export const TutorChat: React.FC<TutorChatProps> = ({
@@ -69,6 +71,8 @@ export const TutorChat: React.FC<TutorChatProps> = ({
   docType = 'STEM',
   onLoadingChange,
   materialContent = '',
+  currentPage,
+  totalPages,
 }) => {
   const [input, setInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
@@ -134,6 +138,39 @@ export const TutorChat: React.FC<TutorChatProps> = ({
     setIsChatLoading(false);
   };
 
+  /**
+   * 与领读模式对齐：从某条 user 消息起编辑并重发。
+   * 会丢弃这条消息以及之后的对话，把原文和图片回填到输入区。
+   */
+  const handleEditUserMessageAtIndex = (idx: number) => {
+    if (idx < 0 || idx >= messages.length || messages[idx].role !== 'user') return;
+
+    if (isChatLoading) {
+      handleStop();
+    }
+
+    const toDeleteCount = messages.length - idx;
+    if (toDeleteCount >= 2) {
+      if (!window.confirm(`将删除此后 ${toDeleteCount} 条对话，确定吗？`)) return;
+    }
+
+    const textToEdit = messages[idx].text;
+    const imagesToEdit = getMessageImages(messages[idx]);
+    setMessages((prev) => {
+      if (idx >= prev.length || prev[idx].role !== 'user') return prev;
+      return prev.slice(0, idx);
+    });
+    setInput(textToEdit);
+    setPendingImages(imagesToEdit);
+    requestAnimationFrame(() => {
+      if (chatInputRef.current) {
+        chatInputRef.current.focus();
+        chatInputRef.current.style.height = 'auto';
+        chatInputRef.current.style.height = `${chatInputRef.current.scrollHeight}px`;
+      }
+    });
+  };
+
   const handleSend = async () => {
     const trimmed = input.trim();
     // 🔴 放宽 guard：无文档也可发；有文字 OR 有待发图片即可。不要求文档内容。
@@ -172,6 +209,8 @@ export const TutorChat: React.FC<TutorChatProps> = ({
         undefined, // readingOptions：tutoring 模式零依赖
         abortController.signal,
         imagesToSend,
+        undefined,
+        { currentPage, totalPages },
       );
       if (abortController.signal.aborted || generationCancelledRef.current) return;
       setMessages((prev) => [...prev, { role: 'model', text: response, timestamp: Date.now() }]);
@@ -207,22 +246,35 @@ export const TutorChat: React.FC<TutorChatProps> = ({
             <div
               className={`relative max-w-[90%] px-4 py-3 text-sm shadow-sm transition-all ${
                 msg.role === 'user'
-                  ? 'bg-amber-100 text-amber-900 rounded-2xl rounded-tr-none'
+                  ? 'group bg-amber-100 text-amber-900 rounded-2xl rounded-tr-none'
                   : 'bg-stone-50 text-slate-700 border border-stone-100 rounded-2xl rounded-tl-none'
               }`}
             >
+              {msg.role === 'user' && (
+                <button
+                  type="button"
+                  title="编辑并重发"
+                  aria-label="编辑并重发"
+                  onClick={() => handleEditUserMessageAtIndex(idx)}
+                  className="absolute top-1.5 right-1.5 z-10 rounded-md bg-indigo-700/90 p-1.5 text-white opacity-0 shadow-sm transition-opacity hover:bg-indigo-800 group-hover:opacity-100 focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-white/60 min-h-[32px] min-w-[32px] flex items-center justify-center"
+                >
+                  <PencilLine className="w-3.5 h-3.5" aria-hidden />
+                </button>
+              )}
               {getMessageImages(msg).map((img, imgIdx) => (
                 <img key={imgIdx} src={img} alt="用户上传" className="max-w-full rounded-lg mb-2" />
               ))}
               {msg.text && (
-                <ReactMarkdown
-                  components={MarkdownComponents}
-                  remarkPlugins={[remarkMath, remarkGfm]}
-                  rehypePlugins={[rehypeKatex]}
-                  className={msg.role === 'user' ? 'prose-invert' : ''}
-                >
-                  {msg.text}
-                </ReactMarkdown>
+                <div data-preserve-language="true">
+                  <ReactMarkdown
+                    components={MarkdownComponents}
+                    remarkPlugins={[remarkMath, remarkGfm]}
+                    rehypePlugins={[rehypeKatex]}
+                    className={msg.role === 'user' ? 'prose-invert' : ''}
+                  >
+                    {msg.text}
+                  </ReactMarkdown>
+                </div>
               )}
             </div>
           </div>

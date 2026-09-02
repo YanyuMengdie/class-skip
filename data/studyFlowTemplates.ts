@@ -28,7 +28,7 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     scenarioKey: 'never_seen_d1_2_good',
     title: '冲刺 · 首次接触',
     steps: [
-      S(1, '略读建立地图', '快速过一遍结构', 'slide_skim', 'skim', 10, false, '时间紧且材料新，先抓整体再深入'),
+      S(1, '领读建立地图', '快速过一遍结构', 'slide_skim', 'skim', 10, false, '时间紧且材料新，先抓整体再深入'),
       S(2, '学习指南', '生成或阅读大纲', 'open_panel', 'studyGuide', 12, true, '用大纲把章节关系理清楚'),
       S(3, '考前预测摸底', '探测薄弱点', 'lsap_session', 'examPrediction', 15, false, '不知考什么时，用摸底找盲区'),
       S(4, '费曼一遍', '用自己的话讲清一个核心概念', 'open_panel', 'feynman', 10, true, '输出能暴露理解漏洞'),
@@ -41,7 +41,7 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     steps: [
       S(1, '学习指南', '建立学习路径', 'open_panel', 'studyGuide', 15, false, '有几天缓冲，先规划再学'),
       S(2, '术语精确定义', '扫清概念障碍', 'open_panel', 'terminology', 12, true, '概念不清时先对齐定义'),
-      S(3, '略读 + 精读交替', '按页推进', 'slide_skim', 'skim', 20, false, '新内容需要多看两遍幻灯'),
+      S(3, '领读 + 页面工具', '按块推进，卡住再放大当前页', 'slide_skim', 'skim', 20, false, '新内容需要先按结构走，再用页面工具处理难页'),
       S(4, '闪卡巩固', '记关键事实', 'open_panel', 'flashcard', 12, true, '碎片事实用闪卡最高效'),
       S(5, '思维导图', '串起章节', 'open_panel', 'mindMap', 10, true, '结构化能减轻记忆负担'),
     ],
@@ -52,7 +52,7 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     steps: [
       S(1, '5 分钟启动', '低压力进入状态', 'open_panel', 'fiveMin', 5, false, '大范围考试，从极小块开始降低抵触'),
       S(2, '学习指南', '定长线计划', 'open_panel', 'studyGuide', 15, false, '时间充裕，先画路线图'),
-      S(3, '略读', '先走完一遍', 'slide_skim', 'skim', 20, false, '第一遍只求有印象'),
+      S(3, '领读', '先走完一遍', 'slide_skim', 'skim', 20, false, '第一遍先按 module / part 建立理解'),
       S(4, '考前速览', '建立信心提要', 'open_panel', 'examSummary', 10, true, '整理一份自己的提要'),
     ],
   },
@@ -62,7 +62,7 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     steps: [
       S(1, '5 分钟', '轻松开始', 'open_panel', 'fiveMin', 5, true, '没有截止日时，用短任务破冰'),
       S(2, '学习指南', '了解要讲什么', 'open_panel', 'studyGuide', 12, false, '先知道全貌再决定深度'),
-      S(3, '精读当前页', '逐页 AI 讲解', 'slide_skim', 'deep', 15, false, '无考试时适合细嚼慢咽'),
+      S(3, '页面工具', '讲当前页或生成本页笔记', 'slide_skim', 'deep', 15, false, '只在关键页或卡点处局部放大'),
     ],
   },
   {
@@ -138,7 +138,7 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     steps: [
       S(1, '进入能量站', '先把心态拉稳', 'rest', 'break', 5, false, '降低紧张感，恢复可执行状态'),
       S(2, '学习指南', '确定今日一小段目标', 'open_panel', 'studyGuide', 10, false, '避免任务过大导致回避'),
-      S(3, '略读一遍', '建立材料全景', 'slide_skim', 'skim', 10, false, '先整体，后细节'),
+      S(3, '领读一遍', '建立材料全景', 'slide_skim', 'skim', 10, false, '先整体，后细节'),
       S(4, '闪卡预热', '巩固最核心概念', 'open_panel', 'flashcard', 8, true, '让大脑获得“我做得到”的反馈'),
     ],
   },
@@ -167,7 +167,7 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     steps: [
       S(1, '5 分钟启动', '快速进入学习状态', 'open_panel', 'fiveMin', 5, false, '把门槛降到最低'),
       S(2, '学习指南', '只定一个小目标', 'open_panel', 'studyGuide', 8, false, '减少决策消耗'),
-      S(3, '精读一小段', '聚焦一个概念', 'slide_skim', 'deep', 10, true, '小段高质量比长时低效率更好'),
+      S(3, '页面工具讲一小段', '聚焦一个概念', 'slide_skim', 'deep', 10, true, '小段高质量比长时低效率更好'),
     ],
   },
   {
@@ -186,7 +186,7 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     steps: [
       S(1, '1 分钟呼吸', '只做放松，不评判自己', 'rest', 'break', 1, false, '降低启动阻力，避免空转'),
       S(2, '5 分钟超小步', '打开材料即可', 'open_panel', 'fiveMin', 5, true, '微量行动建立惯性'),
-      S(3, '略读半章', '只看标题与图', 'slide_skim', 'skim', 8, true, '减量输入，避免过载'),
+      S(3, '领读半章', '只看标题与图', 'slide_skim', 'skim', 8, true, '减量输入，避免过载'),
       S(4, '考前速览（可选）', '若还有余力再看提要', 'open_panel', 'examSummary', 8, true, '远考阶段以建立印象为主'),
     ],
   },

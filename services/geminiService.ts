@@ -1,11 +1,23 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail, LayeredReadingRound3Unit, LayeredReadingQuestion, LayeredReadingQuestionGrade, SkimContentType, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessSession } from "@/types";
+import { GoogleGenAI, Type, type GenerateContentParameters } from "@google/genai";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, ExamReviewScope, LayeredReadingModule, LayeredReadingRound2Branch, LayeredReadingRound3Detail, LayeredReadingRound3Unit, LayeredReadingQuestion, LayeredReadingQuestionGrade, SkimContentType, SkimAuxiliaryMaterialRole, SkimAuxiliaryUseMode, SkimReadingRoute, SkimReadingRouteNode, SkimExplanationDepth, SkimExplanationStyle, SkimExplanationState, SkimExplanationSpineItem, SkimModuleTakeaway, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessSession, JointReviewMaterialRole, LectureStructuredNotes, LectureTranscriptSegment, LectureNoteEvidence, LectureTeacherSignalKind, TinyStudyEntry, TinyStudyEntryAction, TinyStudyEntryTurn, TinyStudyEntryType, LectureCaseManifest, LectureCaseSuitabilityReport, LectureCasePlan, LectureCaseEpisode, LectureCaseProgress, LectureCaseTurnResult, LectureCasePageDisposition, LectureCaseContentUnit } from "@/types";
 import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProfiles";
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/lib/exam/scaffoldingClassifier";
 import { CLASSIFIER_PROMPT, STEM_SYSTEM_PROMPT, HUMANITIES_SYSTEM_PROMPT, PAPER_COMPANION_PROMPT, ARTICLE_COMPANION_PROMPT } from "@/lib/prompts/systemPrompts";
 import { getMessageImages } from "@/lib/chat/messageUtils";
+import {
+  type SkimExplanationTurnDraft,
+  type SkimExplanationVariantDraft,
+  validateSkimExplanationTurnDraft,
+  validateSkimExplanationVariantDraft,
+} from "@/features/reader/skim/skimExplanation";
+import {
+  buildDisplayedSkimTranscript,
+  collectSkimTakeawaySources,
+  normalizeSkimTakeawayDrafts,
+  type SkimTakeawayModelDraft,
+} from "@/features/reader/skim/skimTakeaways";
 import {
   LAYERED_READING_SYSTEM_PROMPT,
   buildLayeredModuleGenPrompt,
@@ -18,6 +30,16 @@ import {
   buildLayeredQuestionRound3Prompt,
   buildLayeredQuestionGradingPrompt,
 } from "@/lib/prompts/layeredReadingPrompts";
+import type {
+  ExamGlobalChatTurn,
+  ExamGlobalCitation,
+  ExamGlobalMaterialConnection,
+  ExamGlobalMaterialManifest,
+  ExamGlobalQuiz,
+  ExamGlobalQuizFeedback,
+  ExamGlobalQuizQuestion,
+} from '@/features/exam/lib/examGlobalChat';
+import { getAIOutputLanguageInstruction, getCurrentAppLanguage, localizeText } from '@/shared/i18n/appLanguage';
 
 let aiClient: GoogleGenAI | null = null;
 
@@ -30,9 +52,53 @@ const getAIClient = (): GoogleGenAI => {
   return aiClient;
 };
 
+const appendOutputLanguageInstruction = (existing: unknown, instruction: string): unknown => {
+  if (!existing) return instruction;
+  if (typeof existing === 'string') return [existing, instruction];
+  if (Array.isArray(existing)) return [...existing, instruction];
+  if (typeof existing === 'object' && existing !== null && Array.isArray((existing as { parts?: unknown[] }).parts)) {
+    const content = existing as { parts: unknown[] } & Record<string, unknown>;
+    return { ...content, parts: [...content.parts, { text: instruction }] };
+  }
+  return [existing, instruction];
+};
+
+/**
+ * Every learner-visible Gemini call in this service passes this single gateway.
+ * The selected language is captured when the request starts, so changing the
+ * setting never mutates a response that is already in flight.
+ */
+export const withCurrentOutputLanguage = (params: GenerateContentParameters): GenerateContentParameters => {
+  const requestLanguage = getCurrentAppLanguage();
+  return {
+    ...params,
+    config: {
+      ...(params.config ?? {}),
+      systemInstruction: appendOutputLanguageInstruction(
+        params.config?.systemInstruction,
+        getAIOutputLanguageInstruction(requestLanguage),
+      ) as GenerateContentParameters['config'] extends { systemInstruction?: infer T } ? T : never,
+    },
+  };
+};
+
 const ai = new Proxy({} as GoogleGenAI, {
   get(_target, prop: keyof GoogleGenAI) {
-    return getAIClient()[prop];
+    const client = getAIClient();
+    if (prop !== 'models') {
+      const value = (client as unknown as Record<PropertyKey, unknown>)[prop];
+      return typeof value === 'function' ? value.bind(client) : value;
+    }
+    const models = client.models;
+    return new Proxy(models as object, {
+      get(target, modelProp) {
+        if (modelProp === 'generateContent') {
+          return (params: GenerateContentParameters) => models.generateContent(withCurrentOutputLanguage(params));
+        }
+        const value = Reflect.get(target, modelProp);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
   },
 });
 
@@ -41,11 +107,17 @@ export interface TaskHugResponse {
   steps: string[];
 }
 
-const DEFAULT_ERROR_SCRIPT = [
-    "(鞠躬) 对不起...",
-    "可能是因为信号不好，我无法读取这份文件。",
-    "请尝试重新上传一下吧！"
-];
+const getDefaultErrorScript = () => getCurrentAppLanguage() === 'en'
+  ? [
+      '(bows) Sorry...',
+      'The connection may be unstable, so I could not read this file.',
+      'Please try uploading it again.',
+    ]
+  : [
+      '(鞠躬) 对不起...',
+      '可能是因为信号不好，我无法读取这份文件。',
+      '请尝试重新上传一下吧！',
+    ];
 
 /**
  * Helper to construct the content part for Gemini.
@@ -112,6 +184,8 @@ export interface GenerateLogicAtomsForContentMapOptions {
   maxDocChars?: number;
   /** true：prompt 中「合并讲义」改为「本份关联材料全文」 */
   perMaterial?: boolean;
+  /** 仅补全既有原子的双语与页码，不改变数量、顺序和含义 */
+  preserveExistingAtoms?: boolean;
 }
 
 /** generateLSAPContentMap 可选模式；默认 legacy 与历史行为一致 */
@@ -220,7 +294,7 @@ ${t}`,
 /** 根据上课转写全文，用 Gemini 整理：讲课逻辑、重点、老师风格、以及如何理解这篇 lecture */
 export const organizeLectureFromTranscript = async (transcript: string): Promise<string> => {
   if (!transcript || transcript.trim().length === 0) {
-    return '（暂无转写内容，无法整理）';
+    return localizeText('（暂无转写内容，无法整理）', '(No transcript is available to organize.)');
   }
   const systemInstruction = `
 你是一位善于归纳课堂内容的助教。用户会提供一堂课的语音转写全文（可能有不连贯或重复）。
@@ -251,67 +325,625 @@ export const organizeLectureFromTranscript = async (transcript: string): Promise
   }
 };
 
-// Interface for internal JSON handling
-interface ExplanationJSON {
-  summary: string;
-  key_points: string[];
-  deep_dive: {
-    title: string;
-    content: string;
-    interactive_question: string;
-  };
+interface RawLectureNoteItem {
+  title?: unknown;
+  summary?: unknown;
+  explanation?: unknown;
+  question?: unknown;
+  answer?: unknown;
+  term?: unknown;
+  description?: unknown;
+  kind?: unknown;
+  segmentIds?: unknown;
 }
 
-export const generateSlideExplanation = async (imageBase64: string, fullContext?: string): Promise<string> => {
+interface RawLectureNotes {
+  overview?: unknown;
+  catchUp?: unknown;
+  outline?: unknown;
+  keyPoints?: unknown;
+  teacherAdditions?: unknown;
+  examples?: unknown;
+  teacherSignals?: unknown;
+  questions?: unknown;
+  terms?: unknown;
+  uncertainMoments?: unknown;
+}
+
+export interface LectureOrganizationContext {
+  sourceFileName?: string;
+  pageBySegmentId?: Record<string, number>;
+  pageTexts?: Array<{ pageNumber: number; text: string }>;
+}
+
+const asCleanString = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+
+const resolveLectureEvidence = (
+  value: unknown,
+  segmentById: Map<string, LectureTranscriptSegment>
+): LectureNoteEvidence[] => {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value
+    .map((segmentId) => asCleanString(segmentId))
+    .filter((segmentId) => {
+      if (!segmentId || seen.has(segmentId) || !segmentById.has(segmentId)) return false;
+      seen.add(segmentId);
+      return true;
+    })
+    .slice(0, 6)
+    .map((segmentId) => {
+      const segment = segmentById.get(segmentId)!;
+      return {
+        segmentId,
+        speakerLabel: segment.speakerLabel,
+        startMs: segment.startMs,
+        endMs: segment.endMs,
+        quote: segment.text.trim().slice(0, 240),
+      };
+    });
+};
+
+/**
+ * V4 classroom review package. The model may only cite transcript segment IDs
+ * supplied by the app; timestamps and quotes are resolved locally.
+ */
+export const organizeLectureWithEvidence = async (
+  segments: LectureTranscriptSegment[],
+  context: LectureOrganizationContext = {}
+): Promise<LectureStructuredNotes> => {
+  const usableSegments = segments
+    .filter((segment) => segment.text.trim())
+    .slice(0, 1200);
+  if (usableSegments.length === 0) {
+    throw new Error('没有可整理的高精度课堂转写。');
+  }
+
+  const segmentById = new Map(usableSegments.map((segment) => [segment.id, segment]));
+  const transcript = usableSegments.map((segment) => ({
+    id: segment.id,
+    speaker: segment.speakerLabel,
+    startSeconds: Math.round(segment.startMs / 1000),
+    pageNumber: context.pageBySegmentId?.[segment.id],
+    text: segment.text.trim(),
+  }));
+  const referencedPages = new Set(
+    Object.values(context.pageBySegmentId || {}).filter((pageNumber) => Number.isFinite(pageNumber))
+  );
+  let slideTextBudget = 45_000;
+  const slideContext: Array<{ pageNumber: number; text: string }> = [];
+  for (const page of context.pageTexts || []) {
+    if (!referencedPages.has(page.pageNumber) || slideTextBudget <= 0) continue;
+
+    const sourceText = page.text.trim();
+    if (!sourceText) continue;
+
+    const text = sourceText.slice(0, Math.min(1800, slideTextBudget));
+    if (!text) continue;
+
+    slideContext.push({ pageNumber: page.pageNumber, text });
+    slideTextBudget -= text.length;
+  }
+  const evidenceIdsSchema = {
+    type: Type.ARRAY,
+    items: { type: Type.STRING },
+  };
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [{
+      role: 'user',
+      parts: [{
+        text: `请把下面的课堂转写整理成可复习、可回听、可核对的课堂复习包。
+
+课堂转写（唯一可引用的音频证据）：
+${JSON.stringify(transcript)}
+
+${slideContext.length > 0
+  ? `关联课件文本（只用于判断老师相对课件的补充、修正和限定；不能替代音频证据）：\n${JSON.stringify(slideContext)}`
+  : '没有提供可安全对照的课件文本。不要声称老师讲了课件之外的内容。'}
+`,
+      }],
+    }],
+    config: {
+      systemInstruction: `
+你是一位谨慎的课堂记录助教。输入是带有稳定段落 id、说话人标签和时间的课堂转写。
+
+目标：
+1. catchUp：先给缺课学生一条 8-12 分钟能读完的最短补课路线，3-6 节，覆盖前提、主线、关键结论和收尾。
+2. outline：还原课堂实际推进顺序和过渡，不按转写字面机械切段。
+3. keyPoints：提取真正需要带走的课堂结论。
+4. teacherAdditions：仅在提供课件文本时，记录老师相对对应课件新增、修正、重新解释或明确限定的内容。
+5. examples：单独整理老师用来解释概念的案例、类比、演示或研究例子。
+6. teacherSignals：只记录老师明确说出的强调、作业、考试、截止日期、更正、限定条件；绝不推测考试重点。
+7. questions：单独整理学生提问与老师回答；证据不足时不要强行归类。
+8. terms：解释课堂专业术语，优先保留老师在本堂课里的用法。
+9. uncertainMoments：标记听不清、答非所问、说话人不确定或上下文不足的片段，不要擅自补全。
+
+证据规则：
+- 每一项都必须填写 segmentIds，且只能使用输入中真实存在的 id。
+- segmentIds 要指向直接支持该项结论的原话，不能只引用附近无关内容。
+- 不要编造时间戳、页码、引语、老师身份或学生身份。
+- 同一说话人标签不等于固定身份；根据对话内容谨慎判断老师与学生。
+- 如果没有可靠的学生提问、术语或不确定片段，对应数组返回空数组。
+- 课件文本不是可引用证据；teacherAdditions 也必须由课堂转写 segmentIds 直接支持。
+- 没有提供课件文本时 teacherAdditions 必须为空。
+- teacherSignals.kind 只能是 emphasis、assignment、exam、deadline、correction、limitation。
+- exam 只有老师明确提到考试、测验或评分要求时才能使用，禁止根据语气和重复次数猜测。
+- 输出简体中文，语言适合课后复习。
+`,
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          overview: { type: Type.STRING },
+          catchUp: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                summary: { type: Type.STRING },
+                segmentIds: evidenceIdsSchema,
+              },
+              required: ['title', 'summary', 'segmentIds'],
+            },
+          },
+          outline: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                summary: { type: Type.STRING },
+                segmentIds: evidenceIdsSchema,
+              },
+              required: ['title', 'summary', 'segmentIds'],
+            },
+          },
+          keyPoints: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                explanation: { type: Type.STRING },
+                segmentIds: evidenceIdsSchema,
+              },
+              required: ['title', 'explanation', 'segmentIds'],
+            },
+          },
+          teacherAdditions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                explanation: { type: Type.STRING },
+                segmentIds: evidenceIdsSchema,
+              },
+              required: ['title', 'explanation', 'segmentIds'],
+            },
+          },
+          examples: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                explanation: { type: Type.STRING },
+                segmentIds: evidenceIdsSchema,
+              },
+              required: ['title', 'explanation', 'segmentIds'],
+            },
+          },
+          teacherSignals: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                kind: {
+                  type: Type.STRING,
+                  enum: ['emphasis', 'assignment', 'exam', 'deadline', 'correction', 'limitation'],
+                },
+                title: { type: Type.STRING },
+                explanation: { type: Type.STRING },
+                segmentIds: evidenceIdsSchema,
+              },
+              required: ['kind', 'title', 'explanation', 'segmentIds'],
+            },
+          },
+          questions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                question: { type: Type.STRING },
+                answer: { type: Type.STRING },
+                segmentIds: evidenceIdsSchema,
+              },
+              required: ['question', 'answer', 'segmentIds'],
+            },
+          },
+          terms: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                term: { type: Type.STRING },
+                explanation: { type: Type.STRING },
+                segmentIds: evidenceIdsSchema,
+              },
+              required: ['term', 'explanation', 'segmentIds'],
+            },
+          },
+          uncertainMoments: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                description: { type: Type.STRING },
+                segmentIds: evidenceIdsSchema,
+              },
+              required: ['description', 'segmentIds'],
+            },
+          },
+        },
+        required: [
+          'overview',
+          'catchUp',
+          'outline',
+          'keyPoints',
+          'teacherAdditions',
+          'examples',
+          'teacherSignals',
+          'questions',
+          'terms',
+          'uncertainMoments',
+        ],
+      },
+    },
+  });
+
+  const parsed = JSON.parse(response.text || '{}') as RawLectureNotes;
+  const rawItems = (value: unknown): RawLectureNoteItem[] => (
+    Array.isArray(value) ? value.filter((item): item is RawLectureNoteItem => Boolean(item && typeof item === 'object')) : []
+  );
+  const withEvidence = (item: RawLectureNoteItem) => resolveLectureEvidence(item.segmentIds, segmentById);
+  const sections = (value: unknown) => rawItems(value)
+    .map((item) => ({
+      title: asCleanString(item.title),
+      summary: asCleanString(item.summary),
+      evidence: withEvidence(item),
+    }))
+    .filter((item) => item.title && item.summary && item.evidence.length > 0);
+  const points = (value: unknown) => rawItems(value)
+    .map((item) => ({
+      title: asCleanString(item.title),
+      explanation: asCleanString(item.explanation),
+      evidence: withEvidence(item),
+    }))
+    .filter((item) => item.title && item.explanation && item.evidence.length > 0);
+  const teacherSignalKinds = new Set<LectureTeacherSignalKind>([
+    'emphasis',
+    'assignment',
+    'exam',
+    'deadline',
+    'correction',
+    'limitation',
+  ]);
+
+  return {
+    version: 4,
+    generatedAt: Date.now(),
+    overview: asCleanString(parsed.overview) || '这堂课的结构化整理已生成。',
+    catchUp: sections(parsed.catchUp),
+    outline: sections(parsed.outline),
+    keyPoints: points(parsed.keyPoints),
+    teacherAdditions: slideContext.length > 0 ? points(parsed.teacherAdditions) : [],
+    examples: points(parsed.examples),
+    teacherSignals: rawItems(parsed.teacherSignals)
+      .map((item) => ({
+        kind: asCleanString(item.kind) as LectureTeacherSignalKind,
+        title: asCleanString(item.title),
+        explanation: asCleanString(item.explanation),
+        evidence: withEvidence(item),
+      }))
+      .filter((item) => (
+        teacherSignalKinds.has(item.kind)
+        && item.title
+        && item.explanation
+        && item.evidence.length > 0
+      )),
+    questions: rawItems(parsed.questions)
+      .map((item) => ({
+        question: asCleanString(item.question),
+        answer: asCleanString(item.answer),
+        evidence: withEvidence(item),
+      }))
+      .filter((item) => item.question && item.answer && item.evidence.length > 0),
+    terms: rawItems(parsed.terms)
+      .map((item) => ({
+        term: asCleanString(item.term),
+        explanation: asCleanString(item.explanation),
+        evidence: withEvidence(item),
+      }))
+      .filter((item) => item.term && item.explanation && item.evidence.length > 0),
+    uncertainMoments: rawItems(parsed.uncertainMoments)
+      .map((item) => ({
+        description: asCleanString(item.description),
+        evidence: withEvidence(item),
+      }))
+      .filter((item) => item.description && item.evidence.length > 0),
+    comparedWithSlides: slideContext.length > 0,
+  };
+};
+
+// Interface for internal JSON handling
+interface ExplanationJSON {
+  summary?: unknown;
+  key_points?: unknown;
+  deep_dive?: unknown;
+}
+
+export type SlideExplanationMode = 'explain' | 'note' | 'exam';
+
+export interface SlideExplanationOptions {
+  mode?: SlideExplanationMode;
+  pageNumber?: number;
+  guideContext?: string;
+}
+
+const getSlideExplanationModeLabel = (mode: SlideExplanationMode): string => {
+  if (mode === 'note') return '整理本页内容';
+  if (mode === 'exam') return '这页怎么考';
+  return '听讲解';
+};
+
+const getSlideExplanationTaskInstruction = (mode: SlideExplanationMode): string => {
+  if (mode === 'note') {
+    return `
+  [页面工具任务：整理本页内容]
+  目标：只把当前这一页本身整理清楚，像把 slide 上的内容转成干净中文笔记。
+  写法：
+  - 忠实整理本页可见内容和本页隐含的基本意思，不要扩展成复习计划。
+  - 不要写「可复习要点」「考前速记」「可能怎么考」「你必须掌握」。
+  - 如果这一页是 bullet list，就按原来的层级整理成清楚的中文条目。
+  - 如果这一页是图表/流程，就只说明图表里各部分和关系。
+  - 如果这一页只是标题、过渡页或很空，就短短整理，不要硬凑。
+  `;
+  }
+  if (mode === 'exam') {
+    return `
+  [页面工具任务：这页怎么考]
+  目标：从考试和复习角度分析这一页。
+  写法：
+  - 必须指出这一页可能对应的考点、常见问法、易错点和最小记忆版本。
+  - 如果这一页不太像考点，请直接说它更像铺垫/背景，并说明需要关注到什么程度。
+  - 输出要具体，不要泛泛说“理解概念”。
+  `;
+  }
+  return `
+  [页面工具任务：听讲解]
+  目标：让学生当场听懂这一页，而不是生成可保存笔记。
+  写法：
+  - 先用一句大白话说这一页到底在讲什么。
+  - 再解释它为什么出现在当前 module / part 里。
+  - 如果是关键页，再拆 bullet、公式、图表、论证或术语。
+  - 如果是过渡页，就短讲它连接了什么。
+  - 语气像陪读讲给人听，不要整理成学习手帐格式。
+  `;
+};
+
+const getSlideExplanationOutputFormat = (mode: SlideExplanationMode): string => {
+  if (mode === 'note') {
+    return `
+  [输出格式 - 严格 JSON]
+  请严格按照以下结构返回 JSON：
+  {
+    "summary": "本页主题：一句话概括本页内容。只基于当前页，不要加入考试或复习建议。",
+
+    "key_points": [
+      "本页内容 1：按当前页可见层级整理",
+      "本页内容 2：按当前页可见层级整理",
+      "本页内容 3：如有才写，不要硬凑"
+    ],
+
+    "deep_dive": {
+      "title": "本页内容整理",
+      "content": "请用 Markdown 忠实整理这一页：\n\n## 本页原本在说什么\n...\n\n## 页面内容\n- ...\n- ...\n\n## 术语 / 图表 / 例子（如果本页有）\n...\n\n要求：只整理这一页，不写可复习要点、不写考前速记、不写可能怎么考。",
+      "interactive_question": ""
+    }
+  }
+  `;
+  }
+
+  if (mode === 'exam') {
+    return `
+  [输出格式 - 严格 JSON]
+  请严格按照以下结构返回 JSON：
+  {
+    "summary": "考试视角：这一页可能和什么考法有关；如果不像考点，也要说明原因。",
+
+    "key_points": [
+      "可能考点 1：具体到本页内容",
+      "可能问法 2：具体到本页内容",
+      "易错点 3：具体到本页内容"
+    ],
+
+    "deep_dive": {
+      "title": "这页怎么考",
+      "content": "请用 Markdown 写出：\n\n## 1. 这页可能考什么\n...\n\n## 2. 老师可能怎么问\n...\n\n## 3. 容易写错在哪里\n...\n\n## 4. 最小答题骨架\n...",
+      "interactive_question": "给用户一个最自然的下一步追问建议。"
+    }
+  }
+  `;
+  }
+
+  return `
+  [输出格式 - 严格 JSON]
+  请严格按照以下结构返回 JSON：
+  {
+    "summary": "一句大白话：这一页到底在说什么。",
+
+    "key_points": [
+      "听懂这页的点 1：",
+      "听懂这页的点 2：",
+      "听懂这页的点 3："
+    ],
+
+    "deep_dive": {
+      "title": "这一页怎么理解",
+      "content": "请用 Markdown 写出：\n\n## 1. 先用人话讲\n...\n\n## 2. 它在当前 module 里的作用\n...\n\n## 3. 这页每个重点是什么意思\n...\n\n## 4. 最容易误解的地方\n...",
+      "interactive_question": "给用户一个最自然的下一步追问建议。"
+    }
+  }
+  `;
+};
+
+const stripMarkdownFence = (text: string): string => {
+  const trimmed = text.trim();
+  return trimmed
+    .replace(/^```(?:json|markdown|md)?\s*/i, '')
+    .replace(/\s*```$/i, '')
+    .trim();
+};
+
+const extractJsonObjectText = (text: string): string => {
+  const cleaned = stripMarkdownFence(text);
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return '';
+  return cleaned.slice(start, end + 1);
+};
+
+const parseExplanationJSON = (raw: string): ExplanationJSON | null => {
+  const candidates = [
+    raw.trim(),
+    stripMarkdownFence(raw),
+    cleanJsonString(raw),
+    extractJsonObjectText(raw),
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as ExplanationJSON;
+      }
+    } catch {
+      // Try the next recovery shape.
+    }
+  }
+
+  return null;
+};
+
+const readTextField = (value: unknown): string => {
+  return typeof value === 'string' ? value.trim() : '';
+};
+
+const readStringList = (value: unknown): string[] => {
+  return Array.isArray(value) ? value.map(readTextField).filter(Boolean) : [];
+};
+
+const readDeepDive = (data: ExplanationJSON): { title?: unknown; content?: unknown; interactive_question?: unknown } => {
+  return data.deep_dive && typeof data.deep_dive === 'object' && !Array.isArray(data.deep_dive)
+    ? data.deep_dive as { title?: unknown; content?: unknown; interactive_question?: unknown }
+    : {};
+};
+
+const hasExplanationContent = (data: ExplanationJSON): boolean => {
+  const deepDive = readDeepDive(data);
+  return Boolean(
+    readTextField(data.summary) ||
+    readTextField(deepDive.title) ||
+    readTextField(deepDive.content) ||
+    readTextField(deepDive.interactive_question) ||
+    readStringList(data.key_points).length > 0
+  );
+};
+
+const buildExplanationMarkdown = (data: ExplanationJSON, mode: SlideExplanationMode): string => {
+  const deepDive = readDeepDive(data);
+  const title = readTextField(deepDive.title) || '页面工具';
+  const summary = readTextField(data.summary);
+  const keyPoints = readStringList(data.key_points);
+  const content = readTextField(deepDive.content);
+  const question = readTextField(deepDive.interactive_question);
+
+  const sections = [`# ${title}`];
+
+  if (summary) {
+    const summaryLabel = mode === 'note' ? '本页主题' : mode === 'exam' ? '考试视角' : '先听这一句';
+    sections.push(`> **${summaryLabel}**: ${summary}`);
+  }
+
+  if (keyPoints.length > 0) {
+    const pointsLabel = mode === 'note' ? '本页内容' : mode === 'exam' ? '可能考法' : '听懂这页的几个点';
+    sections.push(`## ${pointsLabel}\n${keyPoints.map((item) => `- ${item}`).join('\n')}`);
+  }
+
+  if (content) {
+    const contentLabel = mode === 'note' ? '整理稿' : mode === 'exam' ? '考试拆解' : '讲解';
+    sections.push(`## ${contentLabel}\n${content}`);
+  }
+
+  if (question && mode !== 'note') {
+    sections.push(`---\n**🤔 思考**: ${question}`);
+  }
+
+  return sections.join('\n\n').trim();
+};
+
+const buildDraftExplanationMarkdown = (raw: string): string => {
+  const readable = stripMarkdownFence(raw);
+  return `
+# 讲解草稿
+
+> 这次模型返回的格式不太稳定，我先把可读内容保留下来。
+
+${readable}
+  `.trim();
+};
+
+export const generateSlideExplanation = async (imageBase64: string, fullContext?: string, options: SlideExplanationOptions = {}): Promise<string> => {
+  const mode = options.mode ?? 'explain';
   const parts = imageBase64.split(',');
   const base64Data = parts[1];
   const mimeType = parts[0].split(';')[0].split(':')[1] || 'image/png';
 
-  // 【系统指令：全科自适应深度导师 (中文版)】
+  // 【系统指令：领读里的页面工具 (中文版)】
   const systemInstruction = `
-  角色：你是一位博学多才的顶级教授，精通文理。你拥有整本书的记忆。
+  角色：你是一位博学多才的学习导师。你不是在开启一套独立精读模式，而是在领读过程中临时使用「页面工具」。
   **语言约束：无论 Slide 内容是英文还是中文，你必须始终使用【简体中文】进行讲解。**
+  **产品定位：领读负责主学习流程；你负责把当前页这个局部讲清楚、整理成笔记或转成考试视角。**
   
   [你的大脑 - 完整文档记忆]
   <<<文档开始>>>
   ${fullContext ? fullContext.slice(0, 80000) : "未提供上下文"} 
   <<<文档结束>>>
 
-  [你的核心能力：学科自适应解析]
-  当用户展示一张 Slide 时，你必须首先**识别学科类型**，然后采用不同的讲解策略：
+  [当前领读上下文]
+  ${options.guideContext || "未提供领读上下文。请仅根据当前页和全文记忆判断。"}
+
+  [当前页信息]
+  ${options.pageNumber ? `当前页码：第 ${options.pageNumber} 页。` : "当前页码：未知。"}
+
+  ${getSlideExplanationTaskInstruction(mode)}
+
+  [学科自适应策略]
+  当用户展示一张 Slide 时，你必须先识别学科类型，然后采用不同的讲解策略：
 
   **🔴 场景 A：理科/工科 (STEM - 数学, 物理, 生物, 计算机)**
   - **特征**：包含公式、代码、图表、分子结构、解剖图。
-  - **讲解策略 (深度解码)**：
-    1.  **拒绝简略**：严禁只给摘要。必须像老师板书一样拆解过程。
-    2.  **深度推导**：如果 Slide 有公式，**必须**使用 LaTeX 格式完整复写并逐项解释变量含义。不要跳过步骤。
-    3.  **视觉拆解**：对于手写笔记或图表，解释每一个标注、每一个箭头的物理/生物意义。
-    4.  **上下文连贯**：如果是推导的中间步骤，明确指出“这一步承接了上一页的...”。
+  - **讲解策略**：如果本页包含核心公式/图表/模型，才做 Step-by-Step 拆解；如果只是标题或过渡页，说明它在模块中的位置即可。
 
   **🔵 场景 B：人文/社科 (Humanities - 哲学, 历史, 文学, 艺术)**
   - **特征**：主要是文本、论点、历史事件、艺术作品。
-  - **讲解策略 (批判性分析)**：
-    1.  **论证拆解**：不要只翻译文字。要分析作者的 **前提 (Premise)**、**推论 (Inference)** 和 **结论 (Conclusion)**。
-    2.  **历史背景**：利用全书记忆，解释这个观点是在回应历史上的哪场争论？
-    3.  **深度赏析**：如果是艺术/文学，分析其隐喻、象征意义。
+  - **讲解策略**：如果本页承载核心论证，拆前提、推论和结论；如果只是材料背景，讲清它服务于哪个主张。
 
-  [输出格式 - 严格 JSON (四大板块)]
-  请严格按照以下结构返回 JSON：
-  {
-    "summary": "1. 核心摘要：\n一段流畅的中文摘要。理科讲“这一页解决了什么计算难题”，文科讲“这一页提出了什么核心论点”。如果是连续推导，请先承接上文。",
-    
-    "key_points": [
-      "2. 关键概念：",
-      "概念 1：定义 + 详细解释 (中文)",
-      "概念 2：定义 + 详细解释 (中文)"
-    ],
-    
-    "deep_dive": {
-      "title": "3. 详细解析 (自动生成的标题)", 
-      "content": "这里是核心内容，必须非常详细且长。请使用 Markdown 分层：\n\n**A. 场景与背景 (Context)**\n(理科：解释初始物理模型/数学设定；文科：解释历史背景)\n\n**B. 核心推导/论证 (The Core)**\n(这是重点！理科：**Step-by-Step 的公式推导**，务必用 LaTeX；文科：**逻辑论证的拆解**。请把页面上的每一个细节都讲清楚。)\n\n**C. 结论与意义 (Conclusion)**\n(理科：公式的物理含义；文科：理论的深远影响)\n\n---\n\n**4. 视觉逻辑流 (Visual Logic)**\n(请用箭头图表示逻辑链条)\n(示例：\`[ 初始状态 ] ➔ [ 关键变换 ] ➔ [ 最终结果 ]\`)",
-      "interactive_question": "一个符合学科特色的深度思考题 (中文)。"
-    }
-  }
+  ${getSlideExplanationOutputFormat(mode)}
   `;
 
   try {
@@ -321,11 +953,12 @@ export const generateSlideExplanation = async (imageBase64: string, fullContext?
         parts: [
           { inlineData: { mimeType: mimeType, data: base64Data } },
           {
-            text: `请深度讲解这张 Slide。
+            text: `请执行页面工具任务：「${getSlideExplanationModeLabel(mode)}」。
             **要求：**
             1. **必须用中文回答。**
-            2. 先判断学科类型 (STEM 或 Humanities)，应用相应的深度策略。
-            3. 字数要多，解释要细，逻辑要严密。`
+            2. 当前页只是局部，不要脱离当前领读上下文。
+            3. 严格执行当前工具的任务边界：听讲解就讲给人听；整理本页内容就只整理本页；考试视角才谈考试。
+            4. 不要把三种工具写成同一种结果。`
           },
         ],
       },
@@ -335,45 +968,28 @@ export const generateSlideExplanation = async (imageBase64: string, fullContext?
       }
     });
 
-    const jsonText = response.text || "{}";
-    
-    // Parse JSON
-    let data: ExplanationJSON;
-    try {
-        data = JSON.parse(jsonText);
-    } catch (e) {
-        // Fallback for malformed JSON
-        console.warn("JSON Parse Error on Explanation, falling back to raw text", e);
-        const clean = cleanJsonString(jsonText);
-        try {
-            data = JSON.parse(clean);
-        } catch (e2) {
-             return "生成讲解失败，请稍后重试。";
-        }
+    const jsonText = response.text?.trim() || "";
+
+    if (!jsonText) {
+      throw new Error("EMPTY_EXPLANATION_RESPONSE");
     }
 
-    // Convert Structured JSON to Markdown for UI compatibility
-    // Enforcing the Visual Appearance of the 4 Sections
-    const markdownOutput = `
-# ${data.deep_dive.title}
+    const data = parseExplanationJSON(jsonText);
+    if (data && hasExplanationContent(data)) {
+      return buildExplanationMarkdown(data, mode);
+    }
 
-> **💡 核心摘要**: ${data.summary}
+    const readableText = stripMarkdownFence(jsonText);
+    if (readableText.length >= 24) {
+      console.warn("Explanation response was not valid JSON; showing readable draft instead.");
+      return buildDraftExplanationMarkdown(readableText);
+    }
 
-## 🔑 关键概念
-${data.key_points.map(k => `- ${k}`).join('\n')}
-
-## 📘 详细解析
-${data.deep_dive.content}
-
----
-**🤔 思考**: ${data.deep_dive.interactive_question}
-    `.trim();
-
-    return markdownOutput;
+    throw new Error("UNREADABLE_EXPLANATION_RESPONSE");
 
   } catch (error) {
     console.error("Error generating explanation:", error);
-    return "生成讲解失败，请稍后重试。";
+    throw error instanceof Error ? error : new Error("EXPLANATION_GENERATION_FAILED");
   }
 };
 
@@ -549,7 +1165,7 @@ export const multiDocQAReply = async (
     return response.text?.trim() ?? '未能生成回复，请重试。';
   } catch (error) {
     console.error('multiDocQAReply Error:', error);
-    return '抱歉，回答时遇到问题，请稍后重试。';
+    return localizeText('抱歉，回答时遇到问题，请稍后重试。', 'Sorry, something went wrong while answering. Please try again later.');
   }
 };
 
@@ -631,7 +1247,7 @@ export const generatePersonaStoryScript = async (fullText: string, images?: stri
             }
         });
 
-        if (!response.text) return DEFAULT_ERROR_SCRIPT;
+        if (!response.text) return getDefaultErrorScript();
 
         const cleanedText = cleanJsonString(response.text);
         let parsedData = [];
@@ -640,18 +1256,18 @@ export const generatePersonaStoryScript = async (fullText: string, images?: stri
             parsedData = JSON.parse(cleanedText);
         } catch (jsonError) {
             console.error("JSON Parse failed:", jsonError);
-            return DEFAULT_ERROR_SCRIPT;
+            return getDefaultErrorScript();
         }
 
         if (Array.isArray(parsedData) && parsedData.length > 0) {
             return parsedData.map(item => String(item));
         }
         
-        return DEFAULT_ERROR_SCRIPT;
+        return getDefaultErrorScript();
 
     } catch (error) {
         console.error("Gemini API Error:", error);
-        return DEFAULT_ERROR_SCRIPT;
+        return getDefaultErrorScript();
     }
 };
 
@@ -933,17 +1549,34 @@ export const generateGatekeeperQuiz = async (docContent: string, topic: string):
   }
 };
 
-/** 根据当前阅读阶段对话，生成本模块 3–5 条要点（关键要记下来的）。 */
+/**
+ * 根据当前整段式标签或当前唱片中用户实际看过的内容生成要点。
+ * 整段式页码与状态来自连接式骨架；唱片式来源来自当前独立对话，页码严格限制在唱片范围。
+ */
 export const generateModuleTakeaways = async (
   readingMessages: ChatMessage[],
-  docType: DocType
-): Promise<string[]> => {
+  docType: DocType,
+  options: {
+    pageStart: number;
+    pageEnd: number;
+    recordScope?: { title: string; pageStart: number; pageEnd: number };
+  },
+): Promise<SkimModuleTakeaway[]> => {
+  const sources = collectSkimTakeawaySources(readingMessages, {
+    ...(options.recordScope ? { recordScope: options.recordScope } : {}),
+  });
+  const convoText = buildDisplayedSkimTranscript(readingMessages);
+  if (!convoText.trim()) return [];
+  const sourceManifest = sources.map((source) => ({
+    id: source.id,
+    titleZh: source.titleZh,
+    titleEn: source.titleEn ?? '',
+    kind: source.kind,
+    summary: source.summary,
+    pageRefs: source.pageRefs,
+    status: source.status,
+  }));
   try {
-    const convoText = readingMessages
-      .map((m) => `${m.role === 'user' ? '用户' : '导读'}: ${m.text}`)
-      .join('\n\n');
-    if (!convoText.trim()) return [];
-
     const response = await ai.models.generateContent({
       model: 'gemini-3.1-pro-preview',
       contents: [
@@ -951,28 +1584,150 @@ export const generateModuleTakeaways = async (
           role: 'user',
           parts: [
             {
-              text: `你正在做${docType === 'HUMANITIES' ? '社科/人文' : '理科'}文档的导读。以下是当前模块的对话记录。请根据对话内容，提炼出 3–5 条「本模块关键要点」，适合用户记下来或复述以加深记忆。每条一句话，直接、可背诵。\n\n【对话记录】\n${convoText.slice(-12000)}\n\n请返回 JSON：{ "takeaways": ["要点1", "要点2", ...] }`
+              text: `你正在整理${docType === 'HUMANITIES' ? '社科/人文' : '理科'} Lecture 的${options.recordScope ? '当前唱片' : '整段式'}领读要点。目标是让用户快速回看刚才真正看过的内容，不是生成考试提纲。
+
+【硬性规则】
+1. 只整理对话中导读已经展示的内容，不加入外部知识，不扩写新结论。
+2. 每项必须给出：中文标题、可选英文术语、一句中文大白话、它在本段中的作用或与前后内容的关系。
+3. sourceIds 只能逐字使用下方骨架清单中的 id。多个骨架项确实属于同一要点时可以合并。
+4. status=deferred 的骨架是简单版中“AI暂时替你记着”的内容：可以整理，但不能写成已经正式讲过。
+5. 唱片式的来源可能是消息级来源，页码会覆盖当前唱片范围；仍要用 sourceIds 关联真正出现过这些内容的导读消息，不能加入原对话没有讲过的细节。
+6. 若骨架清单为空，说明是旧版对话：仍可根据对话生成要点，但 sourceIds 必须为空，绝不能虚构页码或来源。
+7. 已讲内容提炼 3–6 项；暂存内容最多 4 项。语言简洁，不写学习建议，不打分。
+
+【可靠内容骨架】
+${JSON.stringify(sourceManifest)}
+
+【当前领读标签的对话】
+${convoText.slice(-80000)}
+
+只返回结构化 JSON。`
             }
           ]
         }
       ],
       config: {
-        responseMimeType: "application/json",
+        responseMimeType: 'application/json',
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            takeaways: { type: Type.ARRAY, items: { type: Type.STRING } }
+            items: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  titleZh: { type: Type.STRING },
+                  titleEn: { type: Type.STRING },
+                  plainLanguage: { type: Type.STRING },
+                  connection: { type: Type.STRING },
+                  sourceIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                },
+                required: ['titleZh', 'titleEn', 'plainLanguage', 'connection', 'sourceIds'],
+              },
+            },
           },
-          required: ["takeaways"]
+          required: ['items'],
         }
       }
     });
-    if (!response.text) return [];
-    const parsed = JSON.parse(response.text) as { takeaways: string[] };
-    return Array.isArray(parsed.takeaways) ? parsed.takeaways : [];
+    if (!response.text) {
+      return normalizeSkimTakeawayDrafts([], sources, options.pageStart, options.pageEnd);
+    }
+    const parsed = JSON.parse(response.text) as { items?: SkimTakeawayModelDraft[] };
+    return normalizeSkimTakeawayDrafts(
+      Array.isArray(parsed.items) ? parsed.items : [],
+      sources,
+      options.pageStart,
+      options.pageEnd,
+    );
   } catch (error) {
-    console.error("generateModuleTakeaways Error:", error);
-    return [];
+    console.error('generateModuleTakeaways Error:', error);
+    return normalizeSkimTakeawayDrafts([], sources, options.pageStart, options.pageEnd);
+  }
+};
+
+type SkimKnowledgeExtractionQuestion = {
+  kind: 'fill' | 'choice' | 'concept';
+  question: string;
+  options: string[];
+};
+
+/** 把已讲要点临时变成一条普通领读消息；不保存答案、分数或掌握状态。 */
+export const generateModuleKnowledgeExtraction = async (
+  takeaways: SkimModuleTakeaway[],
+): Promise<string> => {
+  const explained = takeaways.filter((item) => item.status === 'explained');
+  if (explained.length === 0) return '';
+  const source = explained.map((item) => ({
+    titleZh: item.titleZh,
+    titleEn: item.titleEn ?? '',
+    plainLanguage: item.plainLanguage,
+    connection: item.connection,
+  }));
+  try {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [{
+        role: 'user',
+        parts: [{
+          text: `把下面这些用户刚刚看过的领读要点，变成一次很轻的知识提取。
+
+要求：
+- 生成 3–4 道中文小题，一次全部给出，不提供答案、提示、页码或评分。
+- 至少一道概念题，要求用户用自己的话重建关系；可搭配填空题和一道小选择题。
+- 填空只用于确实值得记住的术语、方向或数字；选择题的干扰项应来自容易混淆的说法。
+- 只能问下方要点已经讲过的内容，不得加入材料外知识。
+- 题面友好、简短，不要写成正式考试，也不要询问用户是否准备好。
+
+【已讲要点】
+${JSON.stringify(source)}
+
+只返回结构化 JSON。`,
+        }],
+      }],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            questions: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  kind: { type: Type.STRING, enum: ['fill', 'choice', 'concept'] },
+                  question: { type: Type.STRING },
+                  options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                },
+                required: ['kind', 'question', 'options'],
+              },
+            },
+          },
+          required: ['questions'],
+        },
+      },
+    });
+    if (!response.text) return '';
+    const parsed = JSON.parse(response.text) as { questions?: SkimKnowledgeExtractionQuestion[] };
+    const questions = (Array.isArray(parsed.questions) ? parsed.questions : [])
+      .filter((item) => item && typeof item.question === 'string' && item.question.trim())
+      .slice(0, 4);
+    if (questions.length === 0) return '';
+    const labels: Record<SkimKnowledgeExtractionQuestion['kind'], string> = {
+      fill: '填空',
+      choice: '小选择',
+      concept: '用自己的话说',
+    };
+    const body = questions.map((item, index) => {
+      const optionLines = item.kind === 'choice'
+        ? item.options.slice(0, 4).map((option, optionIndex) => `   ${String.fromCharCode(65 + optionIndex)}. ${option}`).join('\n')
+        : '';
+      return `${index + 1}. **${labels[item.kind]}**：${item.question}${optionLines ? `\n${optionLines}` : ''}`;
+    }).join('\n\n');
+    return `### 先把要点合上，看看还留下了什么\n\n${body}\n\n直接按题号回答就行；想不起来也可以照实说。`;
+  } catch (error) {
+    console.error('generateModuleKnowledgeExtraction Error:', error);
+    return '';
   }
 };
 
@@ -1498,7 +2253,517 @@ export const generateFiveMinGuide = async (docContent: string): Promise<string> 
     return response.text?.trim() || '（暂时无法生成 5 分钟速览，请稍后重试）';
   } catch (error) {
     console.error('generateFiveMinGuide Error:', error);
-    return '（生成 5 分钟速览失败，请稍后重试）';
+    return localizeText('（生成 5 分钟速览失败，请稍后重试）', '(Could not generate the five-minute overview. Please try again later.)');
+  }
+};
+
+export type TinyStudyAction = 'start' | 'next' | 'simpler' | 'deeper' | 'example';
+
+export interface TinyStudyOptions {
+  fileName: string;
+  action: TinyStudyAction;
+  previousTurns?: string[];
+  targetTurn?: {
+    index: number;
+    text: string;
+  };
+}
+
+const getTinyStudyActionInstruction = (action: TinyStudyAction, targetIndex?: number): string => {
+  if (action === 'next') return '接着上一段，往后讲一点点。不要复述之前内容。';
+  if (action === 'simpler') return `只针对第 ${targetIndex ?? '当前'} 小段，用更浅、更生活化、更像人话的方式重讲一遍。不要讲新段落。`;
+  if (action === 'deeper') return `只针对第 ${targetIndex ?? '当前'} 小段，稍微深入一点，但仍然保持低压力和大白话。不要讲新段落。`;
+  if (action === 'example') return `只针对第 ${targetIndex ?? '当前'} 小段，换一个更直观、更生活化的例子来解释。不要讲新段落。`;
+  return '先讲这份材料的最低门槛梗概，只讲最容易进入的一小块。';
+};
+
+/** Dashboard「我现在不想学」→「只学一点点」：低压力、分段式大白话讲解。 */
+export const generateTinyStudyStep = async (
+  docContent: string,
+  options: TinyStudyOptions
+): Promise<string> => {
+  try {
+    const contentPart = getContentPart(docContent);
+    const history = (options.previousTurns ?? [])
+      .slice(-6)
+      .map((turn, index) => `第 ${index + 1} 段：${turn}`)
+      .join('\n\n');
+
+    const prompt = `你是一个很会降低学习阻力的陪读助手。用户现在非常不想学习，甚至不想点开 lecture slides。
+
+你现在要在 Dashboard 的一张小卡片里，帮用户「只学一点点」。这不是正式学习页，不要像老师讲课，也不要制造任务感。
+
+资料名：${options.fileName}
+本次动作：${getTinyStudyActionInstruction(options.action, options.targetTurn?.index)}
+
+之前已经讲过：
+${history || '还没有。'}
+
+${options.targetTurn ? `这次只针对下面这一小段做局部补充，不要继续往后讲：
+第 ${options.targetTurn.index} 小段：
+${options.targetTurn.text}` : ''}
+
+输出要求：
+- 必须用中文。
+- 只讲一小段，控制在 150～260 个中文字左右。
+- 用最简单的大白话，像朋友在旁边帮忙解释。
+- 不要 quiz，不要术语表，不要“你必须掌握/你需要完成/考点如下”这种压力口吻。
+- 如果材料很复杂，先挑最容易进入的一点，不要试图讲完整。
+- 如果本次是“讲白一点 / 稍微深入一点 / 换个例子”，只围绕指定小段补充，不要总结全文，也不要开启下一小段。
+- 结尾用一句很轻的邀请，比如“如果你愿意，我们下一小段再看……”。
+- 直接输出正文，不要 JSON。`;
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [{ role: 'user', parts: [contentPart, { text: prompt }] }],
+    });
+
+    return response.text?.trim() || '我这次没讲出来。我们可以再点一下，换一种更轻的说法。';
+  } catch (error) {
+    console.error('generateTinyStudyStep Error:', error);
+    return localizeText(
+      '我这次没讲出来，可能是云端有点慢。你可以稍后再试，或者先换一份更短的 PDF。',
+      'I could not generate this explanation. The service may be slow; try again later or use a shorter PDF.',
+    );
+  }
+};
+
+const TINY_STUDY_ENTRY_TYPES: TinyStudyEntryType[] = [
+  'question',
+  'experiment',
+  'counterintuitive',
+  'debate',
+  'real_life',
+];
+
+const normalizeEvidenceText = (value: string): string => (
+  value.toLocaleLowerCase().replace(/[^\p{L}\p{N}]+/gu, '')
+);
+
+const hasEvidenceOnPages = (evidence: string, pages: string[]): boolean => {
+  const normalizedEvidence = normalizeEvidenceText(evidence);
+  const normalizedPages = normalizeEvidenceText(pages.join(' '));
+  if (normalizedEvidence.length >= 8 && normalizedPages.includes(normalizedEvidence)) return true;
+
+  const tokens = evidence
+    .toLocaleLowerCase()
+    .split(/[^\p{L}\p{N}]+/gu)
+    .filter((token) => token.length >= 3);
+  if (tokens.length < 2) return false;
+  const matched = tokens.filter((token) => normalizedPages.includes(normalizeEvidenceText(token))).length;
+  return matched / tokens.length >= 0.45;
+};
+
+const parseJsonObject = (raw: string): Record<string, unknown> => {
+  const candidates = [raw, cleanJsonString(raw)];
+  const firstBrace = raw.indexOf('{');
+  const lastBrace = raw.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) candidates.push(raw.slice(firstBrace, lastBrace + 1));
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Try the next progressively cleaned candidate.
+    }
+  }
+  throw new Error('Interest entry response was not valid JSON');
+};
+
+export const generateTinyStudyEntries = async (
+  _docContent: string,
+  pageTexts: string[],
+  options: { fileName: string }
+): Promise<{ documentSummary: string; entries: Array<Omit<TinyStudyEntry, 'id' | 'status' | 'turns'>> }> => {
+  const perPageChars = Math.max(
+    220,
+    Math.min(2400, Math.floor(90000 / Math.max(1, pageTexts.length)))
+  );
+  const pageIndex = pageTexts
+    .map((text, index) => `[PAGE ${index + 1}]\n${text.trim().slice(0, perPageChars) || '（本页没有可提取文字）'}`)
+    .join('\n\n');
+
+  const prompt = `你正在为一个“现在不想学，但又想先接触一点”的大学学习入口架挑选内容。
+
+资料名：${options.fileName}
+
+请从下面逐页标记的原文里，挑出 3～6 个真正有意思、彼此不同、能够准确定位的入口。不要为了凑数量虚构内容。
+
+入口类型只能是：
+- question：资料真正想回答的有意思问题
+- experiment：有具体做法与发现的实验或案例
+- counterintuitive：违反直觉的发现
+- debate：理论或观点冲突
+- real_life：能和现实生活、社会或其他课程建立的原文连接
+
+严格要求：
+- 标题要像优质科普视频的“可信标题党”，目标是让一个本来不想学习的人也产生“等等，怎么回事？”的冲动，而不是像教材目录或论文小标题。
+- 标题必须制造一个真实的好奇缺口：优先使用具体画面、反常识结果、冲突、悬念或直接提问；可以有一点营销号感，但所有暗示都必须被对应原文支持。
+- 标题不要直接把完整答案说完，也不要使用“X 的机制 / X 的效应 / X 的研究 / 浅析 / 探究”这类教科书式名词短语。
+- 禁止虚假夸张和廉价话术，例如“震惊”“99%的人不知道”“看完颠覆认知”“科学家都惊呆了”。
+- 标题尽量控制在 12～26 个汉字。梗概 1～2 句再准确说明“发生了什么、为什么值得看”，标题负责让人想点，梗概负责兑现承诺。
+- 不同类型可以参考这些写法，但不要照抄：
+  - question：为什么越害怕，眼前的东西反而越清楚？
+  - experiment：科学家给图片加了噪点，情绪却骗过了眼睛
+  - counterintuitive：你以为情绪只影响心情，它连画面清晰度都能改
+  - debate：情绪到底先发生在身体，还是先发生在大脑？
+  - real_life：为什么紧张时，周围的一切像突然开了高清？
+- 输出前默默检查每个标题：它是否有问题或冲突、是否有具体画面、是否不像教材标题、是否忠于证据。不要输出检查过程。
+- pageStart/pageEnd 必须使用下方 [PAGE n] 的应用内页码，不能猜页码。
+- evidence 必须逐字抄录对应页中一小段连续原文，用于程序核验；不能改写。
+- 同一内容不要换标题重复推荐。
+- documentSummary 用 2～3 句说明整份资料的背景，只用于后续理解位置。
+- 只输出 JSON，不要代码块或解释。
+
+JSON 格式：
+{"documentSummary":"...","entries":[{"type":"question","title":"...","teaser":"...","pageStart":1,"pageEnd":2,"evidence":"原文逐字短句"}]}
+
+逐页原文：
+${pageIndex}`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-pro-preview',
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+  });
+  const parsed = parseJsonObject(response.text?.trim() || '');
+  const rawEntries = Array.isArray(parsed.entries) ? parsed.entries : [];
+  const entries: Array<Omit<TinyStudyEntry, 'id' | 'status' | 'turns'>> = [];
+  const seenTitles = new Set<string>();
+
+  for (const value of rawEntries) {
+    if (!value || typeof value !== 'object') continue;
+    const item = value as Record<string, unknown>;
+    const type = String(item.type || '') as TinyStudyEntryType;
+    const title = String(item.title || '').trim();
+    const teaser = String(item.teaser || '').trim();
+    const evidence = String(item.evidence || '').trim();
+    const pageStart = Math.trunc(Number(item.pageStart));
+    const pageEnd = Math.trunc(Number(item.pageEnd));
+    const normalizedTitle = normalizeEvidenceText(title);
+    if (!TINY_STUDY_ENTRY_TYPES.includes(type) || !title || !teaser || !evidence) continue;
+    if (!Number.isInteger(pageStart) || !Number.isInteger(pageEnd) || pageStart < 1 || pageEnd < pageStart || pageEnd > pageTexts.length) continue;
+    if (seenTitles.has(normalizedTitle)) continue;
+    const targetPages = pageTexts.slice(pageStart - 1, pageEnd);
+    if (!hasEvidenceOnPages(evidence, targetPages)) continue;
+    const nearDuplicate = entries.some((entry) => {
+      const overlap = Math.max(0, Math.min(entry.pageEnd, pageEnd) - Math.max(entry.pageStart, pageStart) + 1);
+      const smallerRange = Math.min(entry.pageEnd - entry.pageStart + 1, pageEnd - pageStart + 1);
+      return entry.type === type && overlap / smallerRange >= 0.8;
+    });
+    if (nearDuplicate) continue;
+    seenTitles.add(normalizedTitle);
+    entries.push({ type, title, teaser, pageStart, pageEnd, evidence });
+    if (entries.length >= 6) break;
+  }
+
+  if (entries.length === 0) throw new Error('No evidence-grounded interest entries were found');
+  return {
+    documentSummary: String(parsed.documentSummary || '').trim(),
+    entries,
+  };
+};
+
+const getTinyStudyEntryActionInstruction = (action: TinyStudyEntryAction): string => {
+  if (action === 'simpler') return '把刚才这个入口再讲白一点，只解释同一件事，不引入新的主题。';
+  if (action === 'interesting') return '只解释这个入口为什么有意思、反直觉或值得继续看，不扩展成整份资料总结。';
+  if (action === 'deeper') return '沿着同一个入口深入一层，可以补充机制或证据，但不能跳到其他入口。';
+  return '第一次介绍这个入口：先讲清发生了什么，以及为什么有意思。';
+};
+
+export const generateTinyStudyEntryStep = async (
+  _docContent: string,
+  options: {
+    fileName: string;
+    documentSummary: string;
+    entry: TinyStudyEntry;
+    action: TinyStudyEntryAction;
+    pageTexts: string[];
+    previousTurns?: TinyStudyEntryTurn[];
+  }
+): Promise<string> => {
+  const pageScope = options.pageTexts
+    .slice(options.entry.pageStart - 1, options.entry.pageEnd)
+    .map((text, index) => `[PAGE ${options.entry.pageStart + index}]\n${text.slice(0, 5000)}`)
+    .join('\n\n');
+  const history = (options.previousTurns ?? [])
+    .slice(-6)
+    .map((turn) => `${turn.action}: ${turn.text}`)
+    .join('\n\n');
+  const prompt = `你是一个很会降低学习阻力的陪读助手。用户选择了一个自己可能感兴趣的入口，你只能围绕这个入口讲。
+
+资料名：${options.fileName}
+整份资料背景：${options.documentSummary || '无额外背景'}
+当前入口：${options.entry.title}
+入口梗概：${options.entry.teaser}
+准确范围：第 ${options.entry.pageStart}-${options.entry.pageEnd} 页
+本次动作：${getTinyStudyEntryActionInstruction(options.action)}
+
+当前入口的历史：
+${history || '这是第一次讲。'}
+
+对应页面原文：
+${pageScope}
+
+要求：
+- 必须用中文和大白话，像朋友在旁边解释。
+- 第一次控制在 180～320 个中文字；后续只补充当前入口，不重复整段。
+- 先让人理解“发生了什么”和“为什么有意思”，不要自动生成术语表、Quiz、作业或掌握要求。
+- 除非用户明确要求比较，否则不能转去讲其他页或总结整份 PDF。
+- 不要声称原文没有提供的事实。
+- 直接输出正文，不要 JSON。`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-pro-preview',
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+  });
+  const text = response.text?.trim();
+  if (!text) throw new Error('Interest entry explanation was empty');
+  return text;
+};
+
+export interface JointReviewSourceInput {
+  fileName: string;
+  role: JointReviewMaterialRole;
+  content: string;
+}
+
+const getJointReviewRoleLabel = (role: JointReviewMaterialRole): string => {
+  if (role === 'lecture') return 'Lecture / 课堂 slides';
+  if (role === 'reading') return 'Reading / 课前阅读';
+  if (role === 'article') return 'Article / 文章';
+  if (role === 'textbook') return 'Textbook / 教科书章节';
+  return 'Other / 其他材料';
+};
+
+export const generateJointReviewBriefing = async (
+  sources: JointReviewSourceInput[],
+  options: { title: string }
+): Promise<string> => {
+  if (sources.length === 0) return localizeText('这个复习包里还没有材料。', 'This review bundle does not contain any materials yet.');
+  try {
+    const sourceIndex = sources
+      .map((source, index) => `${index + 1}. ${source.fileName} — ${getJointReviewRoleLabel(source.role)}`)
+      .join('\n');
+    const contentParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
+      {
+        text: `你是一个大学课程复习规划助手。用户正在做“联合复习”：把 lecture slides 和课前 paper/article/textbook 放在一起复习。
+
+课次复习包名称：${options.title}
+
+材料清单：
+${sourceIndex}
+
+任务目标：
+请生成一份中文 Markdown「联合复习说明」，回答：这些材料为什么要一起复习、每份材料在这节课里起什么作用、复习时应该怎么搭配读。
+
+必须输出以下结构：
+
+# 联合复习说明
+
+## 1. 这节课的主线
+用 3-6 句话说明这组材料共同服务的核心主题。不要泛泛而谈。
+
+## 2. 每份材料在干什么
+逐份材料说明：它是主线、背景、证据、案例、概念定义、扩展阅读，还是考试加分材料。
+
+## 3. Lecture 和 readings 的对应关系
+尽量指出 lecture 里的哪些概念/页段/主题，可能对应哪些 reading/article/textbook。拿不准页码时可以说“可能对应”，但不要编造不存在的细节。
+
+## 4. 复习优先级
+分成：
+- 必须先看
+- 有时间再看
+- 只需要知道作用
+
+## 5. 考试怎么用
+给出“最小考试答案”和“加分 evidence / reading 出处”的区分。
+
+## 6. 建议复习顺序
+给出一个低压力顺序，帮助用户开始。
+
+约束：
+- 不要假装已经精确读懂所有页码；如果材料多或信息不确定，要用谨慎措辞。
+- 不要要求用户完整重读每篇 paper。
+- 重点是建立关系，而不是单篇文献摘要。
+- 语言自然，像懂课的同学帮忙整理。
+
+下面开始给你材料内容。`
+      },
+    ];
+
+    sources.forEach((source, index) => {
+      contentParts.push({
+        text: `\n\n【材料 ${index + 1}】${source.fileName}\n角色：${getJointReviewRoleLabel(source.role)}\n`,
+      });
+      contentParts.push(getContentPartWithMaxChars(source.content, 50000));
+    });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [{ role: 'user', parts: contentParts }],
+    });
+
+    return response.text?.trim() || '这次没生成出来，可以稍后重试。';
+  } catch (error) {
+    console.error('generateJointReviewBriefing Error:', error);
+    throw error;
+  }
+};
+
+export const chatWithJointReviewGuide = async (
+  sources: JointReviewSourceInput[],
+  history: ChatMessage[],
+  userMessage: string,
+  options: { title: string; summaryMarkdown?: string }
+): Promise<string> => {
+  if (sources.length === 0) return localizeText('这个复习包里还没有可读材料。', 'This review bundle does not contain any readable materials yet.');
+  try {
+    const sourceIndex = sources
+      .map((source, index) => `${index + 1}. ${source.fileName} — ${getJointReviewRoleLabel(source.role)}`)
+      .join('\n');
+    const contentParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
+      {
+        text: `你是逃课神器里的“联合领读”向导。用户把 lecture slides 和课前 reading/article/textbook 放进同一个课次复习包里。
+
+你的任务不是分别总结每份 PDF，而是：以 lecture 为主线，带用户一小段一小段复习；遇到 lecture 背后需要 reading/article/textbook 支撑时，再调取那些材料解释。
+
+课次复习包：${options.title}
+
+材料清单：
+${sourceIndex}
+
+已有联合复习说明：
+${options.summaryMarkdown?.trim() || '暂无。'}
+
+对话规则：
+- 必须用中文。
+- 一次只推进一小段，不要一口气讲完整个 lecture 或完整个 module。
+- 默认以 lecture 为复习主线；reading/article/textbook 只在需要解释背景、证据、出处或加分理解时拉进来。
+- 如果用户说“继续”，就接着上一段往后带读。
+- 如果用户问某个概念，就先答问题，再告诉它和 lecture/readings 的关系。
+- 讲到 reading 证据时要点名来源，例如“这点更像来自 Paper A / Article B 的作用”。不确定时说“可能对应”，不要编造页码。
+- 输出要像陪读，不像报告。可以用小标题、短段落和 bullet，但不要太长。
+- 每次结尾给一个轻量下一步，比如“要不要继续看 lecture 下一小段？”。
+
+下面开始给你材料内容。`
+      },
+    ];
+
+    sources.forEach((source, index) => {
+      contentParts.push({
+        text: `\n\n【材料 ${index + 1}】${source.fileName}\n角色：${getJointReviewRoleLabel(source.role)}\n`,
+      });
+      contentParts.push(getContentPartWithMaxChars(source.content, 50000));
+    });
+
+    const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> }> = [
+      { role: 'user', parts: contentParts },
+      { role: 'model', parts: [{ text: '我已了解这组材料。接下来我会以 lecture 为主线，必要时调用 readings 支撑。' }] },
+    ];
+
+    history.slice(-12).forEach((msg) => {
+      contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+    });
+    contents.push({ role: 'user', parts: [{ text: userMessage }] });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents,
+    });
+
+    return response.text?.trim() || '这次没讲出来，可以再点一次继续。';
+  } catch (error) {
+    console.error('chatWithJointReviewGuide Error:', error);
+    throw error;
+  }
+};
+
+export const generateJointReviewExamPrep = async (
+  sources: JointReviewSourceInput[],
+  options: { title: string; summaryMarkdown?: string; guideMessages?: ChatMessage[] }
+): Promise<string> => {
+  if (sources.length === 0) return localizeText('这个复习包里还没有材料。', 'This review bundle does not contain any materials yet.');
+  try {
+    const sourceIndex = sources
+      .map((source, index) => `${index + 1}. ${source.fileName} — ${getJointReviewRoleLabel(source.role)}`)
+      .join('\n');
+    const recentGuide = (options.guideMessages ?? [])
+      .slice(-10)
+      .map((msg) => `${msg.role === 'user' ? '学生' : '联合领读'}：${msg.text}`)
+      .join('\n\n');
+    const contentParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
+      {
+        text: `你是一个大学课程的考前整合助手。用户已经创建了一个“课次复习包”，里面有 lecture slides 和课前 reading/article/textbook。
+
+你的任务不是继续带读，而是生成一份可直接用于考前复习的中文 Markdown：把 lecture 和 readings 连接成答题材料。
+
+课次复习包：${options.title}
+
+材料清单：
+${sourceIndex}
+
+已有联合复习说明：
+${options.summaryMarkdown?.trim() || '暂无。'}
+
+最近联合领读对话：
+${recentGuide || '暂无。'}
+
+必须输出以下结构：
+
+# 联合考试整合
+
+## 1. 这组材料最可能怎么考
+列出 4-7 个可能考法。每个考法要说明为什么可能考，以及主要来自 lecture 还是 readings。
+
+## 2. 最小考试答案模板
+给 3-5 个高频核心问题。每个问题都要包含：
+- **最小答案**：只靠 lecture 也能答出的版本，适合考试时间紧张。
+- **加分 evidence**：reading/article/textbook 可以补的证据、研究、案例或出处。
+- **别写偏**：容易过度展开或跑题的地方。
+
+## 3. Lecture + Reading 对照答题表
+用 Markdown 表格：
+| Lecture 里的考点 | 对应 reading/article/textbook 的作用 | 考试中怎么用 |
+
+## 4. 易混点与陷阱
+列出容易把 lecture 和 readings 混错、概念混错、证据用错的地方。
+
+## 5. 考前 10 分钟速览
+写成极简清单：如果只剩 10 分钟，先看哪 5-8 个东西。
+
+## 6. 自测题
+给 5 道自测题，题后附简短参考答案。题目要能体现 lecture 与 readings 的关系，不要只考定义。
+
+约束：
+- 不要假装知道老师必考什么，要用“可能/高优先级/低优先级”表达不确定性。
+- 不要要求用户完整重读 paper。
+- 明确区分 lecture 的考试主线与 readings 的加分作用。
+- 如果没有足够证据建立精确对应关系，要直接说“这里需要回到原文核对”，不要编造页码。
+- 输出自然、实用、适合考前直接看。
+
+下面开始给你材料内容。`
+      },
+    ];
+
+    sources.forEach((source, index) => {
+      contentParts.push({
+        text: `\n\n【材料 ${index + 1}】${source.fileName}\n角色：${getJointReviewRoleLabel(source.role)}\n`,
+      });
+      contentParts.push(getContentPartWithMaxChars(source.content, 50000));
+    });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [{ role: 'user', parts: contentParts }],
+    });
+
+    return response.text?.trim() || '这次没生成出来，可以稍后重试。';
+  } catch (error) {
+    console.error('generateJointReviewExamPrep Error:', error);
+    throw error;
   }
 };
 
@@ -1871,7 +3136,7 @@ export function buildExamChunkCitationAppendix(candidates: RetrievedChunk[]): st
     .map((r) => {
       const id = r.chunk.chunkId;
       const sum = r.chunk.text.replace(/\s+/g, ' ').trim().slice(0, 80);
-      return `- \`${id}\` ｜ ${sum}`;
+      return `- \`${id}\` ｜ material=${r.chunk.materialLinkId} ｜ page=${r.chunk.page} ｜ ${sum}`;
     })
     .join('\n');
 
@@ -1890,6 +3155,94 @@ ${lines}
 - **不要**编造未出现在上方列表中的 id。
 
 若本轮无法关联到任何白名单片段，则**不要**输出任何 † 引用，也不要猜测页码。
+`;
+}
+
+function formatReviewScopeForPrompt(scope?: ExamReviewScope | null): string {
+  if (!scope) return '';
+  const formatPageWindows = (windows?: Array<{ start: number; end: number }>): string | null => {
+    const valid = (windows ?? [])
+      .filter((w) => Number.isFinite(w.start) && Number.isFinite(w.end))
+      .map((w) => ({ start: Math.max(1, Math.min(w.start, w.end)), end: Math.max(1, Math.max(w.start, w.end)) }));
+    if (!valid.length) return null;
+    return valid
+      .map((w) => (w.start === w.end ? `第 ${w.start} 页` : `第 ${w.start}-${w.end} 页`))
+      .join('、');
+  };
+  const pageLine =
+    formatPageWindows(scope.pageWindows) ||
+    scope.pageLabel ||
+    (scope.pageRange ? `第 ${scope.pageRange.start}-${scope.pageRange.end} 页` : '页码范围未知');
+  const kcLines = scope.sourceKcs
+    .slice(0, 12)
+    .map((kc, i) => {
+      const anchors = (kc.anchorPages ?? []).length ? `主证据页 ${kc.anchorPages.join('、')}` : '';
+      const sourcePages = (kc.sourcePages ?? []).length ? `证据页 ${kc.sourcePages.join('、')}` : '';
+      const related = (kc.relatedPages ?? []).length ? `关联页 ${kc.relatedPages.join('、')}` : '';
+      const pages = [anchors, sourcePages, related].filter(Boolean).join('；') || '页码未知';
+      return `${i + 1}. ${kc.concept}（${pages}）`;
+    })
+    .join('\n');
+
+  return `
+
+【当前复习块与证据锚点】
+- 当前块：${scope.title}
+- 当前材料：${scope.materialTitle}
+- 当前证据页/窗口：${pageLine}
+- 当前块 KC：\n${kcLines || '（暂无 KC 明细）'}
+
+回答规则：
+1. 主回答必须先围绕“当前复习块”回答；不要把其它 lecture / paper / article 的内容说成当前页或当前块内容。
+2. 页码是证据锚点，不是牢笼；如果用户指出具体页码或指出页码/内容冲突，必须优先核查本轮白名单和用户指出的页码，不要硬拗原范围。
+3. 你可以有全局视野，但只能放在单独小段「全局联系（非当前块证据）」里，并明确说明它来自当前范围之外。
+4. 如果用户问“你确定这是当前页/当前块内容吗”，必须先核对上面的当前材料、证据页和本轮白名单；若刚才说的是外部联系，要直接承认并改回当前材料。
+5. 若当前块证据不足，不要用外部材料硬补成当前证据；请说“当前块里证据不足，我只能作为全局联系补充”。
+`;
+}
+
+/**
+ * 当前复习块专用 chunk 附录：把主证据和全局延伸分开，避免“串台”。
+ */
+export function buildExamScopedChunkCitationAppendix(input: {
+  scope?: ExamReviewScope | null;
+  primary: RetrievedChunk[];
+  global?: RetrievedChunk[];
+}): string {
+  const primary = input.primary ?? [];
+  const global = input.global ?? [];
+  const all = [...primary, ...global];
+  if (!all.length) return '';
+
+  const exampleId = all[0]!.chunk.chunkId;
+  const formatLine = (r: RetrievedChunk) => {
+    const id = r.chunk.chunkId;
+    const sum = r.chunk.text.replace(/\s+/g, ' ').trim().slice(0, 80);
+    return `- \`${id}\` ｜ material=${r.chunk.materialLinkId} ｜ page=${r.chunk.page} ｜ ${sum}`;
+  };
+  const primaryLines = primary.map(formatLine).join('\n') || '- （本轮没有命中当前块附近片段）';
+  const globalLines = global.map(formatLine).join('\n') || '- （本轮没有额外全局片段）';
+  const scopeText = formatReviewScopeForPrompt(input.scope);
+
+  return `
+${scopeText}
+
+【讲义定位引用（当前材料优先 · 必须遵守）】
+本轮白名单分两类。正文的主回答优先使用「当前材料证据」；「全局延伸证据」只能用于单独的“全局联系（非当前块证据）”小段。
+如果用户明确提到某一页，本轮「当前材料证据」中与该页相邻的片段优先级最高。
+
+当前材料证据（当前块 / 用户指出页码 / 同材料候选）：
+${primaryLines}
+
+全局延伸证据：
+${globalLines}
+
+【引用暗号（必须）】
+- 在正文中需要指向讲义时，使用 **†chunkId†**（字符 † 为 U+2020 DAGGER，一对包裹完整 chunkId）。
+- 示例：正如 †${exampleId}† 中的表述…
+- 仅允许引用上方白名单里的 chunkId；禁止编造 id、materialId 或页码。
+- 不要使用旧版文末 \`\`\`json\` 的 \`citations\` 块。
+- 如果当前材料证据为空，不要假装定位到了当前页；请明说当前材料附近暂无可用定位证据。
 `;
 }
 
@@ -1931,6 +3284,7 @@ function buildKCScopedTutorAppendix(ctx: KCScopedTutorContext): string {
 - 布鲁姆追问目标层级：${ctx.bloomTarget}（1=记忆/理解，2=应用，3=分析/综合）
 ${modeHint}
 ${gapPart}
+${formatReviewScopeForPrompt(ctx.reviewScope)}
 
 【本考点逻辑原子 id 清单】
 ${atomLines || '（暂无原子，仅围绕考点概念讨论）'}
@@ -1994,6 +3348,7 @@ function buildMultiKCScopedTutorAppendix(ctx: MultiKCScopedTutorContext): string
 【阶段 3·本场锚定多选考点（共 ${ctx.kcs.length} 个 KC，本轮可在以下范围内联合讨论）】
 请围绕下列考点联合追问与讲解，识别学生表述时按各 KC 各自的原子清单核对覆盖。
 不要泄露 atom id 给学生；保持苏格拉底式辅导口吻，不出"判对错"式题。
+${formatReviewScopeForPrompt(ctx.reviewScope)}
 
 ${kcBlocks}
 
@@ -2011,10 +3366,35 @@ ${kcBlocks}
  * - 该函数由 `chatWithSkimAdaptiveTutor` 与 `chatWithAdaptiveTutor` 的 reading 分支共用；
  *   备考 reading 若未来传入 options，同样遵循本规则。
  */
+type SkimReadingRecordScope = {
+  cardId: string;
+  moduleIndex: number;
+  partIndex?: number;
+  title: string;
+  moduleTitle: string;
+  pageStart: number;
+  pageEnd: number;
+  summary: string;
+  otherRecordDigests: Array<{
+    moduleIndex: number;
+    partIndex?: number;
+    title: string;
+    clarified: string[];
+    unresolved: string[];
+  }>;
+};
+
 // 注:`skimPace` 仅由略读路径(`chatWithSkimAdaptiveTutor` / `SkimPanel`)使用;备考路径(`chatWithAdaptiveTutor`)不传该字段,if 条件永不触发。
 export function appendReadingModeUserMessageSuffix(
   newMessage: string,
-  readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number; skimPace?: 'module' | 'part' }
+  readingOptions?: {
+    skimGranularity?: 'fine' | 'standard' | 'coarse';
+    studyMapBriefing?: string;
+    moduleCount?: number;
+    skimPace?: 'module' | 'part';
+    auxiliaryMaterial?: { fileName: string; role: SkimAuxiliaryMaterialRole; useMode?: SkimAuxiliaryUseMode; content: string };
+    recordScope?: SkimReadingRecordScope;
+  }
 ): string {
   if (!readingOptions) {
     return newMessage;
@@ -2024,6 +3404,8 @@ export function appendReadingModeUserMessageSuffix(
   const brief = readingOptions.studyMapBriefing?.trim();
 
   let out = newMessage;
+
+  out += "\n\n【格式要求·硬约束】只使用 Markdown。不要输出 HTML 标签，尤其不要输出 <br>、<div>、<span>；需要换行时直接换行。";
 
   // 方案 A:moduleCount 与 brief 同时注入,先放硬数字约束,再放地图作为参考清单
   if (hasModuleCount) {
@@ -2041,9 +3423,103 @@ export function appendReadingModeUserMessageSuffix(
       "。";
   }
   if (readingOptions.skimPace === 'part') {
-    out += "\n\n【节奏要求】我需要你一次只生成一个 part，从 module1 开始。不需要你按照既定的格式，目的是讲的很详细就好。";
+    out += "\n\n【节奏要求·硬约束】本次领读节奏 = 一次一个 part。无论用户说“继续”“下一段”“往下讲”，都只能推进当前顺序里的下一个 part，不能一次输出完整 module，也不能连续讲多个 part。请根据对话历史判断当前已经讲到哪里；除非用户明确要求重讲，否则不要从 module1 重新开始。讲完一个 part 后停下，简短询问是否继续。";
+  } else if (readingOptions.skimPace === 'module') {
+    out += "\n\n【节奏要求·硬约束】本次领读节奏 = 一次一个 module。无论用户说“继续”“下一段”“往下讲”，都只能推进当前顺序里的下一个 module，不能一次输出多个 module。请根据对话历史判断当前已经讲到哪里；除非用户明确要求重讲，否则不要从 module1 重新开始。讲完一个 module 后停下，简短询问是否继续。";
+  }
+  if (readingOptions.auxiliaryMaterial) {
+    const useMode = readingOptions.auxiliaryMaterial.useMode ?? 'necessary';
+    out += useMode === 'active'
+      ? "\n\n【联合辅助材料·硬约束】当前对话已挂载一份辅助材料，引用强度=积极关联。主材料仍是当前 PDF；请主动寻找当前 module / part 与辅助材料的联系，但每轮最多补充 1 个短小关联点。没有清楚联系时不要硬凑，不要讲完整辅助材料，不要让它抢走主线。"
+      : "\n\n【联合辅助材料·硬约束】当前对话已挂载一份辅助材料，引用强度=只在必要时引用。主材料仍是当前 PDF；只有当辅助材料能直接解释当前 module / part 的概念、证据、实验或背景时才引用。没有明显关系时完全不要提辅助材料，也不要写“本段没有引用辅助材料”。";
+  }
+  if (readingOptions.recordScope) {
+    const scope = readingOptions.recordScope;
+    const label = `Module ${scope.moduleIndex}${scope.partIndex ? ` · Part ${scope.partIndex}` : ''}`;
+    out += `\n\n【当前唱片范围·最高优先级】
+- 当前唱片：${label} · ${scope.title}
+- 所属 Module：${scope.moduleTitle}
+- 应用内页码：第 ${scope.pageStart}-${scope.pageEnd} 页
+- 本段梗概：${scope.summary}
+
+本轮默认只能讲解、追问、举例和总结上述唱片范围。你拥有整份 PDF 的全局视野，但不能因为看见其他页面就自行切换 Module / Part；只有用户明确提出“比较、联系、回顾、跳到其他部分”时才能跨范围，并要清楚说明正在做跨范围联系。讲完当前唱片后停下，不要自动开始下一张唱片，也不要重新输出整份 Lecture 路线。`;
+    if (scope.otherRecordDigests.length > 0) {
+      const digestText = scope.otherRecordDigests.slice(0, 12).map((digest) => {
+        const digestLabel = `Module ${digest.moduleIndex}${digest.partIndex ? ` Part ${digest.partIndex}` : ''} · ${digest.title}`;
+        const clarified = digest.clarified.slice(0, 3).join('；') || '暂无';
+        const unresolved = digest.unresolved.slice(0, 2).join('；') || '暂无';
+        return `- ${digestLabel}：已讲清 ${clarified}；未解决 ${unresolved}`;
+      }).join('\n');
+      out += `\n\n【其他唱片的压缩记忆·只作全局联系】\n${digestText}`;
+    }
   }
   return out;
+}
+
+type TutorTurnContext = {
+  currentPage?: number;
+  totalPages?: number;
+};
+
+const normalizeForTutorContext = (text: string): string => (
+  text.replace(/\s+/g, ' ').trim()
+);
+
+const clipTutorContextText = (text: string, maxLength = 700): string => {
+  const normalized = normalizeForTutorContext(text);
+  return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
+};
+
+const hasExplicitTutorTopicShift = (message: string): boolean => (
+  /第\s*[0-9一二三四五六七八九十百两]+\s*页|page\s*\d+|全(文|部|局|篇|书)|整(份|个|本)|module|模块|part|章节|换(一|个|成)|重新讲|另一个|下一页|上一页/i.test(message)
+);
+
+const isTutorFollowUpMessage = (message: string): boolean => {
+  const normalized = normalizeForTutorContext(message);
+  if (!normalized) return false;
+  const hasFollowUpCue =
+    /(太|过于)?(细|详细|复杂|长|多)|简单点|简短|短一点|大白话|换个说法|听不懂|没懂|不是这个意思|不用|不需要|继续|再讲|重讲|举例|例子|为什么|怎么理解|什么意思|这句|刚刚|上面|前面|这一点|这个/.test(normalized);
+  return hasFollowUpCue && !hasExplicitTutorTopicShift(normalized);
+};
+
+function buildTutorContextTurnSuffix(
+  history: ChatMessage[],
+  newMessage: string,
+  tutorContext?: TutorTurnContext
+): string {
+  const realHistory = history.filter((msg) => normalizeForTutorContext(msg.text).length > 0);
+  const previousUser = [...realHistory].reverse().find((msg) => msg.role === 'user');
+  const previousModel = [...realHistory].reverse().find((msg) => msg.role === 'model');
+  const hasPreviousTurn = Boolean(previousUser || previousModel);
+  const shouldAnchorToPreviousTurn = hasPreviousTurn && isTutorFollowUpMessage(newMessage);
+  const pageHint =
+    tutorContext?.currentPage && tutorContext?.totalPages
+      ? `当前界面停在第 ${tutorContext.currentPage} / ${tutorContext.totalPages} 页。`
+      : tutorContext?.currentPage
+        ? `当前界面停在第 ${tutorContext.currentPage} 页。`
+        : '';
+
+  if (!pageHint && !hasPreviousTurn) return '';
+
+  let suffix = '\n\n【私教上下文护栏】';
+  if (pageHint) {
+    suffix += `\n- ${pageHint}如果用户没有明确指定别的页码，可以把当前页作为重要参考，但不要无故改成全文概览。`;
+  }
+  suffix += '\n- 用户的短反馈（例如“太细了”“简单点”“不用这么细”“换个说法”“举个例子”）默认是在修改或追问上一轮回答，不是开启新任务。';
+  suffix += '\n- 如果本轮消息没有明确要求换页、换 module 或总结全文，必须保持上一轮的页码、概念和任务范围，只调整讲法、长度或难度。';
+  suffix += '\n- 不要因为用户说“别太细”就自动切到全书大纲；应当把上一轮内容压缩成更轻、更短、更好懂的版本。';
+
+  if (previousUser) {
+    suffix += `\n\n上一轮用户问题：${clipTutorContextText(previousUser.text, 320)}`;
+  }
+  if (previousModel) {
+    suffix += `\n上一轮助手回答片段：${clipTutorContextText(previousModel.text, 520)}`;
+  }
+  if (shouldAnchorToPreviousTurn) {
+    suffix += '\n\n【本轮判定】这句话高度像是对上一轮回答的风格/长度反馈。请重写或调整上一轮回答，不要换主题。';
+  }
+
+  return suffix;
 }
 
 /**
@@ -2152,15 +3628,39 @@ export async function chatWithSkimAdaptiveTutor(
   newMessage: string,
   mode: 'tutoring' | 'reading',
   docType: DocType = 'STEM',
-  readingOptions?: { skimGranularity?: 'fine' | 'standard' | 'coarse'; studyMapBriefing?: string; moduleCount?: number; skimPace?: 'module' | 'part' },
+  readingOptions?: {
+    skimGranularity?: 'fine' | 'standard' | 'coarse';
+    studyMapBriefing?: string;
+    moduleCount?: number;
+    skimPace?: 'module' | 'part';
+    auxiliaryMaterial?: {
+      fileName: string;
+      role: SkimAuxiliaryMaterialRole;
+      useMode?: SkimAuxiliaryUseMode;
+      content: string;
+    };
+    recordScope?: SkimReadingRecordScope;
+  },
   abortSignal?: AbortSignal,
   /** 当前轮用户图片(数组,语义对齐 chatWithSlide 的 userImagesBase64;放末尾以避免 TS 必填参数顺序错误) */
   userImagesBase64?: string[],
   /** 阶段4b：内容类型。'paper'/'article' 走顺序陪读 prompt；缺省/'lecture' 维持 docType 逻辑。私教不传。 */
-  contentType?: SkimContentType
+  contentType?: SkimContentType,
+  tutorContext?: TutorTurnContext
 ): Promise<string> {
   try {
     const contentPart = getContentPart(docContent);
+    const auxiliaryRoleLabel: Record<SkimAuxiliaryMaterialRole, string> = {
+      reading: '课前阅读',
+      paper: 'Paper',
+      article: '文章',
+      textbook: '教科书',
+      other: '辅助材料',
+    };
+    const auxiliaryUseModeLabel: Record<SkimAuxiliaryUseMode, string> = {
+      necessary: '只在必要时引用',
+      active: '积极关联',
+    };
     const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> }> = [];
     const systemInstruction =
       contentType === 'paper' ? PAPER_COMPANION_PROMPT
@@ -2171,7 +3671,20 @@ export async function chatWithSkimAdaptiveTutor(
     contents.push({
       role: 'user',
       parts: [
+        { text: mode === 'tutoring'
+          ? '【主材料】下面这份文档是用户正在学习的 PDF。私教回答必须优先围绕用户问题和当前对话上下文，不要无故切到全文概览。'
+          : '【主材料】下面这份文档是本轮领读的主线。除非用户明确要求，否则必须围绕主材料推进。'
+        },
         contentPart,
+        ...(readingOptions?.auxiliaryMaterial ? [
+          {
+            text: `【辅助材料】下面这份文档是可选参考，不是主线。\n文件名：${readingOptions.auxiliaryMaterial.fileName}\n身份：${auxiliaryRoleLabel[readingOptions.auxiliaryMaterial.role]}\n引用强度：${auxiliaryUseModeLabel[readingOptions.auxiliaryMaterial.useMode ?? 'necessary']}\n使用规则：\n1. 主材料永远是当前 PDF，辅助材料不能改写本轮结构。\n2. ${readingOptions.auxiliaryMaterial.useMode === 'active' ? '可以主动寻找当前 module / part 与辅助材料的联系，但每轮最多补充一个短小关联点。' : '只在辅助材料能直接解释当前 module / part 时引用；没有明显关系就完全不提。'}\n3. 不要总结完整辅助材料，不要连续大段引用辅助材料。\n4. 如果引用它，请用“补充自${auxiliaryRoleLabel[readingOptions.auxiliaryMaterial.role]}：...”标明，并控制在 1-3 句。`
+          },
+          getContentPart(readingOptions.auxiliaryMaterial.content),
+        ] : []),
+        ...(readingOptions?.recordScope ? [{
+          text: `【唱片学习上下文】当前会话是独立唱片对话，范围为应用内第 ${readingOptions.recordScope.pageStart}-${readingOptions.recordScope.pageEnd} 页。整份主材料只提供全局视野；除非用户明确提出跨范围比较或联系，不得主动讲解范围外内容，也不得延续其他唱片的聊天。`
+        }] : []),
         { text: `Current Mode: ${mode === 'tutoring' ? 'Recursive Tutoring' : 'Deep Lead-Reading (Phase 1/2)'}` }
       ]
     });
@@ -2193,6 +3706,8 @@ export async function chatWithSkimAdaptiveTutor(
     let finalMessage = newMessage;
     if (mode === 'reading' && readingOptions) {
       finalMessage = appendReadingModeUserMessageSuffix(newMessage, readingOptions);
+    } else if (mode === 'tutoring') {
+      finalMessage += buildTutorContextTurnSuffix(history, newMessage, tutorContext);
     }
 
     const currentParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: finalMessage }];
@@ -2219,9 +3734,720 @@ export async function chatWithSkimAdaptiveTutor(
       throw error;
     }
     console.error('Skim Adaptive Tutor Error:', error);
-    return '通信中断，请重试。';
+    return localizeText('通信中断，请重试。', 'The connection was interrupted. Please try again.');
   }
 }
+
+type ContinuousLectureReadingOptions = {
+  studyMapBriefing?: string;
+  moduleCount?: number;
+  skimPace?: 'module' | 'part';
+  auxiliaryMaterial?: {
+    fileName: string;
+    role: SkimAuxiliaryMaterialRole;
+    useMode?: SkimAuxiliaryUseMode;
+    content: string;
+  };
+  recordScope?: SkimReadingRecordScope;
+};
+
+export interface GenerateContinuousLectureTurnInput {
+  docContent: string;
+  history: ChatMessage[];
+  newMessage: string;
+  docType: DocType;
+  readingOptions?: ContinuousLectureReadingOptions;
+  depth: SkimExplanationDepth;
+  pageStart: number;
+  pageEnd: number;
+  turnIntent?: 'standard' | 'knowledge-extraction-feedback';
+  abortSignal?: AbortSignal;
+  userImagesBase64?: string[];
+}
+
+export interface GenerateContinuousLectureVariantInput {
+  docContent: string;
+  explanation: SkimExplanationState;
+  targetDepth: SkimExplanationDepth;
+  targetStyle: SkimExplanationStyle;
+  pageStart: number;
+  pageEnd: number;
+  recordScope?: Pick<SkimReadingRecordScope, 'title' | 'pageStart' | 'pageEnd'>;
+  abortSignal?: AbortSignal;
+}
+
+export interface GenerateLegacyRecordExplanationVariantInput {
+  docContent: string;
+  legacyMessageMarkdown: string;
+  targetDepth: SkimExplanationDepth;
+  targetStyle: SkimExplanationStyle;
+  pageStart: number;
+  pageEnd: number;
+  recordTitle: string;
+  abortSignal?: AbortSignal;
+}
+
+const SKIM_EXPLANATION_RESPONSE_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    responseKind: { type: Type.STRING, enum: ['explanation', 'transition'] },
+    messageMarkdown: { type: Type.STRING },
+    spineItems: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          id: { type: Type.STRING },
+          titleZh: { type: Type.STRING },
+          titleEn: { type: Type.STRING },
+          kind: { type: Type.STRING, enum: ['concept', 'relationship', 'mechanism', 'evidence', 'boundary', 'example'] },
+          summary: { type: Type.STRING },
+          pageRefs: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+        },
+        required: ['id', 'titleZh', 'kind', 'summary', 'pageRefs'],
+      },
+    },
+    coveredSpineItemIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+    deferredSpineItemIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+    pageRefs: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+  },
+  required: ['responseKind', 'messageMarkdown', 'spineItems', 'coveredSpineItemIds', 'deferredSpineItemIds', 'pageRefs'],
+};
+
+const SKIM_EXPLANATION_VARIANT_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    messageMarkdown: { type: Type.STRING },
+    coveredSpineItemIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+    deferredSpineItemIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+    pageRefs: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+  },
+  required: ['messageMarkdown', 'coveredSpineItemIds', 'deferredSpineItemIds', 'pageRefs'],
+};
+
+const asStringArray = (value: unknown): string[] => (
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean) : []
+);
+
+const asPageArray = (value: unknown): number[] => (
+  Array.isArray(value)
+    ? value.map(Number).filter((page) => Number.isInteger(page))
+    : []
+);
+
+const normalizeSkimExplanationSpine = (value: unknown): SkimExplanationSpineItem[] => {
+  if (!Array.isArray(value)) return [];
+  return value.map((raw, index) => {
+    const item = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    const kind = typeof item.kind === 'string' && ['concept', 'relationship', 'mechanism', 'evidence', 'boundary', 'example'].includes(item.kind)
+      ? item.kind as SkimExplanationSpineItem['kind']
+      : 'concept';
+    return {
+      id: typeof item.id === 'string' && item.id.trim() ? item.id.trim() : `spine-${index + 1}`,
+      titleZh: typeof item.titleZh === 'string' ? item.titleZh.trim() : '',
+      ...(typeof item.titleEn === 'string' && item.titleEn.trim() ? { titleEn: item.titleEn.trim() } : {}),
+      kind,
+      summary: typeof item.summary === 'string' ? item.summary.trim() : '',
+      pageRefs: asPageArray(item.pageRefs),
+    };
+  });
+};
+
+const parseContinuousLectureTurnDraft = (raw: string): SkimExplanationTurnDraft => {
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = parseJsonObject(raw);
+  } catch {
+    // 返回可校验的空草稿，让调用方携带错误反馈自动修复一次。
+  }
+  return {
+    responseKind: parsed.responseKind === 'transition' ? 'transition' : 'explanation',
+    messageMarkdown: typeof parsed.messageMarkdown === 'string' ? parsed.messageMarkdown.trim() : '',
+    spineItems: normalizeSkimExplanationSpine(parsed.spineItems),
+    coveredSpineItemIds: asStringArray(parsed.coveredSpineItemIds),
+    deferredSpineItemIds: asStringArray(parsed.deferredSpineItemIds),
+    pageRefs: asPageArray(parsed.pageRefs),
+  };
+};
+
+const parseContinuousLectureVariantDraft = (raw: string): SkimExplanationVariantDraft => {
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = parseJsonObject(raw);
+  } catch {
+    // 同上：结构失败进入一次修复，不覆盖已有版本。
+  }
+  return {
+    messageMarkdown: typeof parsed.messageMarkdown === 'string' ? parsed.messageMarkdown.trim() : '',
+    coveredSpineItemIds: asStringArray(parsed.coveredSpineItemIds),
+    deferredSpineItemIds: asStringArray(parsed.deferredSpineItemIds),
+    pageRefs: asPageArray(parsed.pageRefs),
+  };
+};
+
+const buildContinuousLectureDepthDirective = (
+  depth: SkimExplanationDepth,
+  pageStart: number,
+  pageEnd: number,
+  turnIntent: GenerateContinuousLectureTurnInput['turnIntent'] = 'standard',
+  recordScope?: SkimReadingRecordScope,
+  validationFeedback?: string,
+): string => {
+  const modeLabel = recordScope ? '分段唱片式' : '整段式';
+  if (turnIntent === 'knowledge-extraction-feedback') {
+    return `
+
+【普通 Lecture ${modeLabel}领读·临时知识提取核对】
+用户刚刚回答了“看要点”里生成的临时知识提取题。本轮只核对这一次回答，不继续普通领读流程。
+
+必须遵守：
+- 只用简短中文说明“已经说出的意思”和“还需要补的一点”；如果用户想不起来，只补最小缺口。
+- 不给分，不使用百分比、满分、全部拿下等表达，也不声称用户已经掌握、学会或理解扎实。
+- 不继续出题，不主动进入或邀请进入下一个 Module / Part，不询问是否准备好继续。
+- 不改变学习进度、覆盖、证据或掌握状态；这只是一次即时回想核对。
+- 结尾至多告诉用户：可以继续正常领读，或再次打开“看要点”。
+- 必须返回 responseKind=transition；spineItems、coveredSpineItemIds、deferredSpineItemIds、pageRefs 全部为空数组。核对文字只写入 messageMarkdown。
+- 只返回结构化 JSON，不要把 JSON 说明写入 messageMarkdown。
+${validationFeedback ? `
+【上一次输出未通过校验，必须逐项修复】
+${validationFeedback}
+只返回修复后的完整 JSON。` : ''}`;
+  }
+
+  return `
+
+【普通 Lecture ${modeLabel}领读·连接式讲解协议】
+当前应用内页码范围：第 ${pageStart}-${pageEnd} 页。页码只能使用这个范围内的整数。
+本轮讲解深度：${depth === 'simple' ? '简单讲' : '正常讲'}。
+${recordScope ? `当前唱片：${recordScope.title}。上述页码就是这张唱片的硬边界；骨架、讲解、例子和页码都不得越过它，不得自动开始下一张唱片。` : ''}
+
+请返回结构化 JSON，不要把 JSON 说明写入 messageMarkdown。
+- responseKind：有实质概念、关系、机制、证据、边界或例子时为 explanation；只有简短确认、报错或“是否继续”时为 transition。
+- explanation 必须先为本轮原文建立完整 spineItems。骨架要覆盖本轮应讲的核心概念、关系、机制、关键证据和边界，不能因为选择简单讲就从骨架删除难点。
+- 每个骨架项必须有稳定且本轮唯一的 id、中文名、可用时的英文名、短摘要、类型和原 PDF 应用内页码。
+- messageMarkdown 中文为主，英文术语只作为必要的括号补充；只用 Markdown，不用 HTML。
+${depth === 'simple' ? `- 简单讲先给核心关系、直觉和至多一个具体例子，短句、少术语。coveredSpineItemIds 写已经展开的骨架项；其余全部写入 deferredSpineItemIds，界面会显示“AI暂时替你记着”，所以任何骨架项都不能遗漏。` : `- 正常讲完整说明正式术语、关系、机制、证据和边界。coveredSpineItemIds 必须包含全部骨架项，deferredSpineItemIds 必须为空。`}
+- pageRefs 是本轮实际涉及页码的去重数组。transition 的 spineItems 与覆盖数组必须全部为空。
+- 不要引入 Lecture 之外的事实，不要编造页码。
+${validationFeedback ? `
+【上一次输出未通过校验，必须逐项修复】
+${validationFeedback}
+只返回修复后的完整 JSON。` : ''}`;
+};
+
+const appendAuxiliaryContinuousLectureContext = (
+  parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>,
+  auxiliary?: ContinuousLectureReadingOptions['auxiliaryMaterial'],
+) => {
+  if (!auxiliary) return;
+  parts.push({
+    text: `【辅助材料】${auxiliary.fileName}。它只用于必要补充，当前 PDF 永远是讲解主线；不得用辅助材料替换主材料的内容骨架。`,
+  });
+  parts.push(getContentPart(auxiliary.content));
+};
+
+/** 仅供 Lecture + continuous/records + reading 使用；其他领读/私教入口继续使用原服务。 */
+export const generateContinuousLectureTurn = async (
+  input: GenerateContinuousLectureTurnInput,
+): Promise<SkimExplanationTurnDraft> => {
+  const run = async (validationFeedback?: string): Promise<SkimExplanationTurnDraft> => {
+    const recordScope = input.readingOptions?.recordScope;
+    const documentParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [
+      { text: `【主材料】下面是当前普通${recordScope ? '分段唱片式' : '整段式'} Lecture 的主 PDF。所有讲解、骨架和页码必须以它为准。` },
+      getContentPart(input.docContent),
+    ];
+    appendAuxiliaryContinuousLectureContext(documentParts, input.readingOptions?.auxiliaryMaterial);
+    documentParts.push({ text: recordScope ? 'Current Mode: Record-scoped Lecture Lead-Reading' : 'Current Mode: Continuous Lecture Lead-Reading' });
+
+    const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> }> = [
+      { role: 'user', parts: documentParts },
+    ];
+    input.history.forEach((message) => {
+      const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: message.text }];
+      if (message.role === 'user') {
+        getMessageImages(message).forEach((image) => {
+          const [prefix, data] = image.split(',');
+          if (!data) return;
+          parts.push({ inlineData: { mimeType: prefix.split(';')[0].split(':')[1] || 'image/png', data } });
+        });
+      }
+      contents.push({ role: message.role, parts });
+    });
+    const finalMessage = appendReadingModeUserMessageSuffix(input.newMessage, input.readingOptions)
+      + buildContinuousLectureDepthDirective(
+        input.depth,
+        input.pageStart,
+        input.pageEnd,
+        input.turnIntent,
+        recordScope,
+        validationFeedback,
+      );
+    const currentParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: finalMessage }];
+    (input.userImagesBase64 ?? []).forEach((image) => {
+      const [prefix, data] = image.split(',');
+      if (!data) return;
+      currentParts.push({ inlineData: { mimeType: prefix.split(';')[0].split(':')[1] || 'image/png', data } });
+    });
+    contents.push({ role: 'user', parts: currentParts });
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents,
+      config: {
+        systemInstruction: input.docType === 'HUMANITIES' ? HUMANITIES_SYSTEM_PROMPT : STEM_SYSTEM_PROMPT,
+        responseMimeType: 'application/json',
+        responseSchema: SKIM_EXPLANATION_RESPONSE_SCHEMA,
+        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+      },
+    });
+    return parseContinuousLectureTurnDraft(response.text || '');
+  };
+
+  let draft = await run();
+  let validation = validateSkimExplanationTurnDraft(draft, input.depth, input.pageStart, input.pageEnd);
+  if (!validation.valid) {
+    draft = await run(validation.errors.join('\n'));
+    validation = validateSkimExplanationTurnDraft(draft, input.depth, input.pageStart, input.pageEnd);
+  }
+  if (!validation.valid) throw new Error(`连接式讲解校验失败：${validation.errors.join('；')}`);
+  return draft;
+};
+
+/**
+ * 为旧唱片讲解按需补建内容骨架。原消息保留为 normal-standard，
+ * 本服务只生成用户首次点击的目标版本，不在加载时自动消耗模型。
+ */
+export const generateLegacyRecordExplanationVariant = async (
+  input: GenerateLegacyRecordExplanationVariantInput,
+): Promise<SkimExplanationTurnDraft> => {
+  const run = async (validationFeedback?: string): Promise<SkimExplanationTurnDraft> => {
+    const prompt = `【旧唱片讲解·建立连接式版本】
+当前唱片：${input.recordTitle}
+硬性页码范围：第 ${input.pageStart}-${input.pageEnd} 页
+目标深度：${input.targetDepth === 'simple' ? '简单讲' : '正常讲'}
+目标表达：${input.targetStyle === 'interesting' ? '有意思讲法' : '标准讲法'}
+
+这是该唱片之前已经生成的旧讲解：
+
+---
+${input.legacyMessageMarkdown.slice(0, 24000)}
+---
+
+请先从“旧讲解实际说了什么”提取不可变内容骨架，再生成目标版本。
+必须遵守：
+1. responseKind 必须为 explanation。
+2. spineItems 只收录旧讲解已经表达、且能被当前唱片原 PDF 支持的概念、关系、机制、证据、边界和例子；不要把下一张唱片或旧消息未讲的内容加进骨架。
+3. 每个骨架项必须有稳定 ID、中英文名称、短摘要、类型和合法原文页码。
+4. ${input.targetDepth === 'simple' ? '只展开核心关系、直觉和至多一个例子；其余骨架项全部放入 deferredSpineItemIds。' : '展开全部骨架项；coveredSpineItemIds 包含全部 ID，deferredSpineItemIds 为空。'}
+5. ${input.targetStyle === 'interesting' ? '只从这张唱片和旧讲解中找反直觉、冲突、场景或类比；不得添加外部新闻或新研究。结尾对应回正式术语和页码。' : '中文为主，必要英文术语放括号；保持与旧讲解的明确对应。'}
+6. messageMarkdown 只放目标版本正文；pageRefs 与所有骨架页码只能在第 ${input.pageStart}-${input.pageEnd} 页。
+7. 只返回结构化 JSON。
+${validationFeedback ? `
+【上一次输出未通过校验，必须修复】
+${validationFeedback}
+只返回修复后的完整 JSON。` : ''}`;
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [{
+        role: 'user',
+        parts: [getContentPart(input.docContent), { text: prompt }],
+      }],
+      config: {
+        systemInstruction: '你负责为普通 Lecture 的旧唱片讲解补建连接式版本。必须保留原结论，严格遵守当前唱片范围。',
+        responseMimeType: 'application/json',
+        responseSchema: SKIM_EXPLANATION_RESPONSE_SCHEMA,
+        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+      },
+    });
+    return parseContinuousLectureTurnDraft(response.text || '');
+  };
+
+  let draft = await run();
+  let validation = validateSkimExplanationTurnDraft(
+    draft,
+    input.targetDepth,
+    input.pageStart,
+    input.pageEnd,
+  );
+  if (!validation.valid) {
+    draft = await run(validation.errors.join('\n'));
+    validation = validateSkimExplanationTurnDraft(
+      draft,
+      input.targetDepth,
+      input.pageStart,
+      input.pageEnd,
+    );
+  }
+  if (!validation.valid) throw new Error(`旧唱片讲解骨架校验失败：${validation.errors.join('；')}`);
+  return draft;
+};
+
+const buildVariantDirective = (
+  input: GenerateContinuousLectureVariantInput,
+  validationFeedback?: string,
+): string => {
+  const variants = Object.values(input.explanation.variants)
+    .filter((variant): variant is NonNullable<typeof variant> => Boolean(variant))
+    .map((variant) => ({
+      key: variant.key,
+      depth: variant.depth,
+      style: variant.style,
+      messageMarkdown: variant.messageMarkdown.slice(0, 16000),
+      coveredSpineItemIds: variant.coveredSpineItemIds,
+      deferredSpineItemIds: variant.deferredSpineItemIds,
+    }));
+  return `【同一条领读讲解·生成连接版本】
+目标深度：${input.targetDepth === 'simple' ? '简单讲' : '正常讲'}
+目标表达：${input.targetStyle === 'interesting' ? '有意思讲法' : '标准讲法'}
+合法页码：第 ${input.pageStart}-${input.pageEnd} 页
+
+不可变内容骨架：
+${JSON.stringify(input.explanation.spineItems)}
+
+已经生成的同卡片版本：
+${JSON.stringify(variants)}
+
+规则：
+1. 只能改变讲解深度和表达方式，不能新增、删除或改写骨架结论，不能引用骨架外的事实。
+2. 必须参考原 PDF 核对事实与页码，不能只根据简单版自行扩写。
+${input.recordScope ? `3. 这条讲解属于唱片“${input.recordScope.title}”，范围为第 ${input.recordScope.pageStart}-${input.recordScope.pageEnd} 页。任何版本都不得引入下一张唱片的内容。` : '3. 当前为整段式领读，继续沿用该消息已有的内容骨架和页码范围。'}
+4. ${input.targetDepth === 'normal' ? '正常版必须覆盖每个骨架项，coveredSpineItemIds 写全部骨架 ID，deferredSpineItemIds 为空。若已有同表达方式的简单版，要明确用“刚才简单版里的……，正式来说对应……”建立连接。' : '简单版只展开核心关系和一个直觉例子，其余骨架项全部放进 deferredSpineItemIds，不能丢失。'}
+5. ${input.targetStyle === 'interesting' ? '从原材料内部寻找反直觉结果、冲突、具体场景或贴切类比；不要编造新闻、研究或外部事实。结尾明确把场景/类比逐项对应回 Lecture 的术语、证据和页码。若已有另一深度的有意思版，沿用同一个入口。' : '保持清楚、直接、中文为主；必要英文术语放在括号中。'}
+6. messageMarkdown 只用 Markdown，不用 HTML。pageRefs 只能使用合法范围内的原文页码。
+${validationFeedback ? `
+【上一次输出未通过校验，必须修复】
+${validationFeedback}
+只返回修复后的完整 JSON。` : ''}`;
+};
+
+export const generateContinuousLectureVariant = async (
+  input: GenerateContinuousLectureVariantInput,
+): Promise<SkimExplanationVariantDraft> => {
+  const run = async (validationFeedback?: string): Promise<SkimExplanationVariantDraft> => {
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [{
+        role: 'user',
+        parts: [getContentPart(input.docContent), { text: buildVariantDirective(input, validationFeedback) }],
+      }],
+      config: {
+        systemInstruction: '你是普通 Lecture 领读的讲解改写器。忠实性、当前范围和同一内容骨架优先于文风变化。',
+        responseMimeType: 'application/json',
+        responseSchema: SKIM_EXPLANATION_VARIANT_SCHEMA,
+        ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+      },
+    });
+    return parseContinuousLectureVariantDraft(response.text || '');
+  };
+
+  let draft = await run();
+  let validation = validateSkimExplanationVariantDraft(
+    draft,
+    input.explanation.spineItems,
+    input.targetDepth,
+    input.pageStart,
+    input.pageEnd,
+  );
+  if (!validation.valid) {
+    draft = await run(validation.errors.join('\n'));
+    validation = validateSkimExplanationVariantDraft(
+      draft,
+      input.explanation.spineItems,
+      input.targetDepth,
+      input.pageStart,
+      input.pageEnd,
+    );
+  }
+  if (!validation.valid) throw new Error(`讲解版本校验失败：${validation.errors.join('；')}`);
+  return draft;
+};
+
+type RawSkimRouteNode = {
+  kind?: string;
+  index?: number;
+  title?: string;
+  pageStart?: number;
+  pageEnd?: number;
+  pageLabel?: string;
+  summary?: string;
+  children?: RawSkimRouteNode[];
+};
+
+type RawSkimRoutePayload = {
+  title?: string;
+  nodes?: RawSkimRouteNode[];
+};
+
+const parseSkimRouteJson = (raw: string): RawSkimRoutePayload | null => {
+  const candidates = [
+    raw,
+    raw.replace(/```(?:json)?/gi, '').replace(/```/g, '').trim(),
+  ];
+  const firstBrace = raw.indexOf('{');
+  const lastBrace = raw.lastIndexOf('}');
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    candidates.push(raw.slice(firstBrace, lastBrace + 1));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as RawSkimRoutePayload;
+      if (parsed && Array.isArray(parsed.nodes)) return parsed;
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+};
+
+const normalizeRouteTitle = (value: unknown, fallback: string): string => {
+  if (typeof value !== 'string') return fallback;
+  const text = value.replace(/\s+/g, ' ').trim();
+  return text || fallback;
+};
+
+const normalizeRoutePageNumber = (value: unknown): number | undefined => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  const page = Math.round(value);
+  return page > 0 ? page : undefined;
+};
+
+const routeTopKindForContentType = (contentType: SkimContentType): SkimReadingRouteNode['kind'] => {
+  if (contentType === 'paper') return 'section';
+  if (contentType === 'article') return 'stage';
+  return 'module';
+};
+
+const routeChildKindForContentType = (contentType: SkimContentType): SkimReadingRouteNode['kind'] => {
+  if (contentType === 'paper') return 'naturalPart';
+  if (contentType === 'article') return 'paragraphGroup';
+  return 'part';
+};
+
+const normalizeSkimRouteNode = (
+  node: RawSkimRouteNode,
+  contentType: SkimContentType,
+  index: number,
+  parentId?: string
+): SkimReadingRouteNode => {
+  const isChild = Boolean(parentId);
+  const expectedKind = isChild ? routeChildKindForContentType(contentType) : routeTopKindForContentType(contentType);
+  const id = parentId ? `${parentId}-part-${index}` : `route-${contentType}-${index}`;
+  const pageStart = normalizeRoutePageNumber(node.pageStart);
+  const pageEnd = normalizeRoutePageNumber(node.pageEnd);
+  const pageLabel =
+    typeof node.pageLabel === 'string' && node.pageLabel.trim()
+      ? node.pageLabel.trim()
+      : pageStart && pageEnd
+        ? `${pageStart}-${pageEnd} 页`
+        : pageStart
+          ? `第 ${pageStart} 页`
+          : undefined;
+
+  const children = Array.isArray(node.children)
+    ? node.children
+        .slice(0, 8)
+        .map((child, childIndex) => normalizeSkimRouteNode(child, contentType, childIndex + 1, id))
+    : undefined;
+
+  return {
+    id,
+    kind: expectedKind,
+    index,
+    title: normalizeRouteTitle(node.title, isChild ? `Part ${index}` : `Module ${index}`),
+    ...(pageStart ? { pageStart } : {}),
+    ...(pageEnd ? { pageEnd } : {}),
+    ...(pageLabel ? { pageLabel } : {}),
+    ...(typeof node.summary === 'string' && node.summary.trim() ? { summary: node.summary.trim() } : {}),
+    ...(children && children.length > 0 ? { children } : {}),
+  };
+};
+
+const buildSkimRoutePrompt = (options: {
+  contentType: SkimContentType;
+  moduleCount?: number;
+  skimPace?: 'module' | 'part';
+  pageRangeLabel?: string;
+  studyMapBriefing?: string;
+  strictPageRanges?: boolean;
+  pageIndexedText?: string;
+  validationFeedback?: string;
+}): string => {
+  const {
+    contentType,
+    moduleCount,
+    skimPace,
+    pageRangeLabel,
+    studyMapBriefing,
+    strictPageRanges,
+    pageIndexedText,
+    validationFeedback,
+  } = options;
+  const lectureInstruction = `
+你正在为一份 lecture / 讲义生成"可导航领读路线"。
+- 顶层必须是 Module。
+- 如果用户指定模块数(${moduleCount ?? '未指定'}),顶层 Module 数量必须严格贴近/等于该数量。
+- 每个 Module 下可以有 1-4 个 Part,数量按内容自然决定,绝对不要假设每个 Module 都只有 2 个 Part。
+- Part 页码范围必须落在对应 Module 页码范围内。
+- 如果学习地图提供了模块标题和页码,优先沿用它,但要补出自然 Part。`;
+
+  const paperInstruction = `
+你正在为一篇论文 / paper 生成"可导航领读路线"。
+- 顶层是论文真实 Section 或功能段,例如 Abstract、Introduction、Methods、Results、Discussion、Conclusion。
+- 不要套 lecture 的 Module 模板。
+- 长 section 可以拆成 1-4 个 Natural Part;短 section 可以没有 children。
+- 标题要体现作者结构和论证功能。`;
+
+  const articleInstruction = `
+你正在为一篇文章 / 书章生成"可导航领读路线"。
+- 顶层是作者推进思路的 Stage,不是论文 section,也不是 lecture module。
+- 每个 Stage 可拆成若干 Paragraph Group / 小段落组。
+- 标题要体现这一段在作者思路里做了什么,比如提出问题、举例推进、转折反驳、收束结论。`;
+
+  return `
+请只根据材料生成一份稳定的"领读目录路线" JSON。不要讲解内容,不要输出 Markdown。
+
+共同要求:
+- 这份路线用于右侧目录跳转,所以必须按材料出现顺序排列。
+- 只记录正式主线结构,不要记录用户插队提问、追问、重讲请求。
+- ${strictPageRanges
+    ? '页码是创建唱片的硬数据，必须使用下面“逐页原文”标注的应用内页码，禁止估算、使用幻灯片印刷页码或跳过空白页。顶层 Module 必须无缺页、无重叠地连续覆盖整个指定范围；有 Part 时，Part 也必须无缺页、无重叠地连续覆盖所属 Module。'
+    : '页码尽量准确;不确定时允许近似,但不要编造不存在的页码。'}
+- title 用中文优先,必要时保留英文术语。
+- summary ${strictPageRanges ? '写两句简短梗概：第一句说明本段讲什么，第二句说明它在整份 Lecture 中的作用。' : '只写一句短说明,不要长篇解释。'}
+- 输出必须是 JSON object,形如:
+{
+  "title": "整份材料标题",
+  "nodes": [
+    {
+      "kind": "module",
+      "index": 1,
+      "title": "Module 标题",
+      "pageStart": 1,
+      "pageEnd": 6,
+      "pageLabel": "1-6 页",
+      "summary": "这一段在主线中的作用",
+      "children": [
+        { "kind": "part", "index": 1, "title": "Part 标题", "pageStart": 1, "pageEnd": 3, "pageLabel": "1-3 页", "summary": "短说明" }
+      ]
+    }
+  ]
+}
+
+当前材料类型: ${contentType}
+当前页码范围: ${pageRangeLabel || '整份材料'}
+${contentType === 'lecture' ? `当前领读节奏: ${skimPace === 'part' ? '一次一个 part' : '一次一个 module'}` : ''}
+${contentType === 'lecture' ? lectureInstruction : contentType === 'paper' ? paperInstruction : articleInstruction}
+
+${studyMapBriefing?.trim() ? `可参考的旧学习地图如下,但请输出结构化 JSON:\n${studyMapBriefing.trim().slice(0, 8000)}` : ''}
+${validationFeedback?.trim() ? `\n【上一次路线校验失败，必须逐项修复】\n${validationFeedback.trim()}\n不要解释修复过程，只返回修正后的完整 JSON。` : ''}
+${strictPageRanges && pageIndexedText?.trim() ? `\n【逐页原文与唯一页码依据】\n${pageIndexedText.trim()}` : ''}
+`;
+};
+
+export const generateSkimReadingRoute = async (
+  docContent: string,
+  options: {
+    contentType: SkimContentType;
+    docType: DocType;
+    moduleCount?: number;
+    skimPace?: 'module' | 'part';
+    pageRangeLabel?: string;
+    studyMapBriefing?: string;
+    strictPageRanges?: boolean;
+    pageIndexedText?: string;
+    validationFeedback?: string;
+  }
+): Promise<SkimReadingRoute | null> => {
+  try {
+    const contentPart = getContentPart(docContent);
+    const prompt = buildSkimRoutePrompt(options);
+    const childKind = routeChildKindForContentType(options.contentType);
+    const topKind = routeTopKindForContentType(options.contentType);
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-pro-preview',
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            contentPart,
+            { text: prompt },
+          ],
+        },
+      ],
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            nodes: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  kind: { type: Type.STRING, enum: [topKind] },
+                  index: { type: Type.INTEGER },
+                  title: { type: Type.STRING },
+                  pageStart: { type: Type.INTEGER },
+                  pageEnd: { type: Type.INTEGER },
+                  pageLabel: { type: Type.STRING },
+                  summary: { type: Type.STRING },
+                  children: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        kind: { type: Type.STRING, enum: [childKind] },
+                        index: { type: Type.INTEGER },
+                        title: { type: Type.STRING },
+                        pageStart: { type: Type.INTEGER },
+                        pageEnd: { type: Type.INTEGER },
+                        pageLabel: { type: Type.STRING },
+                        summary: { type: Type.STRING },
+                      },
+                      required: options.strictPageRanges
+                        ? ['kind', 'index', 'title', 'pageStart', 'pageEnd', 'pageLabel', 'summary']
+                        : ['title'],
+                    },
+                  },
+                },
+                required: options.strictPageRanges
+                  ? ['kind', 'index', 'title', 'pageStart', 'pageEnd', 'pageLabel', 'summary']
+                  : ['title'],
+              },
+            },
+          },
+          required: ['nodes'],
+        },
+      },
+    });
+
+    const parsed = parseSkimRouteJson(response.text || '');
+    if (!parsed?.nodes?.length) return null;
+
+    const nodes = parsed.nodes
+      .slice(0, 16)
+      .map((node, index) => normalizeSkimRouteNode(node, options.contentType, index + 1));
+    if (nodes.length === 0) return null;
+
+    return {
+      id: `skim-route-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      version: 1,
+      kind: options.contentType,
+      title: normalizeRouteTitle(parsed.title, options.contentType === 'lecture' ? '讲义领读路线' : options.contentType === 'paper' ? '论文领读路线' : '文章领读路线'),
+      generatedAt: Date.now(),
+      ...(options.pageRangeLabel ? { pageRangeLabel: options.pageRangeLabel } : {}),
+      ...(typeof options.moduleCount === 'number' ? { moduleCount: options.moduleCount } : {}),
+      ...(options.skimPace ? { skimPace: options.skimPace } : {}),
+      nodes,
+    };
+  } catch (error) {
+    console.warn('Generate skim reading route failed:', error);
+    return null;
+  }
+};
 
 /** 生成 Study Guide/Outline */
 export const generateStudyGuide = async (
@@ -2408,6 +4634,24 @@ export const generateStudyGuide = async (
 };
 
 // --- L-SAP 考前预测 ---
+function normalizeKcPageList(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((page) => (typeof page === 'string' ? Number(page.trim()) : Number(page)))
+        .filter((page) => Number.isFinite(page) && page >= 1)
+        .map((page) => Math.round(page))
+    )
+  ).sort((a, b) => a - b);
+}
+
+function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
 export const generateLSAPContentMap = async (
   docContent: string,
   options?: GenerateLSAPContentMapOptions
@@ -2420,12 +4664,24 @@ export const generateLSAPContentMap = async (
 
 对每个知识组件输出：
 - id: 唯一标识，如 kc-0, kc-1（本段内唯一即可）
-- concept: 概念名称
-- definition: 简短定义（一句）
+- concept: 材料中的原始概念名称（优先保留英文术语）
+- definition: 与材料语言一致的简短定义（一句）
+- conceptZh: concept 的准确中文名称
+- definitionZh: definition 的准确中文解释；专业术语首次出现时保留英文括注
 - reviewFocus: 复习重点（一句话，严格基于本段）
-- sourcePages: 出现过的页码数组（从本段结构推断，如 [1,2,3]）
+- sourcePages: 直接讲到这个 KC 的证据页数组，必须是 DOCUMENT 里能核对到的页码，如 [12,13]；不要用端点页码假装覆盖整段
+- anchorPages: 1-3 个最核心的证据页，优先选择定义、关键图表、关键实验、关键结论所在页
+- relatedPages: 只作背景、承接、对照的相关页；不要把它们混进 anchorPages
 - examWeight: 考试权重 1-5（5 最重要）
 - bloomTargetLevel: 布鲁姆目标层级 1-3（1=记忆/理解，2=应用，3=分析/综合）
+
+分块原则：
+- KC 是后台「关键点」，不是给用户直接看的整章复习块；可以多一些，但每个必须具体、可验证。
+- 对 lecture/slides：单个 KC 通常覆盖 1-6 个相邻页；如果一个主题要跨很多页，请按“定义/机制/实验/反驳/例子/总结”等局部阶段拆成多个 KC。
+- 对 paper/article：单个 KC 应对应一个具体论证、方法、结果或结论片段，不要把整篇 Introduction/Discussion 合成一个 KC。
+- 不要输出类似 [24,25,...,59] 或 [24,59] 这种横跨大半份材料的 KC；这种情况必须拆小。
+- 如果某个概念在第 24 页提出、第 42 页再次被讨论，请输出 sourcePages: [24,42]，anchorPages 选其中最关键的 1-3 页；不要写成 [24,25,...,42] 或 [24,42] 来表示 24-42 连续范围。
+- 页码来自 DOCUMENT 中的页码标记/页面结构；不确定时宁可少填可核对页，不要猜。
 
 请**充分覆盖本段/本讲的核心可考点**，数量随内容复杂度增加；软上限约 **40 个 KC**（内容极少时可少于 5）。输出 JSON：{ "id": "content-map-xxx", "sourceKey": "doc", "kcs": [ ... ], "createdAt": 0 }
 createdAt 请填当前时间戳（毫秒）。`
@@ -2433,12 +4689,24 @@ createdAt 请填当前时间戳（毫秒）。`
 
 对每个知识组件输出：
 - id: 唯一标识，如 kc-0, kc-1
-- concept: 概念名称
-- definition: 简短定义（一句）
+- concept: 材料中的原始概念名称（优先保留英文术语）
+- definition: 与材料语言一致的简短定义（一句）
+- conceptZh: concept 的准确中文名称
+- definitionZh: definition 的准确中文解释；专业术语首次出现时保留英文括注
 - reviewFocus: 复习重点（一句话，便于复习时扫一眼知道要学什么，严格基于文档）
-- sourcePages: 出现过的页码数组（从文档结构推断，如 [1,2,3]）
+- sourcePages: 直接讲到这个 KC 的证据页数组，必须是 DOCUMENT 里能核对到的页码，如 [12,13]；不要用端点页码假装覆盖整段
+- anchorPages: 1-3 个最核心的证据页，优先选择定义、关键图表、关键实验、关键结论所在页
+- relatedPages: 只作背景、承接、对照的相关页；不要把它们混进 anchorPages
 - examWeight: 考试权重 1-5（5 最重要）
 - bloomTargetLevel: 布鲁姆目标层级 1-3（1=记忆/理解，2=应用，3=分析/综合）
+
+分块原则：
+- KC 是后台「关键点」，不是给用户直接看的整章复习块；可以多一些，但每个必须具体、可验证。
+- 对 lecture/slides：单个 KC 通常覆盖 1-6 个相邻页；如果一个主题要跨很多页，请按“定义/机制/实验/反驳/例子/总结”等局部阶段拆成多个 KC。
+- 对 paper/article：单个 KC 应对应一个具体论证、方法、结果或结论片段，不要把整篇 Introduction/Discussion 合成一个 KC。
+- 不要输出类似 [24,25,...,59] 或 [24,59] 这种横跨大半份材料的 KC；这种情况必须拆小。
+- 如果某个概念在第 24 页提出、第 42 页再次被讨论，请输出 sourcePages: [24,42]，anchorPages 选其中最关键的 1-3 页；不要写成 [24,25,...,42] 或 [24,42] 来表示 24-42 连续范围。
+- 页码来自 DOCUMENT 中的页码标记/页面结构；不确定时宁可少填可核对页，不要猜。
 
 请覆盖文档中的核心考点，数量 5-15 个。输出 JSON：{ "id": "content-map-xxx", "sourceKey": "doc", "kcs": [ ... ], "createdAt": 0 }
 createdAt 请填当前时间戳（毫秒）。`;
@@ -2460,13 +4728,17 @@ createdAt 请填当前时间戳（毫秒）。`;
                   id: { type: Type.STRING },
                   concept: { type: Type.STRING },
                   definition: { type: Type.STRING },
+                  conceptZh: { type: Type.STRING },
+                  definitionZh: { type: Type.STRING },
                   reviewFocus: { type: Type.STRING },
                   sourcePages: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+                  anchorPages: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+                  relatedPages: { type: Type.ARRAY, items: { type: Type.INTEGER } },
                   sourceExcerpt: { type: Type.STRING },
                   examWeight: { type: Type.NUMBER },
                   bloomTargetLevel: { type: Type.INTEGER }
                 },
-                required: ['id', 'concept', 'definition', 'sourcePages', 'examWeight', 'bloomTargetLevel']
+                required: ['id', 'concept', 'definition', 'conceptZh', 'definitionZh', 'sourcePages', 'examWeight', 'bloomTargetLevel']
               }
             },
             createdAt: { type: Type.NUMBER }
@@ -2479,6 +4751,25 @@ createdAt 请填当前时间戳（毫秒）。`;
     const parsed = JSON.parse(response.text) as LSAPContentMap;
     if (!parsed.kcs?.length) return null;
     parsed.createdAt = parsed.createdAt || Date.now();
+    parsed.kcs = parsed.kcs.map((kc, index) => {
+      const sourcePages = normalizeKcPageList(kc.sourcePages);
+      const anchorPages = normalizeKcPageList(kc.anchorPages);
+      const relatedPages = normalizeKcPageList(kc.relatedPages);
+      return {
+        ...kc,
+        id: (kc.id || `kc-${index}`).trim(),
+        concept: (kc.concept || `知识点 ${index + 1}`).trim(),
+        definition: (kc.definition || '').trim(),
+        conceptZh: (kc.conceptZh || '').trim() || undefined,
+        definitionZh: (kc.definitionZh || '').trim() || undefined,
+        reviewFocus: (kc.reviewFocus || '').trim(),
+        sourcePages,
+        anchorPages: anchorPages.length > 0 ? anchorPages : sourcePages.slice(0, 3),
+        relatedPages,
+        examWeight: clampNumber(kc.examWeight, 3, 1, 5),
+        bloomTargetLevel: Math.round(clampNumber(kc.bloomTargetLevel, 1, 1, 3)),
+      };
+    });
     return parsed;
   } catch (e) {
     console.error('generateLSAPContentMap Error:', e);
@@ -2504,12 +4795,21 @@ export async function generateLogicAtomsForContentMap(
     const contentPart = getContentPartWithMaxChars(mergedDocContent, maxChars);
     const docLabel = options?.perMaterial ? '本份关联材料全文' : '本场合并讲义';
 
+    const preserveExistingAtoms = options?.preserveExistingAtoms === true;
     const kcSummaries = copy.kcs
       .map(
-        (k) =>
-          `- id=${k.id}; concept=${k.concept}; definition=${(k.definition || '').slice(0, 200)}; examWeight=${k.examWeight ?? 3}; bloomTargetLevel=${k.bloomTargetLevel ?? 1}`
+        (k) => {
+          const existingAtoms = preserveExistingAtoms && (k.atoms?.length ?? 0) > 0
+            ? `; 既有原子（必须原顺序保留）：${(k.atoms ?? []).map((atom, index) => `[${index}] ${atom.label}: ${atom.description}`).join(' | ')}`
+            : '';
+          return `- id=${k.id}; concept=${k.concept}; definition=${(k.definition || '').slice(0, 200)}; 可用证据页=${normalizeKcPageList([...(k.anchorPages ?? []), ...(k.sourcePages ?? []), ...(k.relatedPages ?? [])]).join(',') || '未知'}; examWeight=${k.examWeight ?? 3}; bloomTargetLevel=${k.bloomTargetLevel ?? 1}${existingAtoms}`;
+        }
       )
       .join('\n');
+
+    const preservationRule = preserveExistingAtoms
+      ? '8. 若 KC 列出了“既有原子”，必须保持其数量、顺序、英文 label 和英文 description 不变；你只负责补全中文与精确页码。这样旧覆盖记录仍能对应原来的原子。'
+      : '';
 
     const prompt = `你是课程分析助手。下面「DOCUMENT」为${docLabel}（唯一事实来源）。上面列出了已提取的考点（KC）列表。
 
@@ -2518,9 +4818,12 @@ export async function generateLogicAtomsForContentMap(
 硬性规则：
 1. 严格依据 DOCUMENT，禁止引入讲义外知识；不要编造页码。
 2. 每个 KC 输出 **3～8** 条原子：examWeight 越高、bloomTargetLevel 越高，倾向于取**更多**条（仍不超过 8）。
-3. 每条原子用简短 label（≤40 字）+ description（1～2 句，可复述讲义可核对的内容）。
+3. 每条原子同时输出：英文 label（≤40 字）、英文 description（1～2 句）、准确的中文 labelZh、中文 descriptionZh。中文不是删减摘要，必须保留英文中的数字、限定条件和因果关系；专业术语首次出现时保留英文括注。
 4. 必须覆盖列表中的**全部** KC id；某 KC 在文档中信息极少时可少至 3 条，但不要留空数组。
-5. 输出 JSON 仅含 perKc 数组：每项含 kcId（与输入 id 一致）与 atoms（label + description，不要含 id 字段）。
+5. 每条原子输出 sourcePages，只列出 DOCUMENT 中直接支持这条命题的 1～3 个原 PDF 页码，并且必须来自对应 KC 的“可用证据页”；不能确定时输出空数组，禁止猜页码。
+6. 每个 perKc 项额外输出 conceptZh 与 definitionZh，作为该 KC 英文名称和定义的准确中文版本。
+7. 输出 JSON 仅含 perKc 数组：每项含 kcId、conceptZh、definitionZh 与 atoms（label、description、labelZh、descriptionZh、sourcePages，不要含 id 字段）。
+${preservationRule}
 
 KC 列表：
 ${kcSummaries}`;
@@ -2539,6 +4842,8 @@ ${kcSummaries}`;
                 type: Type.OBJECT,
                 properties: {
                   kcId: { type: Type.STRING },
+                  conceptZh: { type: Type.STRING },
+                  definitionZh: { type: Type.STRING },
                   atoms: {
                     type: Type.ARRAY,
                     items: {
@@ -2546,12 +4851,15 @@ ${kcSummaries}`;
                       properties: {
                         label: { type: Type.STRING },
                         description: { type: Type.STRING },
+                        labelZh: { type: Type.STRING },
+                        descriptionZh: { type: Type.STRING },
+                        sourcePages: { type: Type.ARRAY, items: { type: Type.INTEGER } },
                       },
-                      required: ['label', 'description'],
+                      required: ['label', 'description', 'labelZh', 'descriptionZh', 'sourcePages'],
                     },
                   },
                 },
-                required: ['kcId', 'atoms'],
+                required: ['kcId', 'conceptZh', 'definitionZh', 'atoms'],
               },
             },
           },
@@ -2561,24 +4869,52 @@ ${kcSummaries}`;
     });
 
     if (!response.text) return null;
-    const parsed = JSON.parse(response.text) as { perKc?: Array<{ kcId: string; atoms: Array<{ label: string; description: string }> }> };
+    type GeneratedAtomRow = {
+      label: string;
+      description: string;
+      labelZh?: string;
+      descriptionZh?: string;
+      sourcePages?: number[];
+    };
+    type GeneratedKcRow = {
+      kcId: string;
+      conceptZh?: string;
+      definitionZh?: string;
+      atoms: GeneratedAtomRow[];
+    };
+    const parsed = JSON.parse(response.text) as { perKc?: GeneratedKcRow[] };
     const rows = parsed.perKc;
     if (!Array.isArray(rows)) return null;
 
-    const byKcId = new Map<string, Array<{ label: string; description: string }>>();
+    const byKcId = new Map<string, GeneratedKcRow>();
     for (const row of rows) {
       if (!row?.kcId) continue;
-      if (!byKcId.has(row.kcId)) byKcId.set(row.kcId, row.atoms ?? []);
+      if (!byKcId.has(row.kcId)) byKcId.set(row.kcId, row);
     }
 
     for (const kc of copy.kcs) {
-      const rawAtoms = byKcId.get(kc.id) ?? [];
-      const atoms: LogicAtom[] = rawAtoms.map((a, index) => ({
-        id: `atom-${kc.id}-${index}`,
+      const generated = byKcId.get(kc.id);
+      const rawAtoms = generated?.atoms ?? [];
+      const existingAtoms = kc.atoms ?? [];
+      const atomRows = preserveExistingAtoms && existingAtoms.length > 0
+        ? existingAtoms.map((existing, index) => ({ existing, generated: rawAtoms[index] }))
+        : rawAtoms.map((generated) => ({ existing: undefined, generated }));
+      const allowedPages = new Set(normalizeKcPageList([
+        ...(kc.anchorPages ?? []),
+        ...(kc.sourcePages ?? []),
+        ...(kc.relatedPages ?? []),
+      ]));
+      const atoms: LogicAtom[] = atomRows.map(({ existing, generated: a }, index) => ({
+        id: existing?.id ?? `atom-${kc.id}-${index}`,
         kcId: kc.id,
-        label: (a.label || '').trim() || `原子 ${index + 1}`,
-        description: (a.description || '').trim() || '—',
+        label: (existing?.label ?? (a?.label || '').trim()) || `原子 ${index + 1}`,
+        description: (existing?.description ?? (a?.description || '').trim()) || '—',
+        labelZh: (a?.labelZh || existing?.labelZh || '').trim() || undefined,
+        descriptionZh: (a?.descriptionZh || existing?.descriptionZh || '').trim() || undefined,
+        sourcePages: normalizeKcPageList(a?.sourcePages ?? existing?.sourcePages).filter((page) => allowedPages.has(page)),
       }));
+      kc.conceptZh = (generated?.conceptZh || kc.conceptZh || '').trim() || undefined;
+      kc.definitionZh = (generated?.definitionZh || kc.definitionZh || '').trim() || undefined;
       kc.atoms = atoms;
     }
 
@@ -3012,7 +5348,7 @@ ${historyText ? `此前对话：\n${historyText}\n\n` : ''}学生问：${userQue
     return response.text?.trim() || '请对照讲义再想想，或点击「查看讲义」看具体页码。';
   } catch (e) {
     console.error('answerLSAPTeachingQuestion Error:', e);
-    return '回答生成失败，请重试或直接查看讲义对应页码。';
+    return localizeText('回答生成失败，请重试或直接查看讲义对应页码。', 'The answer could not be generated. Try again or open the cited lecture pages.');
   }
 };
 
@@ -3873,3 +6209,923 @@ ${JSON.stringify(recentWindow.map(summarizeWitnessForPrompt), null, 2)}
         },
     };
 };
+
+export const translateLectureTranscriptSegment = async (
+    text: string,
+    recentContext: string[] = []
+): Promise<string> => {
+    const source = text.trim();
+    if (!source) return '';
+    const context = recentContext.filter(Boolean).slice(-2).join('\n');
+    const prompt = `
+你是大学课堂的实时字幕翻译器。把下面老师刚确认的一小段课堂原文翻译成简体中文。
+
+规则：
+1. 忠实翻译，不解释、不总结、不扩写。
+2. 专业术语、学者姓名、缩写必须准确；术语第一次出现时可保留英文括号。
+3. 结合前两段上下文消解代词，但只输出“当前原文”的翻译。
+4. 如果原文是残句，保留残句，不擅自补出老师没说的话。
+5. 只输出中文译文，不要标题或引号。
+
+最近上下文：
+${context || '（无）'}
+
+当前原文：
+${source}
+`;
+    const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: { temperature: 0.15 },
+    });
+    return (response.text || '').trim();
+};
+
+// === Lecture 案件式领读 =====================================================
+
+export interface AnalyzeLectureCaseFitInput {
+    pdfDataUrl?: string | null;
+    pageTexts: string[];
+    pageStart: number;
+    pageEnd: number;
+    abortSignal?: AbortSignal;
+}
+
+export interface LectureCaseAnalysisResult {
+    manifest: LectureCaseManifest;
+    report: LectureCaseSuitabilityReport;
+}
+
+export interface BuildLectureCasePlanInput {
+    manifest: LectureCaseManifest;
+    report: LectureCaseSuitabilityReport;
+    validationFeedback?: string;
+    abortSignal?: AbortSignal;
+}
+
+export interface AdvanceLectureCaseInput {
+    plan: LectureCasePlan;
+    episode: LectureCaseEpisode;
+    progress: LectureCaseProgress;
+    pageTexts: string[];
+    history: ChatMessage[];
+    userMessage: string;
+    abortSignal?: AbortSignal;
+}
+
+const CASE_CHUNK_MAX_CHARS = 60_000;
+
+const clampCaseScore = (value: unknown): number => {
+    const number = typeof value === 'number' && Number.isFinite(value) ? value : 0;
+    return Math.max(0, Math.min(1, number));
+};
+
+const parseCaseJson = <T,>(text: string | undefined): T => {
+    if (!text) throw new Error('模型没有返回案件式结构化结果。');
+    return JSON.parse(cleanJsonString(text)) as T;
+};
+
+const buildLectureCaseChunks = (pageTexts: string[], pageStart: number, pageEnd: number) => {
+    const chunks: Array<{ pageStart: number; pageEnd: number; text: string; hasVisualOnlyPage: boolean }> = [];
+    let currentPages: Array<{ page: number; text: string }> = [];
+    let currentLength = 0;
+    const flush = () => {
+        if (currentPages.length === 0) return;
+        chunks.push({
+            pageStart: currentPages[0].page,
+            pageEnd: currentPages[currentPages.length - 1].page,
+            text: currentPages.map(({ page, text }) => `[应用内第 ${page} 页]\n${text || '（本页没有可提取文字，必须结合 PDF 画面归档。）'}`).join('\n\n'),
+            hasVisualOnlyPage: currentPages.some(({ text }) => !text.trim()),
+        });
+        currentPages = [];
+        currentLength = 0;
+    };
+
+    for (let page = pageStart; page <= pageEnd; page += 1) {
+        const raw = pageTexts[page - 1]?.trim() || '';
+        const text = raw.length > CASE_CHUNK_MAX_CHARS
+            ? `${raw.slice(0, CASE_CHUNK_MAX_CHARS)}\n（本页提取文字过长，余下内容请结合随附 PDF 画面判断。）`
+            : raw;
+        const addition = text.length + 40;
+        if (currentPages.length > 0 && currentLength + addition > CASE_CHUNK_MAX_CHARS) flush();
+        currentPages.push({ page, text });
+        currentLength += addition;
+    }
+    flush();
+    return chunks;
+};
+
+const CASE_UNIT_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        id: { type: Type.STRING },
+        title: { type: Type.STRING },
+        kind: { type: Type.STRING, enum: ['concept', 'claim', 'evidence', 'method', 'critique', 'example', 'conclusion', 'context'] },
+        summary: { type: Type.STRING },
+        pageRefs: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+        importance: { type: Type.STRING, enum: ['core', 'supporting', 'context'] },
+        narrativeRole: { type: Type.STRING, enum: ['spine', 'toolkit', 'evidence', 'supplement'] },
+    },
+    required: ['id', 'title', 'kind', 'summary', 'pageRefs', 'importance', 'narrativeRole'],
+};
+
+const analyzeLectureCaseChunk = async (
+    chunk: { pageStart: number; pageEnd: number; text: string; hasVisualOnlyPage: boolean },
+    pdfDataUrl?: string | null,
+    abortSignal?: AbortSignal,
+): Promise<{ pages: LectureCasePageDisposition[]; units: LectureCaseContentUnit[] }> => {
+    const prompt = `
+你正在为大学 Lecture 建立忠实的逐页内容账本，不是在讲课，也不要编故事。
+
+当前唯一范围：应用内第 ${chunk.pageStart}-${chunk.pageEnd} 页。
+要求：
+1. 每一页恰好输出一条 pages 记录，不得缺页或越界。
+2. substantive=有需要学习的实质内容；duplicate=前后动画递进或重复；transition=过渡；title=纯标题；visual_only=主要信息在图中或没有可提取文字。
+3. 每一条记录必须写清处理理由。duplicate 需要说明与哪页重复或递进。
+4. 把实质内容拆成可核查的原子 units；一个 unit 可以跨页，但 pageRefs 必须准确。
+5. unit.id 在本批次内唯一，使用短英文/数字 ID；pages.unitIds 只能引用本批次 units。
+6. narrativeRole 只描述内容天然作用：spine 主线主张/关键结论；toolkit 前置工具；evidence 研究证据；supplement 补充例子或背景。
+7. 忠实保留研究设计、反驳、方法限制与结论，不能因为它们不够“有剧情”而删除。
+8. 所有给用户看的标题、摘要、理由与内容描述必须使用自然的简体中文。专业术语第一次出现时可写成“中文（English）”，不要输出整段英文；unit.id 等机器字段除外。
+
+逐页原文：
+${chunk.text}
+`;
+    const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: prompt }];
+    if (chunk.hasVisualOnlyPage && pdfDataUrl?.startsWith('data:')) parts.unshift(getContentPart(pdfDataUrl));
+    const response = await ai.models.generateContent({
+        model: 'gemini-3.1-pro-preview',
+        contents: [{ role: 'user', parts }],
+        config: {
+            ...(abortSignal ? { abortSignal } : {}),
+            responseMimeType: 'application/json',
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    pages: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                page: { type: Type.INTEGER },
+                                kind: { type: Type.STRING, enum: ['substantive', 'duplicate', 'transition', 'title', 'visual_only'] },
+                                unitIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                reason: { type: Type.STRING },
+                            },
+                            required: ['page', 'kind', 'unitIds', 'reason'],
+                        },
+                    },
+                    units: { type: Type.ARRAY, items: CASE_UNIT_SCHEMA },
+                },
+                required: ['pages', 'units'],
+            },
+        },
+    });
+    return parseCaseJson(response.text);
+};
+
+export const analyzeLectureCaseFit = async (
+    input: AnalyzeLectureCaseFitInput,
+): Promise<LectureCaseAnalysisResult> => {
+    const chunks = buildLectureCaseChunks(input.pageTexts, input.pageStart, input.pageEnd);
+    if (chunks.length === 0) throw new Error('所选范围没有可分析页面。');
+
+    const pages: LectureCasePageDisposition[] = [];
+    const units: LectureCaseContentUnit[] = [];
+    for (const chunk of chunks) {
+        const raw = await analyzeLectureCaseChunk(chunk, input.pdfDataUrl, input.abortSignal);
+        const prefix = `p${chunk.pageStart}`;
+        const idMap = new Map<string, string>();
+        raw.units.forEach((unit, index) => {
+            const id = `${prefix}-${unit.id?.trim() || `unit-${index + 1}`}`;
+            idMap.set(unit.id, id);
+            units.push({
+                ...unit,
+                id,
+                pageRefs: [...new Set(unit.pageRefs)].filter((page) => page >= chunk.pageStart && page <= chunk.pageEnd),
+            });
+        });
+        raw.pages.forEach((page) => {
+            if (page.page < chunk.pageStart || page.page > chunk.pageEnd) return;
+            pages.push({ ...page, unitIds: page.unitIds.map((id) => idMap.get(id)).filter((id): id is string => Boolean(id)) });
+        });
+        for (let page = chunk.pageStart; page <= chunk.pageEnd; page += 1) {
+            if (!pages.some((item) => item.page === page)) {
+                pages.push({ page, kind: 'visual_only', unitIds: [], reason: '模型未返回本页文字归档；保留为视觉页，需在案件计划中显式处理。' });
+            }
+        }
+    }
+    pages.sort((a, b) => a.page - b.page);
+    const manifest: LectureCaseManifest = {
+        version: 1,
+        pageStart: input.pageStart,
+        pageEnd: input.pageEnd,
+        pages,
+        units,
+    };
+
+    const compactManifest = JSON.stringify(manifest);
+    const reportPrompt = `
+请判断下面这份 Lecture 内容账本是否严格适合“案件式领读”。案件式不是虚构故事，而是围绕一个贯穿问题，让竞争主张、预测、证据、反驳和结论自然推进。
+
+严格标准：
+- 必须存在清晰且可由内容单元支持的贯穿问题；
+- 适合度低于 0.75 应判为不适合；
+- 至少能形成 3 个连贯章节；
+- 至少 85% 实质内容能直接进入主线，剩余内容仍须作为 toolkit 或 supplement 安置；
+- 零散术语、独立例题、公式速查或拼盘式复习不能强行案件化；
+- 语气忠实，不虚构人物对白。
+- centralQuestion、whySuitable、failureReasons、identifiedClaims、identifiedEvidenceChains、episodePreviews 等所有用户可见文字必须使用自然的简体中文。专业术语第一次出现时可保留英文括注，不要因为原文是英文就输出英文段落。
+
+只返回结构化判断。episodePreviews 是预览，不是最终计划，页码必须来自账本。
+
+内容账本：
+${compactManifest}
+`;
+    const response = await ai.models.generateContent({
+        model: 'gemini-3.1-pro-preview',
+        contents: [{ role: 'user', parts: [{ text: reportPrompt }] }],
+        config: {
+            ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+            responseMimeType: 'application/json',
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    suitabilityScore: { type: Type.NUMBER },
+                    mappableRate: { type: Type.NUMBER },
+                    centralQuestion: { type: Type.STRING },
+                    fitReasons: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    unsuitableReasons: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    detectedClaims: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    detectedEvidenceGroups: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    episodePreviews: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                title: { type: Type.STRING },
+                                role: { type: Type.STRING },
+                                pageRefs: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+                            },
+                            required: ['title', 'role', 'pageRefs'],
+                        },
+                    },
+                    recommendedFallback: { type: Type.STRING, enum: ['continuous', 'records'] },
+                },
+                required: ['suitabilityScore', 'mappableRate', 'centralQuestion', 'fitReasons', 'unsuitableReasons', 'detectedClaims', 'detectedEvidenceGroups', 'episodePreviews', 'recommendedFallback'],
+            },
+        },
+    });
+    const rawReport = parseCaseJson<LectureCaseSuitabilityReport>(response.text);
+    return {
+        manifest,
+        report: {
+            ...rawReport,
+            suitabilityScore: clampCaseScore(rawReport.suitabilityScore),
+            mappableRate: clampCaseScore(rawReport.mappableRate),
+            episodePreviews: rawReport.episodePreviews.map((episode) => ({
+                ...episode,
+                pageRefs: [...new Set(episode.pageRefs)].filter((page) => page >= input.pageStart && page <= input.pageEnd),
+            })),
+        },
+    };
+};
+
+export const buildLectureCasePlan = async (
+    input: BuildLectureCasePlanInput,
+): Promise<LectureCasePlan> => {
+    const prompt = `
+根据经过适配判断的 Lecture 内容账本，生成一份忠实的案件式领读计划。
+
+要求：
+1. 每个内容单元必须且只能分配给一个主章节，unitIds 使用原 ID，不得创建新 ID。
+2. 至少 3 章，按材料和推理自然顺序排列；允许前置工具包，但不能把所有内容硬写成法庭戏。
+3. 每章 guidingQuestion 必须能引出一个预测、判断、区分或重建动作。
+4. pageRefs 必须在 ${input.manifest.pageStart}-${input.manifest.pageEnd} 内；lastPage 设为该章第一来源页。
+5. openingPrompt 只做短开场并交出一个认知动作，不一次讲完整章。
+6. prerequisiteEpisodeIds 只引用更早章节；用户仍可自由打开后章。
+7. status 固定为 not_started，messages 和 unresolvedQuestions 固定为空数组。
+8. 不虚构原材料没有的人物、实验或结论。
+9. caseTitle、centralQuestion、spineSummary，以及每章的 title、role、guidingQuestion、openingPrompt、bridgeToNext，全部使用自然的简体中文。专业术语第一次出现时可写成“中文（English）”，不得整句照搬英文原文。
+10. title 只写章节名称，不要添加“Episode 1”“Chapter 1”或“第 1 章”等序号前缀，界面会统一显示章节序号。
+${input.validationFeedback ? `\n上一次计划校验失败，必须逐项修复：\n${input.validationFeedback}` : ''}
+
+适配报告：
+${JSON.stringify(input.report)}
+
+内容账本：
+${JSON.stringify(input.manifest)}
+`;
+    const response = await ai.models.generateContent({
+        model: 'gemini-3.1-pro-preview',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+            ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+            responseMimeType: 'application/json',
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    caseTitle: { type: Type.STRING },
+                    centralQuestion: { type: Type.STRING },
+                    spineSummary: { type: Type.STRING },
+                    episodes: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                id: { type: Type.STRING },
+                                index: { type: Type.INTEGER },
+                                title: { type: Type.STRING },
+                                role: { type: Type.STRING },
+                                guidingQuestion: { type: Type.STRING },
+                                pageRefs: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+                                unitIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                prerequisiteEpisodeIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                openingPrompt: { type: Type.STRING },
+                                bridgeToNext: { type: Type.STRING },
+                            },
+                            required: ['id', 'index', 'title', 'role', 'guidingQuestion', 'pageRefs', 'unitIds', 'prerequisiteEpisodeIds', 'openingPrompt'],
+                        },
+                    },
+                },
+                required: ['caseTitle', 'centralQuestion', 'spineSummary', 'episodes'],
+            },
+        },
+    });
+    const raw = parseCaseJson<Omit<LectureCasePlan, 'version'> & { episodes: Array<Omit<LectureCaseEpisode, 'status' | 'lastPage' | 'messages' | 'unresolvedQuestions'>> }>(response.text);
+    const idMap = new Map(raw.episodes.map((episode, index) => [episode.id, `case-episode-${index + 1}`]));
+    const cleanEpisodeTitle = (title: string): string => title
+        .replace(/^\s*(?:episode|chapter)\s*\d+\s*[:：.\-–—]?\s*/i, '')
+        .replace(/^\s*第\s*\d+\s*章\s*[:：.\-–—]?\s*/i, '')
+        .trim();
+    return {
+        version: 1,
+        caseTitle: raw.caseTitle,
+        centralQuestion: raw.centralQuestion,
+        spineSummary: raw.spineSummary,
+        episodes: raw.episodes.map((episode, index) => ({
+            ...episode,
+            title: cleanEpisodeTitle(episode.title) || `案件章节 ${index + 1}`,
+            id: idMap.get(episode.id) ?? `case-episode-${index + 1}`,
+            index: index + 1,
+            pageRefs: [...new Set(episode.pageRefs)].sort((a, b) => a - b),
+            prerequisiteEpisodeIds: episode.prerequisiteEpisodeIds.map((id) => idMap.get(id)).filter((id): id is string => Boolean(id)),
+            status: 'not_started',
+            lastPage: episode.pageRefs[0] ?? input.manifest.pageStart,
+            messages: [],
+            unresolvedQuestions: [],
+        })),
+    };
+};
+
+export const advanceLectureCase = async (
+    input: AdvanceLectureCaseInput,
+): Promise<LectureCaseTurnResult> => {
+    const allowedUnits = new Set(input.episode.unitIds);
+    const episodeUnits = input.episode.unitIds.map((unitId) => ({ unitId, progress: input.progress.units[unitId] ?? { level: 'unseen' } }));
+    const pageSource = input.episode.pageRefs
+        .map((page) => `[应用内第 ${page} 页]\n${input.pageTexts[page - 1]?.trim() || '（没有可提取文字，请谨慎依赖本章计划，不要编造视觉细节。）'}`)
+        .join('\n\n')
+        .slice(0, 60_000);
+    const history = input.history.slice(-16).map((message) => `${message.role === 'user' ? '用户' : 'AI'}：${message.text}`).join('\n');
+    const prompt = `
+你是“案件式领读”的忠实认知向导。案件感来自材料自身的主张、预测、证据和反驳，不得虚构戏剧。
+
+整案：${input.plan.caseTitle}
+贯穿问题：${input.plan.centralQuestion}
+主线：${input.plan.spineSummary}
+
+当前章节：${input.episode.title}
+本章作用：${input.episode.role}
+本章核心问题：${input.episode.guidingQuestion}
+本章允许更新的内容单元及状态：${JSON.stringify(episodeUnits)}
+
+规则：
+1. 一轮只交给用户一个认知动作：prediction、judgment、distinction 或 reconstruction；若用户要求“直接告诉我”，用 reveal 揭晓并停在下一个问题前。
+2. 用户说“我没懂”时换一个具体角度解释，相应 unit 标 needs_review。
+3. 用户说“我会了”只设置 selfReportedUnderstood=true；除非本轮确实包含无提示正确回答，否则不能标 verified。
+4. AI主动展示只能标 introduced；用户实际尝试可标 engaged；只有无提示正确回答才可标 verified。
+5. coverageUpdates 只能使用本章 unitId：${[...allowedUnits].join(', ')}。
+6. focusPages 只能使用本章来源页：${input.episode.pageRefs.join(', ')}。
+7. 内容忠实、简洁，不一次讲完整章。可以用“主张、证据、反驳、债务、裁决”等结构词。
+8. messageMarkdown 和 unresolvedQuestions 必须使用自然的简体中文。专业术语第一次出现时可写成“中文（English）”，之后优先使用中文；即使原文、章节计划或历史消息是英文，也不要跟随它们输出整段英文。
+
+本章原文：
+${pageSource}
+
+最近对话：
+${history || '（尚未开始）'}
+
+用户当前输入：
+${input.userMessage}
+`;
+    const response = await ai.models.generateContent({
+        model: 'gemini-3.1-pro-preview',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+            ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+            responseMimeType: 'application/json',
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    messageMarkdown: { type: Type.STRING },
+                    focusPages: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+                    interactionKind: { type: Type.STRING, enum: ['prediction', 'judgment', 'distinction', 'reconstruction', 'reveal', 'none'] },
+                    coverageUpdates: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                unitId: { type: Type.STRING },
+                                level: { type: Type.STRING, enum: ['introduced', 'engaged', 'verified', 'needs_review'] },
+                                evidence: { type: Type.STRING },
+                                selfReportedUnderstood: { type: Type.BOOLEAN },
+                            },
+                            required: ['unitId', 'level'],
+                        },
+                    },
+                    unresolvedQuestions: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    episodeReadyToComplete: { type: Type.BOOLEAN },
+                },
+                required: ['messageMarkdown', 'focusPages', 'interactionKind', 'coverageUpdates', 'unresolvedQuestions', 'episodeReadyToComplete'],
+            },
+        },
+    });
+    const raw = parseCaseJson<LectureCaseTurnResult>(response.text);
+    return {
+        ...raw,
+        focusPages: raw.focusPages.filter((page) => input.episode.pageRefs.includes(page)),
+        coverageUpdates: raw.coverageUpdates.filter((update) => allowedUnits.has(update.unitId)),
+    };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 备考工作台：整场考试对话（独立于知识块私教、BKT 与覆盖判断）
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ExamGlobalMaterialSourceBatch = {
+  text: string;
+  pages: number[];
+};
+
+export interface GenerateExamGlobalMaterialManifestInput {
+  materialLinkId: string;
+  fileName: string;
+  batches: ExamGlobalMaterialSourceBatch[];
+  routeHints?: string[];
+  abortSignal?: AbortSignal;
+}
+
+const EXAM_GLOBAL_MANIFEST_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    summary: { type: Type.STRING },
+    role: { type: Type.STRING },
+    mainQuestions: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: { text: { type: Type.STRING }, pages: { type: Type.ARRAY, items: { type: Type.INTEGER } } },
+        required: ['text', 'pages'],
+      },
+    },
+    concepts: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          nameZh: { type: Type.STRING },
+          nameEn: { type: Type.STRING },
+          text: { type: Type.STRING },
+          pages: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+        },
+        required: ['nameZh', 'text', 'pages'],
+      },
+    },
+    claims: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: { text: { type: Type.STRING }, pages: { type: Type.ARRAY, items: { type: Type.INTEGER } } },
+        required: ['text', 'pages'],
+      },
+    },
+    evidence: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: { text: { type: Type.STRING }, pages: { type: Type.ARRAY, items: { type: Type.INTEGER } } },
+        required: ['text', 'pages'],
+      },
+    },
+    limitations: {
+      type: Type.ARRAY,
+      items: {
+        type: Type.OBJECT,
+        properties: { text: { type: Type.STRING }, pages: { type: Type.ARRAY, items: { type: Type.INTEGER } } },
+        required: ['text', 'pages'],
+      },
+    },
+  },
+  required: ['summary', 'role', 'mainQuestions', 'concepts', 'claims', 'evidence', 'limitations'],
+};
+
+function normalizeExamGlobalPages(value: unknown, allowedPages: Set<number>): number[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(Number).filter((page) => Number.isInteger(page) && allowedPages.has(page)))]
+    .sort((a, b) => a - b);
+}
+
+function normalizeExamGlobalPageItems(
+  value: unknown,
+  allowedPages: Set<number>,
+  maxItems: number,
+): Array<{ text: string; pages: number[] }> {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, maxItems).flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return [];
+    const row = raw as Record<string, unknown>;
+    const text = typeof row.text === 'string' ? row.text.trim() : '';
+    if (!text) return [];
+    return [{ text, pages: normalizeExamGlobalPages(row.pages, allowedPages) }];
+  });
+}
+
+function normalizeExamGlobalManifestDraft(
+  raw: string,
+  materialLinkId: string,
+  fileName: string,
+  allowedPages: Set<number>,
+): ExamGlobalMaterialManifest {
+  const parsed = parseJsonObject(raw);
+  const conceptsRaw = Array.isArray(parsed.concepts) ? parsed.concepts : [];
+  return {
+    materialLinkId,
+    fileName,
+    summary: typeof parsed.summary === 'string' ? parsed.summary.trim() : '',
+    role: typeof parsed.role === 'string' ? parsed.role.trim() : '',
+    mainQuestions: normalizeExamGlobalPageItems(parsed.mainQuestions, allowedPages, 12),
+    concepts: conceptsRaw.slice(0, 36).flatMap((rawConcept) => {
+      if (!rawConcept || typeof rawConcept !== 'object') return [];
+      const row = rawConcept as Record<string, unknown>;
+      const nameZh = typeof row.nameZh === 'string' ? row.nameZh.trim() : '';
+      const text = typeof row.text === 'string' ? row.text.trim() : '';
+      if (!nameZh || !text) return [];
+      return [{
+        nameZh,
+        ...(typeof row.nameEn === 'string' && row.nameEn.trim() ? { nameEn: row.nameEn.trim() } : {}),
+        text,
+        pages: normalizeExamGlobalPages(row.pages, allowedPages),
+      }];
+    }),
+    claims: normalizeExamGlobalPageItems(parsed.claims, allowedPages, 24),
+    evidence: normalizeExamGlobalPageItems(parsed.evidence, allowedPages, 24),
+    limitations: normalizeExamGlobalPageItems(parsed.limitations, allowedPages, 18),
+  };
+}
+
+async function generateExamGlobalManifestPart(input: {
+  materialLinkId: string;
+  fileName: string;
+  sourceText: string;
+  allowedPages: Set<number>;
+  routeHints?: string[];
+  synthesis?: boolean;
+  abortSignal?: AbortSignal;
+}): Promise<ExamGlobalMaterialManifest> {
+  const prompt = `${input.synthesis ? '你正在把同一份考试材料的多个局部清单合并成一个完整清单。' : '你正在为一份考试材料建立忠实、紧凑的全局清单。'}
+
+材料：${input.fileName}
+合法 PDF 页码：${[...input.allowedPages].sort((a, b) => a - b).join(', ')}
+${input.routeHints?.length ? `已有知识路线提示（只能辅助组织，仍以原文为准）：\n${input.routeHints.join('\n')}` : ''}
+
+要求：
+1. 中文为主；术语可保留英文名。
+2. 提取材料主题、在考试范围中的作用、主要问题、概念、主张、证据和限制。
+3. 每个条目只引用上面的合法页码；无法定位时 pages 为空，禁止猜页码。
+4. 不补充材料外知识，不把推断伪装成原文。
+5. 返回结构化 JSON。
+
+${input.synthesis ? '局部清单：' : '按页原文：'}
+${input.sourceText}`;
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-pro-preview',
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: EXAM_GLOBAL_MANIFEST_SCHEMA,
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    },
+  });
+  return normalizeExamGlobalManifestDraft(
+    response.text || '{}',
+    input.materialLinkId,
+    input.fileName,
+    input.allowedPages,
+  );
+}
+
+export async function generateExamGlobalMaterialManifest(
+  input: GenerateExamGlobalMaterialManifestInput,
+): Promise<ExamGlobalMaterialManifest> {
+  const allowedPages = new Set(input.batches.flatMap((batch) => batch.pages));
+  if (!input.batches.length || allowedPages.size === 0) {
+    throw new Error('这份材料没有可用于建立全局地图的文本页。');
+  }
+  const parts: ExamGlobalMaterialManifest[] = [];
+  for (const batch of input.batches) {
+    parts.push(await generateExamGlobalManifestPart({
+      materialLinkId: input.materialLinkId,
+      fileName: input.fileName,
+      sourceText: batch.text,
+      allowedPages: new Set(batch.pages),
+      routeHints: input.routeHints,
+      abortSignal: input.abortSignal,
+    }));
+  }
+  if (parts.length === 1) return parts[0]!;
+  return generateExamGlobalManifestPart({
+    materialLinkId: input.materialLinkId,
+    fileName: input.fileName,
+    sourceText: JSON.stringify(parts),
+    allowedPages,
+    routeHints: input.routeHints,
+    synthesis: true,
+    abortSignal: input.abortSignal,
+  });
+}
+
+export async function generateExamGlobalMaterialConnections(input: {
+  manifests: ExamGlobalMaterialManifest[];
+  abortSignal?: AbortSignal;
+}): Promise<ExamGlobalMaterialConnection[]> {
+  if (input.manifests.length < 2) return [];
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-pro-preview',
+    contents: [{
+      role: 'user',
+      parts: [{ text: `根据下面的考试材料清单，提炼跨材料的共同主题、支持、冲突、互补或推进顺序。只能使用清单已有的 materialLinkId 和页码；不补充外部事实。\n\n${JSON.stringify(input.manifests)}` }],
+    }],
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          connections: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                description: { type: Type.STRING },
+                kind: { type: Type.STRING, enum: ['common_theme', 'support', 'conflict', 'complement', 'sequence'] },
+                materialLinkIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                pageRefs: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      materialLinkId: { type: Type.STRING },
+                      pages: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+                    },
+                    required: ['materialLinkId', 'pages'],
+                  },
+                },
+              },
+              required: ['title', 'description', 'kind', 'materialLinkIds', 'pageRefs'],
+            },
+          },
+        },
+        required: ['connections'],
+      },
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    },
+  });
+  const parsed = parseJsonObject(response.text || '{}');
+  const rows = Array.isArray(parsed.connections) ? parsed.connections : [];
+  const manifestById = new Map(input.manifests.map((manifest) => [manifest.materialLinkId, manifest]));
+  const allowedPagesById = new Map(input.manifests.map((manifest) => [
+    manifest.materialLinkId,
+    new Set([
+      ...manifest.mainQuestions.flatMap((item) => item.pages),
+      ...manifest.concepts.flatMap((item) => item.pages),
+      ...manifest.claims.flatMap((item) => item.pages),
+      ...manifest.evidence.flatMap((item) => item.pages),
+      ...manifest.limitations.flatMap((item) => item.pages),
+    ]),
+  ]));
+  return rows.slice(0, 16).flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return [];
+    const row = raw as Record<string, unknown>;
+    const title = typeof row.title === 'string' ? row.title.trim() : '';
+    const description = typeof row.description === 'string' ? row.description.trim() : '';
+    const kind = typeof row.kind === 'string' && ['common_theme', 'support', 'conflict', 'complement', 'sequence'].includes(row.kind)
+      ? row.kind as ExamGlobalMaterialConnection['kind']
+      : 'common_theme';
+    const ids = Array.isArray(row.materialLinkIds)
+      ? [...new Set(row.materialLinkIds.filter((id): id is string => typeof id === 'string' && manifestById.has(id)))]
+      : [];
+    if (!title || !description || ids.length < 2) return [];
+    const pageRefs = Array.isArray(row.pageRefs) ? row.pageRefs.flatMap((rawRef) => {
+      if (!rawRef || typeof rawRef !== 'object') return [];
+      const ref = rawRef as Record<string, unknown>;
+      const materialLinkId = typeof ref.materialLinkId === 'string' ? ref.materialLinkId : '';
+      const allowed = allowedPagesById.get(materialLinkId);
+      if (!allowed || !ids.includes(materialLinkId)) return [];
+      return [{ materialLinkId, pages: normalizeExamGlobalPages(ref.pages, allowed) }];
+    }) : [];
+    return [{ title, description, kind, materialLinkIds: ids, pageRefs }];
+  });
+}
+
+export interface ChatWithExamGlobalAssistantInput {
+  examTitle: string;
+  materialMemoryJson: string;
+  unavailableMaterialNames: string[];
+  retrievedChunks: Array<{
+    chunkId: string;
+    materialLinkId: string;
+    materialName: string;
+    page: number;
+    text: string;
+  }>;
+  recentTurns: ExamGlobalChatTurn[];
+  rollingSummary?: string;
+  userMessage: string;
+  allowExternalKnowledge: boolean;
+  materialMapComplete: boolean;
+  abortSignal?: AbortSignal;
+}
+
+export async function chatWithExamGlobalAssistant(input: ChatWithExamGlobalAssistantInput): Promise<string> {
+  const evidence = input.retrievedChunks.map((chunk) => (
+    `[${chunk.chunkId}] material=${chunk.materialLinkId} file=${chunk.materialName} page=${chunk.page}\n${chunk.text}`
+  )).join('\n\n');
+  const systemInstruction = `你是备考工作台中的“整场考试对话”助手。你像普通 GPT 一样直接、自然地回答用户，但默认只依据当前考试材料。
+
+硬规则：
+1. 中文为主，必要英文术语放在括号里。不要自动进入苏格拉底式追问，不要评价掌握度、进度或学习证据。
+2. 材料事实必须来自本轮原文片段；在相关句末输出 †chunkId†。只能引用本轮提供的 chunkId，禁止编造材料、页码或引用。
+3. 全局材料地图帮助你理解结构，但它不是证据；事实仍要由本轮片段引用。若证据不足，明确说“当前材料中没有找到”或说明当前地图仍未完成。
+4. 跨材料综合必须写成“根据这些材料可以推断/综合来看”，不能冒充某一页的原话。
+5. ${input.allowExternalKnowledge
+    ? '用户本轮明确要求材料外知识。材料内回答之后，可增加独立标题“材料外补充”，其中不得输出任何 † 引用，并提醒它不是考试材料原文。'
+    : '用户没有明确要求材料外知识。禁止用模型常识补空白；不要增加“材料外补充”。'}
+6. 不要输出文末 citations JSON；只使用 †chunkId†。`;
+  const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text: string }> }> = [{
+    role: 'user',
+    parts: [{ text: `考试：${input.examTitle}\n材料地图完整：${input.materialMapComplete ? '是' : '否'}\n不可用材料：${input.unavailableMaterialNames.join('、') || '无'}\n\n全局材料地图（结构参考，不能直接当证据）：\n${input.materialMemoryJson}` }],
+  }];
+  if (input.rollingSummary?.trim()) {
+    contents.push({ role: 'user', parts: [{ text: `较早对话摘要（只用于记住讨论脉络，不是材料证据）：\n${input.rollingSummary}` }] });
+  }
+  input.recentTurns.slice(-18).forEach((turn) => {
+    contents.push({ role: turn.role, parts: [{ text: turn.text }] });
+  });
+  contents.push({
+    role: 'user',
+    parts: [{ text: `用户当前问题：\n${input.userMessage}\n\n本轮可引用原文片段：\n${evidence || '（本轮没有检索到可定位原文；必须明确说明，不能猜测。）'}` }],
+  });
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-pro-preview',
+    contents,
+    config: {
+      systemInstruction,
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    },
+  });
+  return response.text?.trim() || '没有生成有效回答，请重试。';
+}
+
+export async function summarizeExamGlobalConversation(input: {
+  previousSummary?: string;
+  turns: ExamGlobalChatTurn[];
+  abortSignal?: AbortSignal;
+}): Promise<string> {
+  if (!input.turns.length) return input.previousSummary ?? '';
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [{ role: 'user', parts: [{ text: `把下面的考试讨论压缩为不超过 900 字的中文对话记忆。保留用户问过的问题、重要概念、已经形成的结论、仍未解决的问题；不要把它写成材料证据，也不要添加新事实。\n\n旧摘要：${input.previousSummary ?? '无'}\n\n新增对话：${input.turns.map((turn) => `${turn.role === 'user' ? '用户' : 'AI'}：${turn.text}`).join('\n')}` }] }],
+    config: input.abortSignal ? { abortSignal: input.abortSignal } : undefined,
+  });
+  return response.text?.trim() || input.previousSummary || '';
+}
+
+export async function generateExamGlobalQuiz(input: {
+  questionText: string;
+  answerText: string;
+  citations: ExamGlobalCitation[];
+  abortSignal?: AbortSignal;
+}): Promise<ExamGlobalQuiz> {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3.1-pro-preview',
+    contents: [{ role: 'user', parts: [{ text: `只根据下面的问题、回答与材料证据，生成 2-4 道轻量提取题。可以是选择题、简答题或概念题；不要提前在题面透露答案。sourceChunkIds 只能使用证据清单中的 id。\n\n原问题：${input.questionText}\n\n回答：${input.answerText}\n\n证据：${JSON.stringify(input.citations)}` }] }],
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          title: { type: Type.STRING },
+          questions: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                id: { type: Type.STRING },
+                kind: { type: Type.STRING, enum: ['choice', 'short_answer', 'concept'] },
+                prompt: { type: Type.STRING },
+                options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                answer: { type: Type.STRING },
+                explanation: { type: Type.STRING },
+                sourceChunkIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+              },
+              required: ['id', 'kind', 'prompt', 'answer', 'explanation', 'sourceChunkIds'],
+            },
+          },
+        },
+        required: ['title', 'questions'],
+      },
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    },
+  });
+  const parsed = parseJsonObject(response.text || '{}');
+  const citationByChunk = new Map(input.citations.map((citation) => [citation.chunkId, citation]));
+  const questions = Array.isArray(parsed.questions) ? parsed.questions.slice(0, 4).flatMap((raw, index) => {
+    if (!raw || typeof raw !== 'object') return [];
+    const row = raw as Record<string, unknown>;
+    const prompt = typeof row.prompt === 'string' ? row.prompt.trim() : '';
+    const answer = typeof row.answer === 'string' ? row.answer.trim() : '';
+    if (!prompt || !answer) return [];
+    const kind = typeof row.kind === 'string' && ['choice', 'short_answer', 'concept'].includes(row.kind)
+      ? row.kind as ExamGlobalQuizQuestion['kind']
+      : 'short_answer';
+    const sourceIds = Array.isArray(row.sourceChunkIds)
+      ? row.sourceChunkIds.filter((id): id is string => typeof id === 'string' && citationByChunk.has(id))
+      : [];
+    return [{
+      id: typeof row.id === 'string' && row.id.trim() ? row.id.trim() : `q-${index + 1}`,
+      kind,
+      prompt,
+      ...(kind === 'choice' && Array.isArray(row.options)
+        ? { options: row.options.filter((option): option is string => typeof option === 'string').slice(0, 5) }
+        : {}),
+      answer,
+      explanation: typeof row.explanation === 'string' ? row.explanation.trim() : '',
+      citations: [...new Set(sourceIds)].map((id) => citationByChunk.get(id)!),
+    }];
+  }) : [];
+  if (questions.length < 2) throw new Error('没有生成足够的小测题，请重试。');
+  return {
+    title: typeof parsed.title === 'string' && parsed.title.trim() ? parsed.title.trim() : '根据这个问题考考我',
+    questions,
+  };
+}
+
+export async function gradeExamGlobalQuiz(input: {
+  quiz: ExamGlobalQuiz;
+  answers: Record<string, string>;
+  abortSignal?: AbortSignal;
+}): Promise<ExamGlobalQuizFeedback[]> {
+  const response = await ai.models.generateContent({
+    model: 'gemini-3-flash-preview',
+    contents: [{ role: 'user', parts: [{ text: `根据标准答案与材料证据，简短核对用户的小测回答。不要更新或声称任何掌握状态。每题只能判为 correct、partial 或 incorrect。\n\n${JSON.stringify({ quiz: input.quiz, answers: input.answers })}` }] }],
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          feedback: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                questionId: { type: Type.STRING },
+                verdict: { type: Type.STRING, enum: ['correct', 'partial', 'incorrect'] },
+                feedback: { type: Type.STRING },
+              },
+              required: ['questionId', 'verdict', 'feedback'],
+            },
+          },
+        },
+        required: ['feedback'],
+      },
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+    },
+  });
+  const parsed = parseJsonObject(response.text || '{}');
+  const ids = new Set(input.quiz.questions.map((question) => question.id));
+  return Array.isArray(parsed.feedback) ? parsed.feedback.flatMap((raw) => {
+    if (!raw || typeof raw !== 'object') return [];
+    const row = raw as Record<string, unknown>;
+    const questionId = typeof row.questionId === 'string' ? row.questionId : '';
+    if (!ids.has(questionId)) return [];
+    const verdict = typeof row.verdict === 'string' && ['correct', 'partial', 'incorrect'].includes(row.verdict)
+      ? row.verdict as ExamGlobalQuizFeedback['verdict']
+      : 'partial';
+    return [{
+      questionId,
+      verdict,
+      feedback: typeof row.feedback === 'string' ? row.feedback.trim() : '',
+    }];
+  }) : [];
+}

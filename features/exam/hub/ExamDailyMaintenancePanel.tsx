@@ -21,6 +21,7 @@ import { MaintenanceFlashcardDeck } from '@/features/exam/hub/MaintenanceFlashca
 import { MaintenanceFeedbackCelebration } from '@/features/exam/hub/MaintenanceFeedbackCelebration';
 import { buildFeedbackExitCopy, buildFeedbackStrongCopy } from '@/data/maintenanceFeedbackCopy';
 import type { FilePlanMeta } from '@/features/exam/lib/examSchedule';
+import { getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
 
 type Phase =
   | 'idle'
@@ -215,7 +216,7 @@ export const ExamDailyMaintenancePanel: React.FC<Props> = ({
       materialsByExam,
       fileMeta
     );
-    const cacheKey = `${user.uid}_${dateStr}_${eligibility.allowedExamIds.slice().sort().join(',')}_${materialKeys.join('|')}_${flashCount}_${band}_${learnerMood}_${aggregatedUrgency}`;
+    const cacheKey = `${user.uid}_${dateStr}_${eligibility.allowedExamIds.slice().sort().join(',')}_${materialKeys.join('|')}_${flashCount}_${band}_${learnerMood}_${aggregatedUrgency}_${getCurrentAppLanguage()}`;
     const existing = await getDailyPlanCache(user.uid, dateStr);
     const cached = existing?.maintenance;
     if (

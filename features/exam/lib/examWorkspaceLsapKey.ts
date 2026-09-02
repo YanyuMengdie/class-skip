@@ -12,6 +12,8 @@ const STORAGE_PREFIX = 'lsap_workspace_bundle_';
 
 /** 备考台苏格拉底对话留痕（仅消息级，用于证据与复盘） */
 export interface WorkspaceDialogueTurn {
+  /** 新记录使用稳定 id；旧记录缺少时由界面按 session/timestamp 生成兼容 id。 */
+  id?: string;
   role: 'user' | 'model';
   text: string;
   timestamp: number;
@@ -21,6 +23,30 @@ export interface WorkspaceDialogueTurn {
   sessionKey?: string;
   /** 1-3：与 ChatMessage.examChunkCitationSnapshot 对齐，供 bundle 恢复链钮 */
   examChunkCitationSnapshot?: ExamChunkCitationSnapshot;
+  /** 本轮用户回答被现有原子分析判定覆盖的 atom；不改变原有 coverage 结构。 */
+  coveredAtomIds?: string[];
+  /** 本轮助手消息正在回访的用户标记。 */
+  revisitAnnotationId?: string;
+  revisitPhase?: 'question' | 'feedback';
+}
+
+export type WorkspaceEvidenceAnnotationKind = 'disputed' | 'needs_review';
+export type WorkspaceRevisitStatus = 'pending' | 'asked' | 'resolved';
+
+/** 用户对某条学习证据的补充判断；只作备注与回访，不重算原有覆盖/理解等级。 */
+export interface WorkspaceEvidenceAnnotation {
+  id: string;
+  kind: WorkspaceEvidenceAnnotationKind;
+  kcId: string;
+  atomId: string;
+  turnId?: string;
+  note?: string;
+  createdAt: number;
+  updatedAt: number;
+  revisitStatus?: WorkspaceRevisitStatus;
+  /** 标记时当前会话已有的用户回答数；至少再经过两个回答才自动回访。 */
+  deferUntilUserTurnCount?: number;
+  lastPromptedAt?: number;
 }
 
 export interface WorkspaceLsapBundle {
@@ -33,6 +59,8 @@ export interface WorkspaceLsapBundle {
   dialogueUpdatedAt?: number;
   /** 按 KC 分组的术语侧栏；旧 bundle 无此字段视为 {} */
   kcGlossary?: Record<string, KcGlossaryEntry[]>;
+  /** 用户纠正与待回看；旧 bundle 无此字段视为 []。 */
+  evidenceAnnotations?: WorkspaceEvidenceAnnotation[];
   savedAt: number;
 }
 
@@ -131,6 +159,7 @@ export function loadWorkspaceLsapBundle(key: string): WorkspaceLsapBundle | null
     if (!parsed.atomCoverage) parsed.atomCoverage = {};
     if (!parsed.dialogueTranscript) parsed.dialogueTranscript = [];
     if (!parsed.kcGlossary) parsed.kcGlossary = {};
+    if (!parsed.evidenceAnnotations) parsed.evidenceAnnotations = [];
     return parsed;
   } catch {
     return null;

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ArrowRight, BookOpen } from 'lucide-react';
+import { useAppLanguage } from '@/shared/i18n/appLanguage';
 
 interface WelcomeScreenProps {
   onStart: () => void;
@@ -14,23 +15,34 @@ const QUOTES = [
   '把门打开，今天就已经开始了。',
 ];
 
+const QUOTES_EN = [
+  'You do not need to fix everything today. Coming back is already enough.',
+  'Going slowly is fine. The light in your study is still on.',
+  'Sit down first. We can take the rest one page at a time.',
+  'A pause does not erase the distance you have already traveled.',
+  'A small continuation is still a continuation.',
+  'Open the door, and today has already begun.',
+];
+
 export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
+  const { language, text } = useAppLanguage();
   const [timeString, setTimeString] = useState('');
   const [quote, setQuote] = useState('');
 
   useEffect(() => {
-    setQuote(QUOTES[Math.floor(Math.random() * QUOTES.length)]);
+    const quotes = language === 'en' ? QUOTES_EN : QUOTES;
+    setQuote(quotes[Math.floor(Math.random() * quotes.length)]);
 
     const updateTime = () => {
       const now = new Date();
-      setTimeString(now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      setTimeString(now.toLocaleTimeString(language, { hour: '2-digit', minute: '2-digit' }));
     };
 
     updateTime();
     const timer = setInterval(updateTime, 1000);
 
     return () => clearInterval(timer);
-  }, []);
+  }, [language]);
 
   return (
     <div className="font-display text-slate-950 min-h-screen flex flex-col overflow-hidden fixed inset-0 z-[9999] bg-[#d3f0f6]">
@@ -55,7 +67,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
       <main className="flex flex-col flex-grow items-center justify-center px-6 py-12 relative z-10">
         <div className="absolute top-8 left-8 hidden md:flex items-center gap-3 rounded-lg bg-white/70 border border-white px-4 py-3 shadow-sm">
           <BookOpen className="w-5 h-5 text-slate-900" />
-          <span className="font-black tracking-tight">逃课神器</span>
+          <span className="font-black tracking-tight">{text('逃课神器', 'Class Skip')}</span>
         </div>
 
         <div className="flex flex-col items-center max-w-5xl w-full text-center space-y-8 md:space-y-10">
@@ -76,7 +88,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
               onClick={onStart}
               className="group flex items-center justify-center gap-3 bg-slate-950 hover:bg-slate-800 text-white px-8 py-4 rounded-lg transition-all duration-300 shadow-lg shadow-slate-900/10 cursor-pointer"
             >
-              <span className="text-base md:text-lg font-black">进入</span>
+              <span className="text-base md:text-lg font-black">{text('进入', 'Enter')}</span>
               <ArrowRight className="w-5 h-5 transition-transform duration-300 group-hover:translate-x-1" />
             </button>
           </div>
