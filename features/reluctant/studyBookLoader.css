@@ -1,0 +1,176 @@
+.reluctant-book-loader {
+  --reluctant-book-scale: 1;
+  position: relative;
+  display: inline-block;
+  width: 88px;
+  height: 64px;
+  flex: 0 0 auto;
+  vertical-align: middle;
+  pointer-events: none;
+}
+
+.reluctant-book-loader--compact {
+  --reluctant-book-scale: 0.43;
+  width: 38px;
+  height: 28px;
+}
+
+.reluctant-book-loader__scene {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 88px;
+  height: 64px;
+  transform: translate(-50%, -50%) scale(var(--reluctant-book-scale));
+}
+
+.reluctant-book-loader__shadow {
+  position: absolute;
+  left: 10px;
+  bottom: 5px;
+  width: 68px;
+  height: 8px;
+  background: radial-gradient(ellipse, #294b3b1c, #294b3b00 72%);
+}
+
+.reluctant-book-loader__book {
+  position: absolute;
+  left: 8px;
+  top: 7px;
+  width: 72px;
+  height: 44px;
+  transform: rotate(-8deg);
+  perspective: 220px;
+  transform-style: preserve-3d;
+}
+
+.reluctant-book-loader__cover {
+  position: absolute;
+  inset: 3px -3px -4px;
+  border-radius: 4px 4px 5px 5px;
+  background: #547661;
+  box-shadow: 0 2px 0 #385441;
+}
+
+.reluctant-book-loader__page {
+  box-sizing: border-box;
+  position: absolute;
+  top: 0;
+  width: 50%;
+  height: 44px;
+  padding: 10px 5px;
+  background: #fff9e9;
+  border: 1px solid #d8d2bd;
+}
+
+.reluctant-book-loader__page--left {
+  left: 0;
+  border-radius: 4px 0 0 4px;
+  transform: skewY(4deg);
+  background: linear-gradient(90deg, #fff9e9 70%, #eee6ce);
+}
+
+.reluctant-book-loader__page--right {
+  left: 50%;
+  border-radius: 0 4px 4px 0;
+  transform: skewY(-4deg);
+  background: linear-gradient(90deg, #eee6ce, #fff9e9 30%);
+}
+
+.reluctant-book-loader__page--turn {
+  left: 50%;
+  z-index: 2;
+  border-radius: 0 4px 4px 0;
+  transform-origin: left center;
+  transform: rotateY(0deg) skewY(-4deg);
+  backface-visibility: visible;
+  animation: reluctant-book-loader-turn 6s ease-in-out infinite;
+  animation-play-state: paused;
+}
+
+.reluctant-book-loader[data-animating='true'] .reluctant-book-loader__page--turn {
+  animation-play-state: running;
+}
+
+.reluctant-book-loader__page i {
+  display: block;
+  width: 100%;
+  height: 2px;
+  margin-bottom: 5px;
+  border-radius: 2px;
+  background: #d5ceb8;
+}
+
+.reluctant-book-loader__page i:nth-child(2) {
+  width: 72%;
+}
+
+.reluctant-book-loader__page i:nth-child(3) {
+  width: 86%;
+}
+
+.reluctant-book-loader__spine {
+  position: absolute;
+  top: 1px;
+  bottom: -2px;
+  left: calc(50% - 0.5px);
+  width: 1px;
+  background: #a39a7f66;
+}
+
+.reluctant-book-loader__ribbon {
+  position: absolute;
+  right: 10px;
+  bottom: -8px;
+  width: 5px;
+  height: 10px;
+  background: #ba7e5e;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 75%, 0 100%);
+}
+
+/* Two page turns, then a quiet pause. Reset the sheet only while it is hidden. */
+@keyframes reluctant-book-loader-turn {
+  0%, 5% {
+    opacity: 1;
+    transform: rotateY(0deg) skewY(-4deg);
+  }
+  19% {
+    opacity: 1;
+    transform: rotateY(-180deg) skewY(-4deg);
+  }
+  19.1% {
+    opacity: 0;
+    transform: rotateY(-180deg) skewY(-4deg);
+  }
+  21.9% {
+    opacity: 0;
+    transform: rotateY(0deg) skewY(-4deg);
+  }
+  22% {
+    opacity: 1;
+    transform: rotateY(0deg) skewY(-4deg);
+  }
+  36% {
+    opacity: 1;
+    transform: rotateY(-180deg) skewY(-4deg);
+  }
+  36.1% {
+    opacity: 0;
+    transform: rotateY(-180deg) skewY(-4deg);
+  }
+  99.9% {
+    opacity: 0;
+    transform: rotateY(0deg) skewY(-4deg);
+  }
+  100% {
+    opacity: 1;
+    transform: rotateY(0deg) skewY(-4deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reluctant-book-loader__page--turn {
+    display: none;
+    animation: none;
+  }
+}

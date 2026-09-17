@@ -28,7 +28,7 @@ export interface SkimTakeawayModelDraft {
 }
 
 export interface SkimTakeawaySourceOptions {
-  /** 唱片式没有连接式内容骨架时，用当前唱片边界建立可信的消息级来源。 */
+  /** 分段式没有连接式内容骨架时，用当前分段边界建立可信的消息级来源。 */
   recordScope?: {
     title: string;
     pageStart: number;

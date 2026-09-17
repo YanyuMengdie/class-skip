@@ -50,7 +50,6 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     scenarioKey: 'never_seen_d8_plus_good',
     title: '从容 · 新手上路',
     steps: [
-      S(1, '5 分钟启动', '低压力进入状态', 'open_panel', 'fiveMin', 5, false, '大范围考试，从极小块开始降低抵触'),
       S(2, '学习指南', '定长线计划', 'open_panel', 'studyGuide', 15, false, '时间充裕，先画路线图'),
       S(3, '领读', '先走完一遍', 'slide_skim', 'skim', 20, false, '第一遍先按 module / part 建立理解'),
       S(4, '考前速览', '建立信心提要', 'open_panel', 'examSummary', 10, true, '整理一份自己的提要'),
@@ -60,7 +59,6 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     scenarioKey: 'never_seen_no_exam_good',
     title: '无考试压力 · 新机探索',
     steps: [
-      S(1, '5 分钟', '轻松开始', 'open_panel', 'fiveMin', 5, true, '没有截止日时，用短任务破冰'),
       S(2, '学习指南', '了解要讲什么', 'open_panel', 'studyGuide', 12, false, '先知道全貌再决定深度'),
       S(3, '页面工具', '讲当前页或生成本页笔记', 'slide_skim', 'deep', 15, false, '只在关键页或卡点处局部放大'),
     ],
@@ -127,7 +125,6 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     title: '急迫且焦虑 · 先稳住再冲刺',
     steps: [
       S(1, '稳定呼吸', '先缓解焦虑，避免空转', 'rest', 'break', 3, false, '情绪先稳定，效率才会上来'),
-      S(2, '5 分钟启动', '先做最小任务', 'open_panel', 'fiveMin', 5, false, '降低启动阻力'),
       S(3, '考前预测摸底', '先找最薄弱点', 'lsap_session', 'examPrediction', 12, false, '焦虑时优先抓最关键缺口'),
       S(4, '陷阱清单', '补易错点', 'open_panel', 'trapList', 8, true, '快速减少考试失误'),
     ],
@@ -147,7 +144,6 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     title: '焦虑但不紧迫 · 低压开局',
     steps: [
       S(1, '进入能量站', '先调整情绪', 'rest', 'break', 5, false, '优先恢复稳定感'),
-      S(2, '5 分钟启动', '小步开始', 'open_panel', 'fiveMin', 5, false, '通过小胜利建立行动惯性'),
       S(3, '学习指南', '拆分后续学习路径', 'open_panel', 'studyGuide', 12, false, '把未知变成可执行清单'),
     ],
   },
@@ -165,7 +161,6 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     scenarioKey: 'never_seen_d3_7_tired',
     title: '疲惫期稳步推进',
     steps: [
-      S(1, '5 分钟启动', '快速进入学习状态', 'open_panel', 'fiveMin', 5, false, '把门槛降到最低'),
       S(2, '学习指南', '只定一个小目标', 'open_panel', 'studyGuide', 8, false, '减少决策消耗'),
       S(3, '页面工具讲一小段', '聚焦一个概念', 'slide_skim', 'deep', 10, true, '小段高质量比长时低效率更好'),
     ],
@@ -185,7 +180,6 @@ export const STUDY_FLOW_TEMPLATES: StudyFlowTemplate[] = [
     title: '不想学 · 远考 · 先稳住再微量推进',
     steps: [
       S(1, '1 分钟呼吸', '只做放松，不评判自己', 'rest', 'break', 1, false, '降低启动阻力，避免空转'),
-      S(2, '5 分钟超小步', '打开材料即可', 'open_panel', 'fiveMin', 5, true, '微量行动建立惯性'),
       S(3, '领读半章', '只看标题与图', 'slide_skim', 'skim', 8, true, '减量输入，避免过载'),
       S(4, '考前速览（可选）', '若还有余力再看提要', 'open_panel', 'examSummary', 8, true, '远考阶段以建立印象为主'),
     ],

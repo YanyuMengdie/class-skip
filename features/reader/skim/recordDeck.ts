@@ -76,7 +76,7 @@ const validateOrderedCoverage = (
 };
 
 /**
- * 唱片式路线必须完整、连续且可追溯。连续领读仍可使用旧路线，不受此严格校验影响。
+ * 分段式路线必须完整、连续且可追溯。连续领读仍可使用旧路线，不受此严格校验影响。
  */
 export const validateSkimReadingRoute = (
   route: SkimReadingRoute,
@@ -84,7 +84,7 @@ export const validateSkimReadingRoute = (
   maxPage: number,
 ): SkimRouteValidationResult => {
   const errors: string[] = [];
-  if (route.kind !== 'lecture') errors.push('唱片式学习目前只支持 Lecture。');
+  if (route.kind !== 'lecture') errors.push('分段式学习目前只支持 Lecture。');
   if (!Number.isInteger(minPage) || !Number.isInteger(maxPage) || minPage < 1 || minPage > maxPage) {
     errors.push('选择的总页码范围无效。');
     return { valid: false, errors };

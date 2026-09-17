@@ -1,12 +1,16 @@
+import { prepareLectureKnowledge, type PrepareLectureKnowledgeOptions } from '@/features/exam/round/lectureKnowledge';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Header } from '@/shared/layout/Header';
+import { dashboardFeatures } from '@/shared/dashboardFeatures';
 import { SlideViewer } from '@/features/reader/slide-viewer/SlideViewer';
 import { exportStudyHandoutPdf } from '@/features/reader/export/studyHandoutPdf';
 import { SlidePageComments } from '@/features/reader/page-notes/SlidePageComments';
 import { ExplanationPanel } from '@/features/reader/deep-read/ExplanationPanel';
 import { SkimPanel } from '@/features/reader/skim/SkimPanel';
 import { SkimRecordShelf } from '@/features/reader/skim/SkimRecordShelf';
+import { SessionTabInk, type SessionTabInkPosition } from '@/features/reader/motion/SessionTabInk';
+import '@/features/reader/readingWorkspaceShell.css';
 import { TutorChat, TUTOR_OPENING_TEXT } from '@/features/tutor/TutorChat';
 import { Sidebar } from '@/shared/layout/Sidebar';
 import { Notebook } from '@/features/reader/notebook/Notebook';
@@ -16,7 +20,6 @@ import { GalgameSettings } from '@/components/GalgameSettings';
 import { WelcomeScreen } from '@/shared/layout/WelcomeScreen';
 import { DashboardScreen } from '@/shared/layout/DashboardScreen';
 import { SideQuestPanel } from '@/features/reader/side-quest/SideQuestPanel';
-import { LayeredReadingPanel } from '@/features/reader/layered/LayeredReadingPanel';
 import { QuizReviewPanel } from '@/features/review/tools/QuizReviewPanel';
 import { FlashCardReviewPanel } from '@/features/review/tools/FlashCardReviewPanel';
 import { PageMarkPanel } from '@/features/reader/marks/PageMarkPanel';
@@ -30,10 +33,9 @@ import { TrickyProfessorPanel } from '@/features/review/tools/TrickyProfessorPan
 import { MindMapPanel } from '@/features/review/tools/mindMap/MindMapPanel';
 import { MultiDocQAPanel, getMultiDocQAConversationKey, loadMultiDocQAMessages, saveMultiDocQAMessages } from '@/features/review/tools/MultiDocQAPanel';
 import { StudioPanel, ArtifactFullView } from '@/shared/studio/StudioPanel';
-import { MoodDialog } from '@/features/sessionStart/MoodDialog';
 import { LoginModal } from '@/shared/auth/LoginModal';
-import { FiveMinFlowPanel } from '@/features/sessionStart/FiveMinFlowPanel';
 import { ClassroomPanel } from '@/features/lecture/ClassroomPanel';
+import { MicrophoneSetupDialog } from '@/features/lecture/MicrophoneSetupDialog';
 import { LectureTranscriptPage } from '@/features/lecture/LectureTranscriptPage';
 import { getLecturePageAtElapsedMs } from '@/features/lecture/lectureReviewExport';
 import { ReviewPage, ReviewType } from '@/features/review/ReviewPage';
@@ -58,7 +60,7 @@ import {
 import { storageService } from '@/services/storageService';
 import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, deleteSkimSessionFromCloud, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud, deleteTutorSessionFromCloud } from '@/services/firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, LectureAudioRecording, LectureRealtimeLine, LectureRealtimeStatus, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, LayeredReadingState, TutorSession, SkimContentType, SkimAuxiliaryMaterial, SkimReadingRoute, SkimStudyStyle, SkimExplanationDepth, SkimRecordDeck, SkimRecordCardState, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession, LectureCaseLearningState } from '@/types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, LectureAudioRecording, LectureRealtimeLine, LectureRealtimeStatus, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, TutorSession, SkimContentType, SkimAuxiliaryMaterial, SkimReadingRoute, SkimStudyStyle, SkimExplanationDepth, SkimRecordDeck, SkimRecordCardState, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession, LectureCaseLearningState } from '@/types';
 import {
   appendLocalPendingSuggestion,
   appendLocalWitnessSession,
@@ -86,7 +88,7 @@ import { filterEvidenceAnnotationsForMap } from '@/features/exam/lib/examLearnin
 import { getActiveIndexAfterDeletion, getNextDefaultSessionSequence } from '@/features/reader/sessionTabs';
 import { computePredictedScore } from '@/features/exam/lib/lsapScore';
 import { normalizeTermKey } from '@/lib/text/extractBoldTermsFromMarkdown';
-import { Sparkles, X, ChevronDown, Loader2, Wand2, Plus, MessageCircle, MoreHorizontal, Pencil, Trash2, PanelRightClose, PanelRightOpen, Mic, Pause, Play } from 'lucide-react';
+import { Sparkles, X, ChevronDown, Loader2, Wand2, Plus, MessageCircle, MoreHorizontal, Pencil, Trash2, PanelRightClose, PanelRightOpen, Mic, Pause, Play, BookOpen, Info } from 'lucide-react';
 import { useAppLanguage, getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
 import { getCloudAppPreferences, saveCloudAppPreferences } from '@/services/appPreferencesService';
 import type { AppLanguage, AppPreferences } from '@/types';
@@ -242,13 +244,13 @@ interface SkimSession {
   readingRoute?: SkimReadingRoute | null;
   /** Lecture 领读呈现方式；旧会话缺省为整段式。 */
   studyStyle?: SkimStudyStyle;
-  /** 普通 Lecture 整段式/分段唱片式领读的后续讲解深度；旧会话缺省为正常讲。 */
+  /** 普通 Lecture 整段式/分段式领读的后续讲解深度；旧会话缺省为正常讲。 */
   explanationDepth?: SkimExplanationDepth;
-  /** 整段式领读自己的 PDF 停留页，与唱片停留页分开保存。 */
+  /** 整段式领读自己的 PDF 停留页，与分段停留页分开保存。 */
   continuousLastPage?: number;
-  /** 分段式学习的唱片路线、状态与独立对话。 */
+  /** 分段式学习的分段路线、状态与独立对话。 */
   recordDeck?: SkimRecordDeck | null;
-  /** 案件式领读的适配报告、内容账本、章节与学习证据。 */
+  /** 推演式领读的适配报告、内容账本、章节与学习证据。 */
   caseLearning?: LectureCaseLearningState | null;
   /** 阶段二：paper/文章模式 AI 是否已讲过梗概（阶段四才真正写，先占位）。 */
   briefingDone?: boolean;
@@ -281,16 +283,16 @@ const createEmptySkimSession = (seq = 1): SkimSession => ({
 /** 略读会话数量上限（阶段一） */
 const MAX_SKIM_SESSIONS = 10;
 
-/** 私教会话数量上限 */
+/** 问答会话数量上限 */
 const MAX_TUTOR_SESSIONS = 10;
 
 type ManagedSessionTab = { kind: 'skim' | 'tutor'; id: string };
 
-/** 新建一条私教会话：含前端开场白 messages[0]，docType 默认 STEM；与略读 SkimSession 完全独立。
+/** 新建一条问答会话：含前端开场白 messages[0]，docType 默认 STEM；与略读 SkimSession 完全独立。
  *  cloudSessionId：基于的云端文件会话 id（轻引用，仅存指针、不存 PDF），无则不写该字段。 */
 const createTutorSession = (seq: number, cloudSessionId?: string | null, fileHash?: string | null): TutorSession => ({
   id: `tutor-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-  title: `私教 ${seq}`,
+  title: `问答 ${seq}`,
   createdAt: Date.now(),
   messages: [{ role: 'model', text: TUTOR_OPENING_TEXT, timestamp: Date.now() }],
   docType: 'STEM',
@@ -298,11 +300,19 @@ const createTutorSession = (seq: number, cloudSessionId?: string | null, fileHas
   ...(fileHash ? { fileHash } : {}),
 });
 
-/** 私教多会话本地↔云合并：按 id 去重，云端在冲突时覆盖本地（跨设备源），按 createdAt 倒序 */
+const normalizeTutorSessionTitle = (title: string): string => title.replace(/^私教(?=\s*\d+$)/, '问答');
+
+/** 旧版本可能保存过已下线的阅读模式；恢复时统一安全回到领读。 */
+const normalizeRestoredViewMode = (mode: unknown): ViewMode => {
+  if (mode === 'deep' || mode === 'tutor') return mode;
+  return 'skim';
+};
+
+/** 问答多会话本地↔云合并：按 id 去重，云端在冲突时覆盖本地（跨设备源），按 createdAt 倒序 */
 const mergeTutorSessions = (local: TutorSession[], cloud: TutorSession[]): TutorSession[] => {
   const map = new Map<string, TutorSession>();
-  for (const s of local) map.set(s.id, s);
-  for (const s of cloud) map.set(s.id, s); // 云端后写 → 冲突时云端胜
+  for (const s of local) map.set(s.id, { ...s, title: normalizeTutorSessionTitle(s.title) });
+  for (const s of cloud) map.set(s.id, { ...s, title: normalizeTutorSessionTitle(s.title) }); // 云端后写 → 冲突时云端胜
   return Array.from(map.values()).sort((a, b) => b.createdAt - a.createdAt);
 };
 
@@ -648,16 +658,17 @@ const App: React.FC = () => {
   );
 
   const [viewMode, setViewMode] = useState<ViewMode>('skim');
+  const sessionTabInkPositionRef = useRef<SessionTabInkPosition | null>(null);
   const [managedSessionTab, setManagedSessionTab] = useState<ManagedSessionTab | null>(null);
   const [sessionRenameDraft, setSessionRenameDraft] = useState('');
   const [sessionTabDeleting, setSessionTabDeleting] = useState(false);
 
-  // === 私教多会话（阶段三）：与略读三件套平行、命名独立，绝不混进 skimSessions / 文件 hash 存储 ===
+  // === 问答多会话（阶段三）：与略读三件套平行、命名独立，绝不混进 skimSessions / 文件 hash 存储 ===
   const [tutorSessions, setTutorSessions] = useState<TutorSession[]>([]);
   const [activeTutorIndex, setActiveTutorIndex] = useState(0);
-  /** 私教 isChatLoading 上抛，用于标签栏「生成中锁切换」 */
+  /** 问答 isChatLoading 上抛，用于标签栏「生成中锁切换」 */
   const [tutorActiveLoading, setTutorActiveLoading] = useState(false);
-  /** 始终指向当前激活私教会话 id；所有写入按此 id 定位，绝不用 index 闭包（防跨 session 污染） */
+  /** 始终指向当前激活问答会话 id；所有写入按此 id 定位，绝不用 index 闭包（防跨 session 污染） */
   const activeTutorIdRef = useRef<string | null>(null);
   const activeTutor = tutorSessions[activeTutorIndex] ?? tutorSessions[0];
   activeTutorIdRef.current = activeTutor?.id ?? null;
@@ -671,7 +682,7 @@ const App: React.FC = () => {
     value => updateActiveTutorSession(s => ({ ...s, messages: typeof value === 'function' ? (value as (p: ChatMessage[]) => ChatMessage[])(s.messages) : value })),
     [updateActiveTutorSession]
   );
-  /** 私教会话 id → 该会话对应 PDF 的 dataURL（运行时缓存，**不持久化**；持久化只存 cloudSessionId 轻引用）。
+  /** 问答会话 id → 该会话对应 PDF 的 dataURL（运行时缓存，**不持久化**；持久化只存 cloudSessionId 轻引用）。
    *  STOP-2 ①：每轮喂 AI 用这份 PDF（vision），与略读 content=pdfDataUrl 完全一致。 */
   const [tutorMaterialMap, setTutorMaterialMap] = useState<Record<string, string>>({});
 
@@ -695,8 +706,6 @@ const App: React.FC = () => {
   const [isOpeningStudyFile, setIsOpeningStudyFile] = useState<boolean>(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
-  /** 递进阅读模式独立 state，与 studyMap 完全无关（铁律 2，详见 docs/inquiries/LAYERED_READING_INQUIRY.md §8.G） */
-  const [layeredReadingState, setLayeredReadingState] = useState<LayeredReadingState | null>(null);
   const [fullPdfText, setFullPdfText] = useState<string | null>(null);
   const [pdfPageTexts, setPdfPageTexts] = useState<string[]>([]);
   const [isStudyMapLoading, setIsStudyMapLoading] = useState<boolean>(false);
@@ -722,12 +731,12 @@ const App: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
-  // === 私教入口/新建（放在 pdfDataUrl + currentSessionId 之后：创建时即捕获「当前文件」的 PDF 与云引用）===
-  /** 新建一条私教会话并切过去（满上限 / 生成中则忽略）。
+  // === 问答入口/新建（放在 pdfDataUrl + currentSessionId 之后：创建时即捕获「当前文件」的 PDF 与云引用）===
+  /** 新建一条问答会话并切过去（满上限 / 生成中则忽略）。
    *  STOP-2：以当前 currentSessionId 作轻引用存进会话；以当前内存 pdfDataUrl 作本会话材料（直接复用，不再存一份）。 */
   const handleAddTutorSession = useCallback(() => {
     if (tutorActiveLoading || tutorSessions.length >= MAX_TUTOR_SESSIONS) return;
-    const nextSequence = getNextDefaultSessionSequence(tutorSessions.map(session => session.title), '私教');
+    const nextSequence = getNextDefaultSessionSequence(tutorSessions.map(session => normalizeTutorSessionTitle(session.title)), '问答');
     const newSession = createTutorSession(nextSequence, currentSessionId, fileHash);
     const newIndex = tutorSessions.length;
     setTutorSessions(prev => (prev.length >= MAX_TUTOR_SESSIONS ? prev : [...prev, newSession]));
@@ -736,12 +745,12 @@ const App: React.FC = () => {
     // 直接复用当前已加载 PDF（含未登录场景）；无文件则空串=纯对话
     setTutorMaterialMap(m => ({ ...m, [newSession.id]: pdfDataUrl ?? '' }));
   }, [tutorActiveLoading, tutorSessions, currentSessionId, pdfDataUrl, fileHash]);
-  /** 略读配置卡「私教模式」入口：无会话则建一条，进入独立 tutor viewMode */
+  /** 略读配置卡「问答模式」入口：无会话则建一条，进入独立 tutor viewMode */
   const handleStartTutorMode = useCallback(() => {
     if (tutorSessions.length === 0) handleAddTutorSession();
     setViewMode('tutor');
   }, [tutorSessions.length, handleAddTutorSession]);
-  /** 恢复路径（刷新/重登）：进入某私教会话且其 PDF 尚未解析 → 凭 cloudSessionId 轻引用重取，
+  /** 恢复路径（刷新/重登）：进入某问答会话且其 PDF 尚未解析 → 凭 cloudSessionId 轻引用重取，
    *  复用略读同款 getUserSessions→fetchFileFromUrl→readFileAsDataURL 通路。仅在 tutor viewMode 下触发。 */
   useEffect(() => {
     if (viewMode !== 'tutor' || !activeTutor) return;
@@ -760,7 +769,7 @@ const App: React.FC = () => {
             if (!cancelled) setTutorMaterialMap(m => ({ ...m, [id]: dataUrl }));
             return;
           }
-        } catch (e) { console.warn('私教材料重取失败，退化为纯对话', e); }
+        } catch (e) { console.warn('问答材料重取失败，退化为纯对话', e); }
       }
       if (!cancelled) setTutorMaterialMap(m => ({ ...m, [id]: '' })); // 取不到 → 纯对话
     })();
@@ -836,6 +845,8 @@ const App: React.FC = () => {
   const [workspaceLsapKey, setWorkspaceLsapKey] = useState<string | null>(null);
   const [examWorkspaceMaterials, setExamWorkspaceMaterials] = useState<ExamMaterialLink[]>([]);
   const [workspaceLsapGenerating, setWorkspaceLsapGenerating] = useState(false);
+  const workspaceKnowledgeOwnerRef = useRef('');
+  workspaceKnowledgeOwnerRef.current = `${user?.uid ?? ''}:${activeExamId ?? ''}`;
   /** P1：按材料逐份生成考点图谱时的进度（与 workspaceLsapGenerating 同时置位） */
   const [workspaceLsapProgress, setWorkspaceLsapProgress] = useState<{
     current: number;
@@ -887,10 +898,8 @@ const App: React.FC = () => {
   const [multiDocQAPanelOpen, setMultiDocQAPanelOpen] = useState(false);
   const [multiDocQAConversationKey, setMultiDocQAConversationKey] = useState<string | null>(null);
   const multiDocQAInitialMessages = useMemo(() => multiDocQAConversationKey ? loadMultiDocQAMessages(multiDocQAConversationKey) : [], [multiDocQAConversationKey]);
-  // 学习兴致弹窗 & 5 分钟模式
-  const [moodDialogOpen, setMoodDialogOpen] = useState(false);
-  const [fiveMinFlowOpen, setFiveMinFlowOpen] = useState(false);
   const [isClassroomMode, setIsClassroomMode] = useState(false);
+  const [microphoneSetupOpen, setMicrophoneSetupOpen] = useState(false);
   const [isClassroomPanelVisible, setIsClassroomPanelVisible] = useState(false);
   const [isClassroomPaused, setIsClassroomPaused] = useState(false);
   const [classroomPausedAt, setClassroomPausedAt] = useState<number | null>(null);
@@ -918,6 +927,7 @@ const App: React.FC = () => {
   const [lectureRealtimeLines, setLectureRealtimeLines] = useState<LectureRealtimeLine[]>([]);
   const [lectureAudioLevel, setLectureAudioLevel] = useState(0);
   const activeLectureIdRef = useRef<string | null>(null);
+  const activeLectureMicrophoneDeviceIdRef = useRef<string | undefined>(undefined);
   const lectureRecentTextRef = useRef<string[]>([]);
   const lectureTranslationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lectureEndingRef = useRef(false);
@@ -993,8 +1003,6 @@ const App: React.FC = () => {
   const pendingNavSegmentRef = useRef<DailySegment | null>(null);
   const applyDailySegRef = useRef<(seg: DailySegment) => void>(() => {});
   const pendingExamPredictionAfterHashRef = useRef<string | null>(null);
-  const skipMoodOnNextFileLoadRef = useRef(false);
-  const moodDialogShownThisSessionRef = useRef(false);
   const selectionTimeoutRef = useRef<number | null>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
   
@@ -1392,12 +1400,12 @@ const App: React.FC = () => {
     reloadStudyCloudSessions();
   }, [reloadStudyCloudSessions]);
 
-  // --- 私教会话持久化（阶段三）：独立于略读 / 文件 hash，按用户全局存取 ---
+  // --- 问答会话持久化（阶段三）：独立于略读 / 文件 hash，按用户全局存取 ---
   // 1) 挂载即从本地 IndexedDB 恢复（仅当内存仍为空，避免覆盖用户已开的会话）
   useEffect(() => {
     if (!fileHash) { setTutorSessions([]); return; }
     storageService.getAllTutorSessions(fileHash)
-      .then(local => setTutorSessions(local))
+      .then(local => setTutorSessions(local.map(session => ({ ...session, title: normalizeTutorSessionTitle(session.title) }))))
       .catch(() => {});
   }, [fileHash]);
   // 2) 登录后拉云端，与内存（本地）按 id 合并、云端胜（跨设备恢复）。本地优先显示、云端到达再并入。
@@ -1466,7 +1474,7 @@ const App: React.FC = () => {
             notebookData,
             pageComments,
             currentIndex,
-            // 私教是独立 viewMode、不属于任何文件：落盘时 'tutor' 归一为 'deep'，避免重开文件误入私教
+            // 问答是独立 viewMode、不属于任何文件：落盘时 'tutor' 归一为 'deep'，避免重开文件误入问答
             viewMode: viewMode === 'tutor' ? 'deep' : viewMode,
             skimTopHeight,
             skimFocusMode,
@@ -1485,7 +1493,6 @@ const App: React.FC = () => {
             pageMarks,
             studyGuide,
             savedArtifacts,
-            layeredReadingState,
             ...(lsapContentMap?.sourceKey === examSummaryContentKey && lsapContentMap && lsapState
               ? { lsapContentMap, lsapState }
               : {})
@@ -1496,7 +1503,7 @@ const App: React.FC = () => {
       } catch (e) { console.warn('Auto-save failed:', e); }
     }, 2000);
     return () => clearTimeout(saveTimeout);
-  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, layeredReadingState, lsapContentMap, lsapState, examSummaryContentKey]);
+  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState, examSummaryContentKey]);
 
   useEffect(() => {
     if (!currentSessionId || !user) return;
@@ -1505,11 +1512,11 @@ const App: React.FC = () => {
         // 阶段三：把完整 skimSessions + activeSkimIndex 一并写云端（整包覆盖，冲突走「后写覆盖」策略 A）。
         // 「读旧不毁旧」复用本地同一套抑制：迁移未触碰前不写新字段、只续写旧扁平字段，不改写云端旧记录。
         ...(isUntouchedSkimMigration() ? {} : { skimSessions, activeSkimIndex }),
-        explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode: viewMode === 'tutor' ? 'deep' : viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, layeredReadingState: layeredReadingState ? JSON.parse(JSON.stringify(layeredReadingState)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
+        explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode: viewMode === 'tutor' ? 'deep' : viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
       });
     }, 3000);
     return () => clearTimeout(cloudSaveTimeout);
-  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, layeredReadingState, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
+  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
 
 
   const addArtifact = useCallback((artifact: SavedArtifact) => {
@@ -1631,9 +1638,10 @@ const App: React.FC = () => {
     setProfileSuggestion(null);
     setProfileSuggestionDraft(null);
     setProfileSuggestionError(null);
-    setIsGeneratingProfileSuggestion(true);
+    setIsGeneratingProfileSuggestion(dashboardFeatures.profile);
     try {
       await persistWitnessSession(session);
+      if (!dashboardFeatures.profile) return;
       const localRecent = loadLocalWitnessSessions();
       const cloudRecent = user ? await getCloudWitnessSessions(user, 20).catch(() => []) : [];
       const mergedRecent = [session, ...cloudRecent, ...localRecent]
@@ -1703,7 +1711,7 @@ const App: React.FC = () => {
       const stateToRestore = restoreData || (existingRecord ? existingRecord.state : null);
       if (stateToRestore) {
         setExplanations(stateToRestore.explanations || {}); setExplanationErrors({}); setChatCache(stateToRestore.chatCache || {}); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
-        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(stateToRestore.viewMode || 'skim'); setLayeredReadingState(stateToRestore.layeredReadingState ?? null); setDocType(stateToRestore.docType || 'STEM');
+        setCurrentIndex(stateToRestore.currentIndex || 0); setViewMode(normalizeRestoredViewMode(stateToRestore.viewMode)); setDocType(stateToRestore.docType || 'STEM');
         // 阶段二：区分新旧格式。无 version 字段，只能靠「skimSessions 是否存在」判断（RECON Q4）。
         if (stateToRestore.skimSessions && stateToRestore.skimSessions.length > 0) {
           // 新格式：直接恢复多段列表 + 激活索引（越界回 0）。补 createEmptySkimSession 默认值，兼容未来新增字段。
@@ -1741,7 +1749,7 @@ const App: React.FC = () => {
         if (restoredBg) setCustomBackgroundUrl(restoredBg); else if (stateToRestore.galgameBackgroundUrl) setCustomBackgroundUrl(stateToRestore.galgameBackgroundUrl);
         if (stateToRestore.personaSettings) setPersonaSettings(stateToRestore.personaSettings);
       } else {
-        setExplanations({}); setExplanationErrors({}); setChatCache({}); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('skim'); setLayeredReadingState(null); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
+        setExplanations({}); setExplanationErrors({}); setChatCache({}); setAnnotations({}); setPageComments({}); setCurrentIndex(0); setViewMode('skim'); setDocType('STEM'); setCurrentSessionId(null); setCustomAvatarUrl(null); setCustomBackgroundUrl(null); setPersonaSettings(DEFAULT_PERSONA); setReviewQuizRounds([]); setReviewFlashCards([]); setFlashCardEstimate(undefined); setPageMarks({}); setStudyGuide(null); setSavedArtifacts([]); setLsapContentMap(null); setLsapState(null);
         // 全新文件：领读回到单段空白配置区（非迁移，不抑制保存）。
         const blankSkimSession = { ...createEmptySkimSession(), skipDiagnosis: true };
         setSkimSessions([blankSkimSession]); setActiveSkimIndex(0); activeIdRef.current = blankSkimSession.id;
@@ -1779,14 +1787,8 @@ const App: React.FC = () => {
         setExamPredictionPanelOpen(true);
         /* 保持在备考工作台，不跳回主学习界面 */
       }
-      // 本页注释默认收起；文档加载完成后弹出一次「学习兴致」选择对话框
+      // 文档加载后直接进入阅读，本页注释默认收起。
       setNotesPanelCollapsed(true);
-      if (skipMoodOnNextFileLoadRef.current) {
-        skipMoodOnNextFileLoadRef.current = false;
-      } else if (!moodDialogShownThisSessionRef.current) {
-        moodDialogShownThisSessionRef.current = true;
-        setMoodDialogOpen(true);
-      }
     } catch (error) {
       // #region agent log
       _debugLog('App.tsx:processFile', 'catch', { err: String(error) });
@@ -1848,7 +1850,6 @@ const App: React.FC = () => {
         skimMessages: fullData.skimMessages,
         viewMode: fullData.viewMode,
         studyMap: fullData.studyMap,
-        layeredReadingState: fullData.layeredReadingState,
         skimStage: fullData.skimStage,
         quizData: fullData.quizData,
         // 阶段三：带上云端多会话列表 + 激活索引，交给 processFile 统一分流（有 ⇒ 多段；无 ⇒ 旧格式迁移成单段并打 baseline）。
@@ -2087,6 +2088,7 @@ const App: React.FC = () => {
   );
 
   const navigateStudyFlowStep = useCallback((step: StudyFlowStep) => {
+    if (!dashboardFeatures.energy && (step.action === 'rest' || step.action === 'open_panel' && step.target === 'break')) return;
     if (step.action === 'rest') {
       setDashboardInitialTab('energy');
       setShellMode('dashboard');
@@ -2123,9 +2125,6 @@ const App: React.FC = () => {
           break;
         case 'mindMap':
           setMindMapPanelOpen(true);
-          break;
-        case 'fiveMin':
-          setFiveMinFlowOpen(true);
           break;
         case 'break':
           setDashboardInitialTab('energy');
@@ -2290,6 +2289,47 @@ const App: React.FC = () => {
    * M1 / P1：按 examWorkspaceMaterialsSorted **逐份**拉文本 → generateLSAPContentMap(workspaceChunk) → 合并 KC；
    * 空文本跳过；单份返回 null 跳过；若最终 0 个 KC 则 alert。
    */
+  const handlePrepareLectureKnowledge = useCallback(async (options: PrepareLectureKnowledgeOptions) => {
+    const material = examWorkspaceMaterialsSorted.find(item => item.id === options.materialId);
+    if (!user?.uid || !activeExamId || !material) throw new Error('请先选择考试与讲义。');
+    if (workspaceLsapGenerating || workspaceAtomsGenerating) return;
+    const owner = workspaceKnowledgeOwnerRef.current;
+    const key = computeExamWorkspaceLsapKey(user.uid, activeExamId, examWorkspaceMaterialsSorted);
+    const isKc = options.stage === 'kc';
+    const setBusy = isKc ? setWorkspaceLsapGenerating : setWorkspaceAtomsGenerating;
+    const setProgress = isKc ? setWorkspaceLsapProgress : setWorkspaceAtomsProgress;
+    setBusy(true);
+    try {
+      const map = await prepareLectureKnowledge(workspaceLsapContentMap, material, options.pageTexts, options.stage, {
+        concepts: source => generateLSAPContentMap(source, { mode: 'workspaceChunk' }),
+        atoms: (source, subset) => generateLogicAtomsForContentMap(source, subset, {
+          maxDocChars: source.length, perMaterial: true, preserveExistingAtoms: true,
+        }),
+      }, (current, total) => setProgress({ current, total, fileName: material.fileName }));
+      if (workspaceKnowledgeOwnerRef.current !== owner) return;
+      map.sourceKey = key;
+      const existingState = workspaceLsapStateRef.current;
+      const state: LSAPState = existingState ? { ...existingState, contentMapId: map.id } : {
+        contentMapId: map.id, bktState: {}, probeHistory: [], lastPredictedScore: 0, lastUpdated: Date.now(),
+      };
+      // Earlier BKT estimates, atom coverage and conversations remain historical records.
+      const atomCoverage = { ...workspaceAtomCoverageRef.current, ...mergeAtomCoverageForMap(workspaceAtomCoverageRef.current, map) };
+      saveWorkspaceLsapBundle(key, {
+        contentMap: map, state, atomCoverage,
+        dialogueTranscript: workspaceDialogueTranscriptRef.current,
+        kcGlossary: workspaceKcGlossaryRef.current,
+        evidenceAnnotations: workspaceEvidenceAnnotationsRef.current,
+        dialogueUpdatedAt: Date.now(), savedAt: Date.now(),
+      });
+      setWorkspaceLsapContentMap(map);
+      workspaceLsapStateRef.current = state;
+      setWorkspaceLsapState(state);
+      workspaceAtomCoverageRef.current = atomCoverage;
+      setWorkspaceAtomCoverage(atomCoverage);
+      setWorkspaceLsapKey(key);
+    } finally { setBusy(false); setProgress(null); }
+  }, [user, activeExamId, examWorkspaceMaterialsSorted, workspaceLsapContentMap, workspaceLsapGenerating, workspaceAtomsGenerating]);
+
   const handleGenerateWorkspaceLsap = useCallback(async () => {
     if (!user?.uid || !activeExamId || examWorkspaceMaterialsSorted.length === 0) {
       window.alert('请先选择考试并关联材料。');
@@ -2751,20 +2791,17 @@ const App: React.FC = () => {
         return;
       }
       pendingExamPredictionAfterHashRef.current = firstFile.fileHash;
-      skipMoodOnNextFileLoadRef.current = true;
       window.alert(`请选择本地文件「${firstFile.fileName}」以加载与考试关联的 PDF，随后将打开考前预测。`);
       hiddenFileInputRef.current?.click();
       return;
     }
     const firstSession = sorted.find((l) => l.sourceType === 'sessionId' && l.cloudSessionId);
     if (firstSession) {
-      skipMoodOnNextFileLoadRef.current = true;
       try {
         const sessions = await getUserSessions(user);
         const s = sessions.find((x) => x.id === firstSession.cloudSessionId && x.type === 'file');
         if (!s?.fileUrl) {
           window.alert('无法找到云端文件或下载链接缺失。请先在主界面侧栏从「云端」恢复该 PDF，或到考试中心检查材料关联。');
-          skipMoodOnNextFileLoadRef.current = false;
           return;
         }
         await handleRestoreCloudSession(s);
@@ -2774,7 +2811,6 @@ const App: React.FC = () => {
       } catch (e) {
         console.error(e);
         window.alert('从云端打开材料失败，请检查网络后重试。');
-        skipMoodOnNextFileLoadRef.current = false;
       }
       return;
     }
@@ -2794,7 +2830,6 @@ const App: React.FC = () => {
       skimTopHeight,
       skimFocusMode,
       studyMap,
-      layeredReadingState,
       skimStage,
       quizData,
       docType,
@@ -2823,7 +2858,6 @@ const App: React.FC = () => {
     skimTopHeight,
     skimFocusMode,
     studyMap,
-    layeredReadingState,
     skimStage,
     quizData,
     docType,
@@ -2902,7 +2936,7 @@ const App: React.FC = () => {
       });
   }, []);
 
-  const startLectureRealtime = useCallback(async (lectureId: string) => {
+  const startLectureRealtime = useCallback(async (lectureId: string, microphoneDeviceId?: string) => {
     await startElevenLabsRealtimeTranscription({
       onStatus: (status, message) => {
         if (activeLectureIdRef.current !== lectureId) return;
@@ -2914,7 +2948,7 @@ const App: React.FC = () => {
         setTranscriptLive(text);
       },
       onCommitted: (text) => handleLectureRealtimeCommitted(lectureId, text),
-    });
+    }, microphoneDeviceId ?? activeLectureMicrophoneDeviceIdRef.current);
   }, [handleLectureRealtimeCommitted]);
 
   const handleRetryLectureRealtime = useCallback(async () => {
@@ -2923,7 +2957,7 @@ const App: React.FC = () => {
     await retryElevenLabsRealtimeTranscription();
   }, [isClassroomPaused]);
 
-  const handleStartClass = async () => {
+  const handleStartClass = async (microphoneDeviceId?: string): Promise<boolean> => {
     const startedAt = Date.now();
     const hasOpenMaterial = Boolean(fileName && slides.length > 0);
     const lecture: LectureRecord = {
@@ -2940,6 +2974,7 @@ const App: React.FC = () => {
         : undefined,
     };
     try {
+      activeLectureMicrophoneDeviceIdRef.current = microphoneDeviceId;
       activeLectureIdRef.current = lecture.id;
       lectureEndingRef.current = false;
       lectureRecentTextRef.current = [];
@@ -2960,12 +2995,15 @@ const App: React.FC = () => {
         (progress) => {
           setCurrentLecture((prev) => prev ? withLectureAudio(prev, progress) : null);
         },
-        setLectureAudioLevel
+        setLectureAudioLevel,
+        microphoneDeviceId
       );
       setCurrentLecture((prev) => prev ? withLectureAudio(prev, audio) : null);
-      void startLectureRealtime(lecture.id);
+      void startLectureRealtime(lecture.id, microphoneDeviceId);
+      return true;
     } catch (e) {
       activeLectureIdRef.current = null;
+      activeLectureMicrophoneDeviceIdRef.current = undefined;
       stopElevenLabsRealtimeTranscription();
       alert(e instanceof Error ? e.message : '无法开启录音');
       setCurrentLecture(null);
@@ -2974,8 +3012,12 @@ const App: React.FC = () => {
       setClassroomPausedDurationMs(0);
       setIsClassroomMode(false);
       setIsClassroomPanelVisible(false);
+      return false;
     }
   };
+
+  const openMicrophoneSetup = useCallback(() => setMicrophoneSetupOpen(true), []);
+  const closeMicrophoneSetup = useCallback(() => setMicrophoneSetupOpen(false), []);
 
   const handlePauseClass = async () => {
     if (!isClassroomMode || isClassroomPaused || !currentLecture) return;
@@ -3018,6 +3060,7 @@ const App: React.FC = () => {
     lectureEndingRef.current = true;
     const lecture = currentLecture;
     activeLectureIdRef.current = null;
+    activeLectureMicrophoneDeviceIdRef.current = undefined;
     stopElevenLabsRealtimeTranscription();
     let audio: LectureAudioRecording | null = null;
     try {
@@ -3294,7 +3337,7 @@ const App: React.FC = () => {
     // 方案 A：设了页码范围时，地图也只覆盖选中页（contentOverride 优先），否则回退整本
     const content = contentOverride || pdfDataUrl || fullPdfText;
     if (!content) return null;
-    const map = await performPreFlightDiagnosis(content, { moduleCount });
+    const map = await performPreFlightDiagnosis(content, { moduleCount }, 'astra');
     if (map) setSkimSessions(prev => prev.map(s => (s.id === targetSkimId ? { ...s, studyMap: map, studyMapModuleCount: moduleCount } : s)));
     return map; // 返回新 map，供 SkimPanel 直接用，绕开 setState 后的旧闭包
   };
@@ -3346,7 +3389,7 @@ const App: React.FC = () => {
         : session));
     } else {
       if (tutorSessions.some(session => session.id !== managedSessionTab.id && session.title.trim() === nextTitle)) {
-        window.alert('已经有一个同名的私教标签。');
+        window.alert('已经有一个同名的问答标签。');
         return;
       }
       const target = tutorSessions.find(session => session.id === managedSessionTab.id);
@@ -3374,7 +3417,7 @@ const App: React.FC = () => {
       ? '\n\n为了让领读入口保持可用，删除后会建立一个全新的空白领读标签。'
       : '';
     const confirmed = window.confirm(
-      `永久删除“${targetTitle}”？\n\n该标签里的对话、学习位置和模式记录会被删除；其他领读、私教、PDF 注释与便签不受影响。${lastSkimHint}`
+      `永久删除“${targetTitle}”？\n\n该标签里的对话、学习位置和模式记录会被删除；其他领读、问答、PDF 注释与便签不受影响。${lastSkimHint}`
     );
     if (!confirmed) return;
 
@@ -3625,10 +3668,6 @@ const App: React.FC = () => {
         setIsClassroomPanelVisible(false);
         setViewMode(prev => prev === 'skim' ? 'deep' : 'skim');
       }}
-      onToggleLayered={() => {
-        setIsClassroomPanelVisible(false);
-        setViewMode(prev => prev === 'layered' ? 'skim' : 'layered');
-      }}
       hasStudyMap={slides.length > 0} 
       onOpenHistory={handleOpenHistory} 
       onEnterGalgameMode={() => setIsGalgameMode(true)}
@@ -3650,7 +3689,7 @@ const App: React.FC = () => {
       onOpenLectureTranscript={() => setLectureTranscriptPageOpen(true)}
       isClassroomMode={isClassroomMode}
       isClassroomPanelVisible={isClassroomPanelVisible}
-      onStartClass={handleStartClass}
+      onStartClass={openMicrophoneSetup}
       onOpenClassroomPanel={() => setIsClassroomPanelVisible(true)}
       isTranscriptionSupported={transcriptionSupported}
       onOpenReview={() => setReviewPageOpen(true)}
@@ -3661,7 +3700,6 @@ const App: React.FC = () => {
         }
         setAppMode('examWorkspace');
       }}
-      onOpenFiveMin={() => setFiveMinFlowOpen(true)}
       onOpenTurtleSoup={() => setTurtleSoupOpen(true)}
       pomodoroSegmentSeconds={pomodoroSegmentSeconds}
       pomodoroBreakSeconds={pomodoroBreakSeconds}
@@ -3690,18 +3728,24 @@ const App: React.FC = () => {
     />
   );
   
-  // 领读 + 私教共用的同一排标签栏（数据仍两套独立；点标签同时切 viewMode + 该套 activeIndex）。
+  // 领读 + 问答共用的同一排标签栏（数据仍两套独立；点标签同时切 viewMode + 该套 activeIndex）。
   // 任一套生成中即锁全排，避免切走时打断在途生成。仅在 viewMode==='skim' / 'tutor' 两态渲染。
   const tabsLocked = skimActiveLoading || tutorActiveLoading;
   const sessionTabBar = (
-    <div className="flex items-center gap-1.5 px-3 py-2 border-b border-stone-100 bg-white shrink-0 overflow-x-auto custom-scrollbar">
-      {/* 领读标签（靛蓝系） */}
+    <div className="editorial-session-tabs has-session-tab-ink flex items-center gap-1.5 px-3 py-2 border-b border-stone-100 bg-white shrink-0 overflow-x-auto custom-scrollbar">
+      <SessionTabInk
+        activeKey={viewMode === 'skim' ? `skim:${activeSkim.id}` : activeTutor ? `tutor:${activeTutor.id}` : null}
+        scopeKey={fileHash || currentSessionId || fileName || 'local-document'}
+        layoutKey={JSON.stringify([skimSessions.map(s => [s.id, s.title]), tutorSessions.map(s => [s.id, s.title])])}
+        positionRef={sessionTabInkPositionRef}
+      />
+      {/* 领读与问答保留各自会话，以图标区分。 */}
       {skimSessions.map((s, i) => {
         const active = viewMode === 'skim' && i === activeSkimIndex;
         return (
           <div
             key={s.id}
-            className={`flex shrink-0 items-center rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
+            className={`editorial-session-tab is-skim flex shrink-0 items-center text-xs font-bold whitespace-nowrap transition-colors border ${active ? 'is-active' : ''} ${
               active
                 ? 'bg-indigo-100 text-indigo-700 border-indigo-200'
                 : 'bg-stone-50 text-stone-500 border-transparent hover:bg-stone-100'
@@ -3712,9 +3756,11 @@ const App: React.FC = () => {
               onClick={() => { if (!tabsLocked) { setViewMode('skim'); setActiveSkimIndex(i); } }}
               disabled={tabsLocked}
               title={tabsLocked ? '生成中，请等转圈结束再切换' : s.title}
-              className={`min-w-0 max-w-32 truncate px-3 py-1.5 ${tabsLocked ? 'cursor-not-allowed opacity-50' : ''}`}
+              aria-current={active ? 'page' : undefined}
+              className={`flex min-w-0 max-w-40 items-center gap-1.5 px-3 py-1.5 ${tabsLocked ? 'cursor-not-allowed opacity-50' : ''}`}
             >
-              {s.title}
+              <BookOpen className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{s.title}</span>
             </button>
             <button
               type="button"
@@ -3728,13 +3774,13 @@ const App: React.FC = () => {
           </div>
         );
       })}
-      {/* 私教标签（紫色系 + 对话图标，视觉区分于领读） */}
+      {/* 问答标签 */}
       {tutorSessions.map((s, i) => {
         const active = viewMode === 'tutor' && i === activeTutorIndex;
         return (
           <div
             key={s.id}
-            className={`flex shrink-0 items-center rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${
+            className={`editorial-session-tab is-tutor flex shrink-0 items-center text-xs font-bold whitespace-nowrap transition-colors border ${active ? 'is-active' : ''} ${
               active
                 ? 'bg-violet-100 text-violet-700 border-violet-200'
                 : 'bg-stone-50 text-violet-400 border-transparent hover:bg-violet-50'
@@ -3745,7 +3791,8 @@ const App: React.FC = () => {
               onClick={() => { if (!tabsLocked) { setViewMode('tutor'); setActiveTutorIndex(i); activeTutorIdRef.current = s.id; } }}
               disabled={tabsLocked}
               title={tabsLocked ? '生成中，请等转圈结束再切换' : s.title}
-              className={`flex min-w-0 max-w-32 items-center gap-1 px-3 py-1.5 ${tabsLocked ? 'cursor-not-allowed opacity-50' : ''}`}
+              aria-current={active ? 'page' : undefined}
+              className={`flex min-w-0 max-w-40 items-center gap-1.5 px-3 py-1.5 ${tabsLocked ? 'cursor-not-allowed opacity-50' : ''}`}
             >
               <MessageCircle className="h-3 w-3 shrink-0" />
               <span className="truncate">{s.title}</span>
@@ -3774,7 +3821,7 @@ const App: React.FC = () => {
               ? '生成中，请等转圈结束再新建'
               : '新建一段空白领读'
         }
-        className={`shrink-0 flex items-center justify-center w-7 h-7 rounded-lg border transition-colors ${
+        className={`editorial-session-add shrink-0 flex items-center justify-center w-7 h-7 border transition-colors ${
           tabsLocked || skimSessions.length >= MAX_SKIM_SESSIONS
             ? 'bg-stone-50 text-stone-300 border-transparent cursor-not-allowed'
             : 'bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50'
@@ -3783,24 +3830,24 @@ const App: React.FC = () => {
       >
         <Plus className="w-4 h-4" />
       </button>
-      {/* 新建私教（紫色 + 对话图标，区分于新建领读） */}
+      {/* 新建问答（紫色 + 对话图标，区分于新建领读） */}
       <button
         type="button"
         onClick={() => { handleAddTutorSession(); setViewMode('tutor'); }}
         disabled={tabsLocked || tutorSessions.length >= MAX_TUTOR_SESSIONS}
         title={
           tutorSessions.length >= MAX_TUTOR_SESSIONS
-            ? `最多 ${MAX_TUTOR_SESSIONS} 段私教`
+            ? `最多 ${MAX_TUTOR_SESSIONS} 段问答`
             : tabsLocked
               ? '生成中，请等转圈结束再新建'
-              : '新建一段私教'
+              : '新建一段问答'
         }
-        className={`shrink-0 flex items-center justify-center gap-0.5 h-7 px-1.5 rounded-lg border transition-colors ${
+        className={`editorial-session-add shrink-0 flex items-center justify-center gap-0.5 h-7 px-1.5 border transition-colors ${
           tabsLocked || tutorSessions.length >= MAX_TUTOR_SESSIONS
             ? 'bg-stone-50 text-stone-300 border-transparent cursor-not-allowed'
             : 'bg-white text-violet-600 border-violet-200 hover:bg-violet-50'
         }`}
-        aria-label="新建私教会话"
+        aria-label="新建问答会话"
       >
         <MessageCircle className="w-3.5 h-3.5" />
         <Plus className="w-3.5 h-3.5" />
@@ -3819,7 +3866,7 @@ const App: React.FC = () => {
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-[11px] font-black uppercase tracking-wide text-slate-400">
-                  {managedSessionTab.kind === 'skim' ? '领读标签' : '私教标签'}
+                  {managedSessionTab.kind === 'skim' ? '领读标签' : '问答标签'}
                 </p>
                 <h2 id="session-tab-manager-title" className="mt-1 text-base font-black text-slate-900">管理“{managedSessionTitle}”</h2>
               </div>
@@ -3851,7 +3898,7 @@ const App: React.FC = () => {
 
             <div className="mt-5 border-t border-stone-200 pt-4">
               <p className="text-xs leading-5 text-slate-500">
-                永久删除只会清除这个{managedSessionTab.kind === 'skim' ? '领读' : '私教'}标签里的对话、学习位置和模式记录，不影响另一类标签、PDF 注释或便签。
+                永久删除只会清除这个{managedSessionTab.kind === 'skim' ? '领读' : '问答'}标签里的对话、学习位置和模式记录，不影响另一类标签、PDF 注释或便签。
               </p>
               <button
                 type="button"
@@ -3903,11 +3950,12 @@ const App: React.FC = () => {
   }, [activeSkim.studyStyle, currentIndex, slides.length, updateActiveSkimSession]);
 
   const studyRightPanel = viewMode === 'skim' ? (
-    // 标签栏（领读+私教同排，共享）+ SkimPanel 同框：SkimPanel 始终挂载，切换标签只换喂进去的「激活会话切片」。
+    // 标签栏（领读+问答同排，共享）+ SkimPanel 同框：SkimPanel 始终挂载，切换标签只换喂进去的「激活会话切片」。
     <div className="flex flex-col h-full">
       {sessionTabBar}
       <div className="flex-1 min-h-0">
         <SkimPanel
+          readingSessionKey={JSON.stringify([fileHash, currentSessionId, activeSkim.id, activeRecordCard?.id ?? 'continuous'])}
           studyMap={studyMap}
           isLoading={isStudyMapLoading}
           onSwitchToDeep={() => setViewMode('deep')}
@@ -3969,7 +4017,7 @@ const App: React.FC = () => {
       </div>
     </div>
   ) : viewMode === 'tutor' ? (
-    // 私教 = 右栏内一种视图，与领读共用左侧 PDF 与同排标签栏；返回领读靠点领读标签。
+    // 问答 = 右栏内一种视图，与领读共用左侧 PDF 与同排标签栏；返回领读靠点领读标签。
     <div className="flex flex-col h-full">
       {sessionTabBar}
       <div className="flex-1 min-h-0">
@@ -3986,19 +4034,6 @@ const App: React.FC = () => {
         )}
       </div>
     </div>
-  ) : viewMode === 'layered' ? (
-    <LayeredReadingPanel
-      fullText={fullPdfText}
-      pdfDataUrl={pdfDataUrl}
-      fileName={fileName}
-      layeredReadingState={layeredReadingState}
-      setLayeredReadingState={setLayeredReadingState}
-      onJumpToPage={(page1Based: number) => {
-        if (slides.length === 0) return;
-        const idx = Math.max(0, Math.min(page1Based - 1, slides.length - 1));
-        setCurrentIndex(idx);
-      }}
-    />
   ) : (
     <ExplanationPanel
       explanation={currentPageToolExplanation} 
@@ -4092,10 +4127,15 @@ const App: React.FC = () => {
     : viewMode === 'skim'
       ? '领读'
       : viewMode === 'tutor'
-        ? '私教'
-        : viewMode === 'layered'
-          ? '递进'
-          : '页面工具';
+        ? '问答'
+        : '页面工具';
+
+  // 阅读双栏使用剩余空间的 46:54；专用工作区及沉浸拖宽仍沿用原布局。
+  const isReadingWorkspaceLayout = (viewMode === 'skim' || viewMode === 'tutor')
+    && !(isClassroomPanelVisible && isClassroomMode && currentLecture)
+    && !studioExpandedId
+    && !isRecordShelfVisible
+    && !(viewMode === 'skim' && activeSkim.studyStyle === 'case');
   
   if (!hasStarted) {
     return <WelcomeScreen onStart={() => { setHasStarted(true); setDashboardInitialTab('library'); setShellMode('dashboard'); }} />;
@@ -4153,6 +4193,11 @@ const App: React.FC = () => {
       )}
 
       <LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
+      <MicrophoneSetupDialog
+        open={microphoneSetupOpen}
+        onClose={closeMicrophoneSetup}
+        onStart={handleStartClass}
+      />
 
       {summarySession && (
         <div className="fixed inset-0 z-[220] bg-slate-900/35 backdrop-blur-sm flex items-center justify-center p-4">
@@ -4186,7 +4231,7 @@ const App: React.FC = () => {
               </ul>
             </section>
 
-            <section className="mt-5">
+            {dashboardFeatures.profile && <section className="mt-5">
               <div className="flex items-center justify-between gap-3">
                 <h3 className="text-sm font-black text-slate-800">画像更新建议</h3>
                 {isGeneratingProfileSuggestion && (
@@ -4236,7 +4281,7 @@ const App: React.FC = () => {
                   )}
                 </div>
               )}
-            </section>
+            </section>}
 
             <div className="mt-6 flex flex-wrap justify-end gap-2">
               <button
@@ -4244,9 +4289,9 @@ const App: React.FC = () => {
                 onClick={closeProfileSummaryModal}
                 className="px-4 py-2 rounded-xl text-sm font-bold text-slate-500 hover:bg-slate-100"
               >
-                跳过这次
+                {dashboardFeatures.profile ? '跳过这次' : '关闭小结'}
               </button>
-              <button
+              {dashboardFeatures.profile && <><button
                 type="button"
                 onClick={handleSaveProfileSuggestionForLater}
                 disabled={!profileSuggestion}
@@ -4261,7 +4306,7 @@ const App: React.FC = () => {
                 className="px-4 py-2 rounded-xl text-sm font-bold bg-slate-900 text-white hover:bg-slate-700 disabled:opacity-40"
               >
                 保存当前建议
-              </button>
+              </button></>}
             </div>
           </div>
         </div>
@@ -4334,38 +4379,6 @@ const App: React.FC = () => {
           onClose={() => setReviewPageOpen(false)}
           onStartReview={handleStartReview}
           trapCount={trapList.length}
-        />
-      )}
-
-      {/* 学习兴致弹窗 */}
-      {moodDialogOpen && (
-        <MoodDialog
-          open={moodDialogOpen}
-          onSelectLowEnergy={() => {
-            setMoodDialogOpen(false);
-            setFiveMinFlowOpen(true);
-          }}
-          onSelectHighEnergy={() => {
-            setMoodDialogOpen(false);
-          }}
-        />
-      )}
-
-      {/* 5 分钟学习模式 */}
-      {fiveMinFlowOpen && (
-        <FiveMinFlowPanel
-          docContent={fullPdfText || pdfDataUrl || ''}
-          docLabel={fileName || '当前文档'}
-          onClose={() => setFiveMinFlowOpen(false)}
-          onExtend={() => {
-            setFiveMinFlowOpen(false);
-            const content = fullPdfText || pdfDataUrl;
-            if (!content) return;
-            setCombinedReviewContent(content);
-            setCombinedReviewFileName(fileName || '当前文档');
-            setCombinedReviewFileNames(null);
-            setReviewModeChooserOpen(true);
-          }}
         />
       )}
 
@@ -4804,6 +4817,7 @@ const App: React.FC = () => {
           onWorkspaceLsapStateCommit={commitWorkspaceLsapState}
           predictedScore={workspacePredictedScore}
           onGenerateWorkspaceLsap={handleGenerateWorkspaceLsap}
+          onPrepareLectureKnowledge={handlePrepareLectureKnowledge}
           workspaceLsapGenerating={workspaceLsapGenerating}
           workspaceLsapProgress={workspaceLsapProgress}
           workspaceAtomsProgress={workspaceAtomsProgress}
@@ -4822,7 +4836,7 @@ const App: React.FC = () => {
         />
       ) : (
         <>
-      <section className={`craft-learning-shell h-screen flex flex-col relative z-20 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] ${isImmersive ? 'bg-[#F3F4F6]' : ''}`}>
+      <section className={`craft-learning-shell reading-workspace-shell h-screen flex flex-col relative z-20 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] ${isImmersive ? 'bg-[#F3F4F6]' : ''}`}>
         {isEmbeddedDev && !devBannerDismissed && (
           <div className="flex items-center justify-between gap-4 px-4 py-2 bg-amber-50 border-b border-amber-200 text-amber-800 text-sm shrink-0">
             <span>上传 PDF 在 Cursor 预览中可能受限，建议用 Chrome 打开 <strong>http://localhost:3000</strong> 进行开发调试。</span>
@@ -4832,31 +4846,24 @@ const App: React.FC = () => {
         {commonHeader}
 
         {fileName && slides.length > 0 && (
-          <div className="craft-study-strip shrink-0 border-b px-6 py-3">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={`h-2.5 w-2.5 rounded-full ${activeStudyStartedAt ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-                  <p className="text-sm font-black text-slate-900">本次学习</p>
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-black ${activeStudyStartedAt ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                    {activeStudyStartedAt ? '记录中' : '未开始记录'}
-                  </span>
-                </div>
-                <p className="mt-1 truncate text-xs font-semibold text-slate-500">
-                  {activeStudyStartedAt
-                    ? `已经记录 ${formatDurationShort(activeStudyElapsedMs)}，当前第 ${currentIndex + 1} / ${slides.length} 页`
-                    : '点开始后，只记录页面停留、离开和回来，不记录聊天内容。'}
-                </p>
+          <div className="craft-study-strip reading-study-strip shrink-0 border-b">
+            <div className="reading-study-strip-main">
+              <div className="reading-study-status">
+                <span className={`reading-study-dot ${activeStudyStartedAt ? 'is-recording' : ''}`} aria-hidden="true" />
+                <span>本次学习</span>
+                <span className="reading-study-state">{activeStudyStartedAt ? '记录中' : '未开始记录'}</span>
+                {activeStudyStartedAt && <span className="reading-study-elapsed">{formatDurationShort(activeStudyElapsedMs)}</span>}
+                <details className="reading-study-help">
+                  <summary aria-label="学习记录说明" title="学习记录说明"><Info className="h-3.5 w-3.5" /></summary>
+                  <p>开始后记录页面停留、离开和回来，不记录聊天内容。你可以随时开始或结束记录。</p>
+                </details>
               </div>
+              <span className="reading-study-description">{activeStudyStartedAt ? `当前原文第 ${currentIndex + 1} / ${slides.length} 页` : '只记录停留、离开和回来'}</span>
               <button
                 type="button"
                 onClick={activeStudyStartedAt ? handleEndStudySession : handleStartStudySession}
                 disabled={isProcessingFile}
-                className={`inline-flex shrink-0 items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                  activeStudyStartedAt
-                    ? 'bg-rose-500 text-white hover:bg-rose-600'
-                    : 'bg-emerald-600 text-white hover:bg-emerald-700'
-                }`}
+                className={`reading-study-action ${activeStudyStartedAt ? 'is-recording' : ''}`}
               >
                 {activeStudyStartedAt ? '结束本次学习' : '开始学习'}
               </button>
@@ -4877,7 +4884,7 @@ const App: React.FC = () => {
             </button>
         )}
 
-        <main className="flex-1 flex overflow-hidden relative">
+        <main className={`reading-workspace-main flex-1 flex overflow-hidden relative ${isReadingWorkspaceLayout && !isImmersive && !isSidePanelCollapsed ? 'is-reading-layout' : ''}`}>
           {isOpeningStudyFile && (
             <div className="absolute inset-0 z-[170] flex items-center justify-center bg-white/85 backdrop-blur-sm">
               <div className="flex flex-col items-center gap-3 rounded-2xl border border-stone-100 bg-white px-8 py-6 shadow-xl shadow-stone-200/60">
@@ -4890,6 +4897,7 @@ const App: React.FC = () => {
             </div>
           )}
           
+          <div className={`reading-page-sidebar ${isSidebarOpen ? 'is-open' : ''}`}>
           <Sidebar 
             isOpen={isSidebarOpen}
             totalPages={slides.length} 
@@ -4909,6 +4917,7 @@ const App: React.FC = () => {
             onRestoreSession={handleRestoreCloudSession}
             onDeleteSession={handleDeleteSession}
           />
+          </div>
           
           <div
             ref={leftPanelRef}
@@ -4988,7 +4997,7 @@ const App: React.FC = () => {
                   ? 'flex-1 min-w-[300px]'
                   : 'shrink-0 border-l border-stone-100 shadow-[-10px_0_30px_-15px_rgba(0,0,0,0.03)]'
             }`}
-            style={!isImmersive && !isSidePanelCollapsed ? { width: 'clamp(400px, 34vw, 560px)' } : undefined}
+            style={!isImmersive && !isSidePanelCollapsed && !isReadingWorkspaceLayout ? { width: 'clamp(400px, 34vw, 560px)' } : undefined}
           >
             {isSidePanelCollapsed ? (
               <div className="h-full w-full flex flex-col items-center bg-stone-50">
@@ -5033,6 +5042,7 @@ const App: React.FC = () => {
           </div>
 
           {fileName && slides.length > 0 && !isClassroomMode && (
+            <div className={`reading-studio-dock ${studioCollapsed ? 'is-collapsed' : 'is-expanded'}`}>
             <StudioPanel
               artifacts={savedArtifacts}
               expandedId={studioExpandedId}
@@ -5044,6 +5054,7 @@ const App: React.FC = () => {
               onOpenFlashcard={() => setReviewPanel('flashcard')}
               onOpenTrapList={() => setTrapListPanelOpen(true)}
             />
+            </div>
           )}
         </main>
         {!isImmersive && slides.length > 0 && fileName && (() => {
@@ -5062,7 +5073,7 @@ const App: React.FC = () => {
         <>
           <section className="craft-notebook-section pt-10 pb-24 relative z-10">
              <Notebook fileName={fileName} notes={fileName ? (notebookData[fileName] || {}) : {}} onUpdateNote={handleUpdateNote} onDeleteNote={handleDeleteNote} />
-             <footer className="mt-10 text-center text-stone-300 text-sm font-bold tracking-widest">逃课神器 · POWERED BY GEMINI 3.0 PRO</footer>
+             <footer className="mt-10 text-center text-stone-300 text-sm font-bold tracking-widest">逃课神器 · POWERED BY GPT-6 ASTRA</footer>
           </section>
         </>
       )}

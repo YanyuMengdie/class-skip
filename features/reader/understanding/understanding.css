@@ -1,0 +1,45 @@
+.understanding-panel { position: absolute; inset: 0; z-index: 35; display: flex; flex-direction: column; min-height: 0; min-width: 0; background: #faf9f5; color: #30473a; text-align: left; }
+.understanding-panel button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; transition: background-color 150ms; }
+.understanding-panel button:disabled { opacity: .45; cursor: not-allowed; }
+.understanding-panel button:focus-visible, .understanding-panel select:focus-visible, .understanding-panel textarea:focus-visible { outline: 2px solid #497660; outline-offset: 3px; }
+.understanding-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 20px; border-bottom: 1px solid #e1e4dc; flex-wrap: wrap; }
+.understanding-back { font-size: 13px; color: #436850; min-height: 32px; }
+.understanding-budget { display: flex; gap: 5px; align-items: center; font-size: 11px; color: #748174; }
+.understanding-budget select { background: #eef1e9; border: 1px solid #dce3d7; border-radius: 6px; padding: 5px 7px; color: #385a45; }
+.understanding-context { padding: 16px 22px 13px; border-bottom: 1px solid #e2e6dc; }
+.understanding-eyebrow { display: flex; align-items: center; gap: 6px; color: #6b816f; font-size: 11px; margin: 0 0 7px; }
+.understanding-context h2 { font-family: 'Songti SC', SimSun, serif; font-size: 21px; line-height: 1.45; font-weight: 500; margin: 0 0 8px; overflow-wrap: anywhere; }
+.understanding-context details { font-size: 11px; color: #6b796e; }
+.understanding-context summary { cursor: pointer; }
+.understanding-context details p { max-height: 120px; overflow-y: auto; font-size: 12px; white-space: pre-wrap; margin-top: 7px; }
+.understanding-sources { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; max-height: 60px; overflow-y: auto; }
+.understanding-sources button { border: 1px solid #e0e5dc; padding: 3px 7px; border-radius: 4px; font-size: 10px; color: #53725c; }
+.understanding-transcript { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 20px 24px; }
+.understanding-turn { margin: 0 0 22px; font-size: 15px; line-height: 1.9; overflow-wrap: anywhere; }
+.understanding-turn.is-user { background: #e8eee3; margin-left: 28px; padding: 12px 16px; border-radius: 12px 12px 3px 12px; }
+.understanding-speaker { display: block; font-size: 10px; color: #748272; margin-bottom: 5px; }
+.understanding-turn p { margin: 0 0 9px; }.understanding-turn p:last-child { margin-bottom: 0; }
+.understanding-turn ul,.understanding-turn ol { padding-left: 22px; list-style: revert; }.understanding-turn table { display: block; overflow-x: auto; }
+.understanding-turn th,.understanding-turn td { padding: 5px 8px; border-bottom: 1px solid #dce3d6; }.understanding-turn .katex-display { max-width: 100%; overflow-x: auto; overflow-y: hidden; }
+.understanding-turn blockquote { border-left: 3px solid #b7c9b7; padding-left: 12px; margin: 9px 0; color: #607560; }
+.understanding-turn pre { max-width: 100%; overflow-x: auto; }
+.understanding-status { display: flex; align-items: center; gap: 7px; font-size: 12px; color: #698371; }
+.understanding-error { background: #fff4e5; border: 1px solid #ead8ba; padding: 12px; border-radius: 8px; font-size: 12px; color: #825822; }
+.understanding-error button { display: block; margin-top: 8px; text-decoration: underline; }
+.understanding-reflection { background: #eff2e7; border: 1px solid #d9e0cc; border-radius: 9px; padding: 17px; margin-top: 18px; }
+.understanding-reflection h3 { font-family: 'Songti SC', SimSun, serif; font-size: 19px; margin: 0 0 12px; font-weight: 500; }
+.understanding-reflection dt { font-size: 11px; color: #748069; margin-top: 12px; }.understanding-reflection dd { margin: 3px 0 0; font-size: 13px; line-height: 1.7; }
+.understanding-reflection p { font-size: 13px; line-height: 1.7; }.understanding-reflection-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+.understanding-reflection-actions button { border: 1px solid #c7d5be; border-radius: 6px; padding: 7px 10px; font-size: 11px; }.understanding-reflection-actions button:first-child { background: #3a624a; color: #fff; border-color: #3a624a; }
+.understanding-composer { border-top: 1px solid #e1e4da; background: #faf9f5; padding: 12px 18px 10px; }
+.understanding-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }.understanding-actions button { border: 1px solid #dbe1d4; border-radius: 6px; padding: 7px 10px; font-size: 12px; background: #fffef9; }
+.understanding-actions button:hover:not(:disabled) { background: #e7eedf; }
+.understanding-composer form { display: flex; align-items: flex-end; gap: 9px; border: 1px solid #d2ddcd; background: #fffefa; border-radius: 9px; padding: 8px 9px 8px 12px; }
+.understanding-composer textarea { width: 100%; flex: 1; min-width: 0; resize: vertical; max-height: 130px; background: transparent; border: 0; outline: 0; font-size: 14px; line-height: 1.6; padding: 3px 0; }
+.understanding-composer form button { background: #3d674d; color: #fff; border-radius: 7px; width: 35px; height: 35px; flex-shrink: 0; }
+.understanding-composer > p { font-size: 10px; color: #86907f; margin: 7px 0 0; }
+.reader-understanding-entry { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; margin-top: 16px; border-top: 1px solid #e6e8df; padding-top: 11px; }
+.reader-understanding-entry button { display: inline-flex; gap: 6px; align-items: center; color: #436e51; border: 1px solid #d5dfcd; border-radius: 6px; background: #f3f6ed; font-size: 12px; padding: 7px 10px; }.reader-understanding-entry button:disabled { opacity: .45; cursor: not-allowed; }
+.reader-understanding-entry span { font-size: 10px; color: #85907e; }
+@media(max-width:600px) { .understanding-header { padding: 10px 13px; }.understanding-context { padding: 12px 15px; }.understanding-context h2 { font-size: 19px; }.understanding-transcript { padding: 16px; }.understanding-composer { padding: 10px 12px; }.understanding-composer textarea { font-size: 16px; }.understanding-turn { font-size: 14px; } }
+@media(prefers-reduced-motion:reduce) { .understanding-panel button { transition: none; } }

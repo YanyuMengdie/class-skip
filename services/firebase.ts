@@ -24,7 +24,6 @@ import {
   writeBatch,
   query,
   orderBy, 
-  limit as firestoreLimit,
   where,
   Timestamp, 
   initializeFirestore, 
@@ -366,7 +365,7 @@ export const writeSkimSessions = async (sessionId: string, skimSessions: Persist
     }
 };
 
-/** 永久删除一条领读会话及其唱片对话子文档；不会触碰同文件下的其他领读或私教。 */
+/** 永久删除一条领读会话及其分段对话子文档；不会触碰同文件下的其他领读或私教。 */
 export const deleteSkimSessionFromCloud = async (sessionId: string, skimId: string) => {
     const ref = doc(db, "sessions", sessionId, "skims", skimId);
     const legacyRef = doc(db, "sessions", sessionId, "data", "main");
@@ -472,12 +471,53 @@ export const deleteCloudSession = async (sessionId: string) => {
   }
 };
 
+/** Delete one folder, promoting its immediate contents without touching their data. */
+export const deleteCloudFolderPreservingContents = async (user: User, folder: CloudSession): Promise<void> => {
+  if (!user?.uid || folder.userId !== user.uid || folder.type !== 'folder') {
+    throw new Error('只能删除自己资料库里的文件夹。');
+  }
+
+  const folderRef = doc(db, 'sessions', folder.id);
+  const [folderSnapshot, userSessionsSnapshot] = await Promise.all([
+    getDoc(folderRef),
+    getDocs(query(collection(db, 'sessions'), where('userId', '==', user.uid))),
+  ]);
+  const folderData = folderSnapshot.data();
+  if (!folderSnapshot.exists() || folderData?.userId !== user.uid || folderData.type !== 'folder') {
+    throw new Error('这个文件夹已不存在，或不属于当前账号，请重新打开资料库。');
+  }
+
+  const parentId = typeof folderData.parentId === 'string' && folderData.parentId
+    ? folderData.parentId
+    : null;
+  if (parentId) {
+    const parent = userSessionsSnapshot.docs.find((entry) => entry.id === parentId);
+    if (parentId === folder.id || !parent || parent.data().type !== 'folder') {
+      throw new Error('上一级文件夹已不可用，请重新打开资料库后再试。');
+    }
+  }
+
+  const children = userSessionsSnapshot.docs.filter((entry) => entry.data().parentId === folder.id);
+  // Keep the promotion and deletion atomic: never commit only part of the contents.
+  if (children.length > 499) {
+    throw new Error('这个文件夹里的直接项目过多，请先移出部分资料或子文件夹，再删除文件夹。');
+  }
+  if (auth.currentUser?.uid !== user.uid) {
+    throw new Error('登录账号已变化，请重新打开资料库后再试。');
+  }
+
+  const batch = writeBatch(db);
+  const updatedAt = Timestamp.now();
+  children.forEach((child) => batch.update(child.ref, { parentId, updatedAt }));
+  batch.delete(folderRef);
+  await batch.commit();
+};
+
 export const getUserSessions = async (user: User): Promise<CloudSession[]> => {
   try {
     const q = query(
-      collection(db, "sessions"), 
-      orderBy("createdAt", "desc"),
-      firestoreLimit(100) // Increase limit for folders
+      collection(db, "sessions"),
+      where("userId", "==", user.uid)
     );
     
     const snapshot = await getDocs(q);
@@ -493,7 +533,15 @@ export const getUserSessions = async (user: User): Promise<CloudSession[]> => {
         } as CloudSession);
       }
     });
-    return sessions;
+    // Sort locally so loading the complete folder tree needs no composite index.
+    const createdAtMillis = (value: CloudSession['createdAt']): number => {
+      if (typeof value?.toMillis === 'function') return value.toMillis();
+      if (typeof value === 'number') return value;
+      if (value instanceof Date) return value.getTime();
+      if (typeof value?.seconds === 'number') return value.seconds * 1000;
+      return 0;
+    };
+    return sessions.sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt));
   } catch (error) {
     console.error("[Firebase] Get Sessions Failed:", error);
     return [];

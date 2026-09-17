@@ -8,9 +8,11 @@ import type { ChatMessage, DocType } from '@/types';
 import { chatWithSkimAdaptiveTutor } from '@/services/geminiService';
 import { getMessageImages } from '@/lib/chat/messageUtils';
 import { readFileAsDataURL } from '@/lib/pdf/pdfUtils';
+import { useReplyArrival } from '@/features/reader/motion/useReplyArrival';
+import '@/features/reader/skim/readingConversation.css';
 
 /**
- * 私教模式纯对话组件（阶段 3：受控版）。
+ * 问答模式纯对话组件（阶段 3：受控版）。
  *
  * 设计要点：
  * - 纯对话单栏，**零略读元素**（无模块数 / 节奏 / 页码 / study map / stage / quiz）。
@@ -47,7 +49,7 @@ const MarkdownComponents: Components = {
 };
 
 export interface TutorChatProps {
-  /** 受控：当前激活私教会话的消息（含 messages[0] 开场白） */
+  /** 受控：当前激活问答会话的消息（含 messages[0] 开场白） */
   messages: ChatMessage[];
   /** 受控：写回 App 的 tutorSessions（App 按 id 定位会话更新） */
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
@@ -77,6 +79,7 @@ export const TutorChat: React.FC<TutorChatProps> = ({
   const [input, setInput] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const { markReplyArrival, replyArrivalRef } = useReplyArrival();
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const generationCancelledRef = useRef(false);
@@ -95,7 +98,7 @@ export const TutorChat: React.FC<TutorChatProps> = ({
   useEffect(() => {
     onLoadingChange?.(isChatLoading);
   }, [isChatLoading, onLoadingChange]);
-  // 卸载（如返回退出私教）时复位 loading 标志，避免标签栏残留锁定
+  // 卸载（如返回退出问答）时复位 loading 标志，避免标签栏残留锁定
   useEffect(() => () => onLoadingChange?.(false), [onLoadingChange]);
 
   /** 选图（参照 SkimPanel.handleImageSelect） */
@@ -213,7 +216,9 @@ export const TutorChat: React.FC<TutorChatProps> = ({
         { currentPage, totalPages },
       );
       if (abortController.signal.aborted || generationCancelledRef.current) return;
-      setMessages((prev) => [...prev, { role: 'model', text: response, timestamp: Date.now() }]);
+      const reply: ChatMessage = { role: 'model', text: response, timestamp: Date.now() };
+      markReplyArrival(reply);
+      setMessages((prev) => [...prev, reply]);
     } catch (e) {
       if (abortController.signal.aborted || generationCancelledRef.current) return;
       const isAbort =
@@ -230,26 +235,30 @@ export const TutorChat: React.FC<TutorChatProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white">
+    <div className="reading-conversation flex flex-col h-full bg-white">
       {/* 顶栏：标题（返回略读靠点上方略读标签，无需独立返回键） */}
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-stone-100 shrink-0">
-        <div className="p-1.5 rounded-lg bg-violet-100 text-violet-600">
+      <div className="reader-context-bar shrink-0">
+        <div className="reader-context-heading">
+        <div className="reader-context-icon">
           <MessageCircle className="w-4 h-4" />
         </div>
-        <span className="text-sm font-bold text-slate-700">私教模式</span>
+        <div><span className="reader-context-title">聊聊你的问题</span><p className="reader-context-subtitle">问答 · 独立对话</p></div>
+        </div>
       </div>
 
       {/* 消息列表 */}
-      <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar bg-white">
+      <div ref={chatContainerRef} className="reading-chat flex-1 min-w-0 overflow-y-auto custom-scrollbar bg-white">
         {messages.map((msg, idx) => (
-          <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={idx} className={`reader-message flex ${msg.role === 'user' ? 'is-user justify-end' : 'is-model justify-start'}`}>
             <div
-              className={`relative max-w-[90%] px-4 py-3 text-sm shadow-sm transition-all ${
+              ref={msg.role === 'model' ? replyArrivalRef(msg) : undefined}
+              className={`reader-message-card relative text-sm transition-colors ${
                 msg.role === 'user'
                   ? 'group bg-amber-100 text-amber-900 rounded-2xl rounded-tr-none'
-                  : 'bg-stone-50 text-slate-700 border border-stone-100 rounded-2xl rounded-tl-none'
+                  : 'reader-model-reply text-slate-700'
               }`}
             >
+              {msg.role === 'model' && <div className="reader-message-label"><span>AI 回复</span><span aria-hidden="true" /></div>}
               {msg.role === 'user' && (
                 <button
                   type="button"
@@ -265,7 +274,7 @@ export const TutorChat: React.FC<TutorChatProps> = ({
                 <img key={imgIdx} src={img} alt="用户上传" className="max-w-full rounded-lg mb-2" />
               ))}
               {msg.text && (
-                <div data-preserve-language="true">
+                <div className="reader-message-body" data-preserve-language="true">
                   <ReactMarkdown
                     components={MarkdownComponents}
                     remarkPlugins={[remarkMath, remarkGfm]}
@@ -294,7 +303,7 @@ export const TutorChat: React.FC<TutorChatProps> = ({
       </div>
 
       {/* 输入区 */}
-      <div className="p-4 border-t border-stone-50 bg-white shrink-0 space-y-2">
+      <div className="reader-composer border-t border-stone-50 bg-white shrink-0 space-y-2">
         <input
           ref={fileInputRef}
           type="file"
@@ -324,7 +333,7 @@ export const TutorChat: React.FC<TutorChatProps> = ({
           </div>
         )}
 
-        <div className="flex items-center space-x-2 bg-stone-50 p-1.5 rounded-full border border-stone-100 focus-within:ring-2 focus-within:ring-indigo-100 transition-all">
+        <div className="reader-input-row flex items-center space-x-2 bg-stone-50 p-1.5 border border-stone-100 focus-within:ring-2 focus-within:ring-indigo-100 transition-colors">
           <textarea
             ref={chatInputRef}
             rows={1}
@@ -369,6 +378,7 @@ export const TutorChat: React.FC<TutorChatProps> = ({
             <button
               type="button"
               onClick={handleSend}
+              aria-label="发送消息"
               disabled={!input.trim() && pendingImages.length === 0}
               className="p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md"
             >

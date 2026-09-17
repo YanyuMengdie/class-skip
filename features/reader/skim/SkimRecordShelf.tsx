@@ -103,7 +103,7 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
   if (cards.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-[#f4f6f8] p-8 text-center">
-        <p className="text-sm font-bold text-slate-500">这次没有生成可用唱片，请回到配置区重新规划。</p>
+        <p className="text-sm font-bold text-slate-500">这次没有生成可用分段，请回到配置区重新规划。</p>
       </div>
     );
   }
@@ -117,7 +117,7 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
               <Layers3 className="h-5 w-5 text-indigo-600" />
               分段式学习
             </p>
-            <p className="mt-1 text-xs font-medium text-slate-500">选一张唱片开始；顺序是建议，不是限制。</p>
+            <p className="mt-1 text-xs font-medium text-slate-500">选一个分段开始；顺序是建议，不是限制。</p>
           </div>
           <div className="shrink-0 text-xs font-bold text-slate-500">
             {cards.filter((card) => card.status === 'completed').length} / {cards.length} 已学完
@@ -186,7 +186,7 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => move(-1)}
           disabled={focusedIndex === 0}
-          aria-label="上一张唱片"
+          aria-label="上一分段"
           className="absolute left-3 z-30 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-md transition-colors hover:border-indigo-400 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-30"
         >
           <ArrowLeft className="h-5 w-5" />
@@ -249,7 +249,7 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
                 <p className="mt-4 line-clamp-3 min-h-[4.5rem] text-sm leading-6 text-slate-600">{card.summary}</p>
                 {hasEarlierUnfinished && (
                   <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-                    前面还有未学完的唱片，但你仍然可以自由打开这一张。
+                    前面还有未学完的分段，但你仍然可以自由打开这一段。
                   </p>
                 )}
                 <button
@@ -271,7 +271,7 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => move(1)}
           disabled={focusedIndex === cards.length - 1}
-          aria-label="下一张唱片"
+          aria-label="下一分段"
           className="absolute right-3 z-30 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-md transition-colors hover:border-indigo-400 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-30"
         >
           <ArrowRight className="h-5 w-5" />

@@ -1,7 +1,8 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { Image as ImageIcon, Coffee, X, Download, StickyNote, GripHorizontal, Minus, Plus, Scaling, Move, Bold, ZoomIn, ZoomOut, Maximize2, ChevronDown, Loader2 } from 'lucide-react';
 import { Slide, SlideAnnotation } from '@/types';
 import { plainTextToHtmlWithSupSub } from '@/features/reader/lib/textUtils';
+import './slideViewer.css';
 
 interface SlideViewerProps {
   slide: Slide | undefined;
@@ -50,6 +51,10 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
   leftPanelRef
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
+  const [contentSize, setContentSize] = useState({ width: 0, height: 0 });
+  const [imageSize, setImageSize] = useState<{ source: string; width: number; height: number } | null>(null);
   
   // Interaction State
   const [activeNoteId, setActiveNoteId] = useState<string | null>(null);
@@ -71,6 +76,35 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
   useEffect(() => {
     setZoom(1);
   }, [slide, isImmersive]);
+
+  // Fit the normal view to the space remaining after the toolbar and comments.
+  // The image and annotation layer use the same measured dimensions.
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content || isImmersive || !slide) return;
+    const recordSize = (width: number, height: number) => {
+      const next = { width: Math.max(0, width), height: Math.max(0, height) };
+      setContentSize(previous => previous.width === next.width && previous.height === next.height ? previous : next);
+    };
+    const styles = getComputedStyle(content);
+    recordSize(
+      content.clientWidth - parseFloat(styles.paddingLeft) - parseFloat(styles.paddingRight),
+      content.clientHeight - parseFloat(styles.paddingTop) - parseFloat(styles.paddingBottom),
+    );
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) recordSize(entry.contentRect.width, entry.contentRect.height);
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [isImmersive, Boolean(slide)]);
+
+  const currentImageSize = imageSize?.source === slide?.imageUrl ? imageSize : null;
+  const fittedSize = currentImageSize && contentSize.width > 0 && contentSize.height > 0
+    ? (() => {
+        const scale = Math.min(contentSize.width / currentImageSize.width, contentSize.height / currentImageSize.height);
+        return { width: currentImageSize.width * scale, height: currentImageSize.height * scale };
+      })()
+    : null;
 
   // 初始化编辑内容：只在进入编辑模式时设置一次
   useEffect(() => {
@@ -149,12 +183,12 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
     initialNote.current = { x: note.x, y: note.y, w: note.width || 240, h: note.height || 100 };
 
     const onMove = (ev: MouseEvent) => {
-        // 使用左侧面板容器（如果提供）来扩大拖拽范围，否则使用 slide 容器
-        const dragContainer = leftPanelRef?.current || containerRef.current;
+        // Stored percentages belong to the actual page, even when the desk is wider.
+        const dragContainer = containerRef.current;
         if (!dragContainer) return;
         
-        // Rect of the drag container (左侧面板或 slide 容器)
         const rect = dragContainer.getBoundingClientRect();
+        if (!rect.width || !rect.height) return;
         
         const deltaX = ev.clientX - dragStartMouse.current.x;
         const deltaY = ev.clientY - dragStartMouse.current.y;
@@ -201,29 +235,13 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
     dragStartMouse.current = { x: e.clientX, y: e.clientY };
     initialNote.current = { x: note.x, y: note.y, w: note.width || 240, h: note.height || 100 };
 
-    // Need to account for zoom scale in resizing too?
-    // Not directly, but since we are changing Pixel width, we might need to adjust delta by scale factor 
-    // to match mouse movement speed if the container is scaled via transform.
-    // However, in this implementation we are setting the width of the container via style={{ width: zoom * 100% }}.
-    // So 1px mouse move is 1px on screen, but the annotation width is absolute pixels inside the container.
-    // If the container is effectively larger, the annotation pixel width stays same visually? 
-    // Wait, the annotation width is in PX. 
-    
     const onMove = (ev: MouseEvent) => {
         const deltaX = ev.clientX - dragStartMouse.current.x;
         const deltaY = ev.clientY - dragStartMouse.current.y;
         
-        // Adjust delta by zoom level to make resize feel natural if we were using transform: scale.
-        // But here we are just changing container width.
-        // If zoom is 2.0, everything is 2x bigger visually. 
-        // A 10px mouse move covers "5px" of unscaled content space? 
-        // Actually, let's divide by zoom to keep 1:1 tracking.
-        
-        const effectiveDeltaX = deltaX / zoom;
-        const effectiveDeltaY = deltaY / zoom;
-
-        const newW = Math.max(120, initialNote.current.w + effectiveDeltaX);
-        const newH = Math.max(60, initialNote.current.h + effectiveDeltaY);
+        // Notes keep pixel dimensions; PDF zoom changes page width, not a CSS scale.
+        const newW = Math.max(120, initialNote.current.w + deltaX);
+        const newH = Math.max(60, initialNote.current.h + deltaY);
         
         onUpdateAnnotation(note.id, { width: newW, height: newH });
     };
@@ -336,11 +354,11 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
       setActiveNoteId(null);
   };
 
-  // CSS Styles for the Container based on Mode
-  // If immersive, we want a "Preview" like look: Gray bg, centered content, shadow
+  // Keep the PDF and its annotation layer together; only the surrounding desk
+  // and toolbar change between the fitted and immersive layouts.
   const containerClasses = isImmersive
-    ? "craft-slide-viewer bg-[#E5E7EB] w-full h-full overflow-auto flex flex-col items-center justify-start p-6 relative"
-    : `craft-slide-viewer flex-1 h-full flex items-center justify-center p-8 overflow-hidden relative transition-colors duration-200 ${isDragOver ? 'bg-amber-50 ring-4 ring-inset ring-amber-300' : 'bg-[#FFFBF7]'}`;
+    ? `craft-slide-viewer editorial-pdf-desktop editorial-pdf-desktop--immersive w-full h-full overflow-auto flex flex-col items-center justify-start relative ${isDragOver ? 'editorial-pdf-desktop--drop' : ''}`
+    : `craft-slide-viewer editorial-pdf-desktop flex-1 h-full flex flex-col overflow-hidden relative ${isDragOver ? 'editorial-pdf-desktop--drop' : ''}`;
 
   // If normal mode, we constrain strictly to viewport. If immersive, we allow overflow for zoom.
   // We use `min-h-min` and `min-w-min` in a flex container to allow centering when smaller than viewport,
@@ -355,36 +373,32 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
         onDrop={handleDrop}
         onMouseDown={handleBgClick} 
     >
-      {/* ZOOM CONTROLS */}
+      {/* Original-page tools stay outside the image and annotation coordinate layer. */}
       {slide && (
-          <div
-            className={
-              isImmersive
-                ? 'sticky top-4 z-50 self-end mb-4 flex items-center space-x-2 rounded-2xl border border-stone-200 bg-white/90 px-3 py-2 shadow-lg backdrop-blur transition-opacity hover:opacity-100'
-                : 'absolute top-6 right-6 z-50 flex items-center space-x-2'
-            }
-          >
-              
-              {isImmersive && (
-                  <>
-                    <button onClick={handleZoomOut} className="p-1.5 hover:bg-stone-100 rounded-full text-slate-600"><ZoomOut className="w-4 h-4" /></button>
-                    <span className="text-xs font-mono font-bold text-slate-500 w-12 text-center">{Math.round(zoom * 100)}%</span>
-                    <button onClick={handleZoomIn} className="p-1.5 hover:bg-stone-100 rounded-full text-slate-600"><ZoomIn className="w-4 h-4" /></button>
-                    <div className="w-px h-4 bg-stone-300 mx-1"></div>
-                    <button onClick={handleFitWidth} className="p-1.5 hover:bg-stone-100 rounded-full text-slate-600" title="适合宽度"><Maximize2 className="w-4 h-4" /></button>
-                    <div className="w-px h-4 bg-stone-300 mx-1"></div>
-                  </>
-              )}
-
-              <button 
-                onClick={(e) => { e.stopPropagation(); onExportPDF(); }}
-                disabled={isExporting}
-                className={`${isImmersive ? 'text-slate-600 hover:text-slate-900 p-1.5' : 'bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl shadow-xl'} flex items-center space-x-2 transition-all font-bold text-sm ${isExporting ? 'opacity-70 cursor-not-allowed' : ''}`}
-                title="导出复习讲义 PDF"
-              >
-                  {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                  {!isImmersive && <span>{isExporting ? '导出中...' : '导出复习讲义 PDF'}</span>}
-              </button>
+          <div className="editorial-pdf-tools" role="group" aria-label="原文工具">
+              <div className="editorial-pdf-source-label"><span>原文</span><span className="editorial-pdf-page-label">第 {slide.pageNumber} 页</span></div>
+              <div className="editorial-pdf-tool-actions">
+                {isImmersive && (
+                    <div className="editorial-pdf-zoom" role="group" aria-label="原文缩放">
+                      <button type="button" onClick={handleZoomOut} title="缩小原文" aria-label="缩小原文"><ZoomOut className="w-4 h-4" /></button>
+                      <span className="editorial-pdf-zoom-value">{Math.round(zoom * 100)}%</span>
+                      <button type="button" onClick={handleZoomIn} title="放大原文" aria-label="放大原文"><ZoomIn className="w-4 h-4" /></button>
+                      <span className="editorial-pdf-tool-divider" aria-hidden="true" />
+                      <button type="button" onClick={handleFitWidth} title="适合宽度" aria-label="适合宽度"><Maximize2 className="w-4 h-4" /></button>
+                    </div>
+                )}
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onExportPDF(); }}
+                  disabled={isExporting}
+                  className="editorial-pdf-export"
+                  title="导出复习讲义 PDF：包含原文页面、贴附注释与本页注释"
+                  aria-label={isExporting ? '正在导出复习讲义 PDF' : '导出复习讲义 PDF'}
+                >
+                    {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    <span>{isExporting ? '导出中…' : '导出讲义'}</span>
+                </button>
+              </div>
           </div>
       )}
 
@@ -399,19 +413,27 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
 
       {slide ? (
         // Inner Wrapper for centering and scaling
-        <div className={`relative transition-transform duration-100 ease-out origin-top ${isImmersive ? 'w-full flex justify-center pb-12' : 'w-full h-full flex items-center justify-center p-4'}`}>
+        <div ref={contentRef} className={`editorial-pdf-content relative transition-transform duration-100 ease-out origin-top ${isImmersive ? 'w-full flex justify-center pb-12' : 'w-full flex items-center justify-center'}`}>
           <div 
             ref={containerRef} 
-            className={`craft-pdf-sheet relative bg-white ${isImmersive ? '' : 'max-w-full max-h-full rounded-lg border-[6px] border-white'}`}
-            style={{
-                width: isImmersive ? `${zoom * 100}%` : 'auto',
-                // For immersive, allow natural height. For normal, constrain.
+            className={`craft-pdf-sheet relative bg-white ${isImmersive ? '' : 'editorial-pdf-sheet--fitted'}`}
+            style={isImmersive ? { width: `${zoom * 100}%` } : {
+              width: fittedSize?.width ?? 0,
+              height: fittedSize?.height ?? 0,
+              visibility: fittedSize ? 'visible' : 'hidden',
             }}
           >
              <img
+              key={slide.imageUrl}
+              ref={imageRef}
               src={slide.imageUrl}
               alt={`Slide ${slide.pageNumber}`}
-              className={`${isImmersive ? 'w-full h-auto' : 'max-w-full max-h-[calc(100vh-160px)]'} object-contain bg-white pointer-events-none select-none block`}
+              onLoad={(event) => {
+                const image = event.currentTarget;
+                if (image !== imageRef.current || !image.naturalWidth || !image.naturalHeight) return;
+                setImageSize({ source: slide.imageUrl, width: image.naturalWidth, height: image.naturalHeight });
+              }}
+              className={`${isImmersive ? 'w-full h-auto' : 'w-full h-full'} object-contain bg-white pointer-events-none select-none block`}
             />
 
             {annotations.map((note) => {
@@ -424,7 +446,7 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
                 return (
                 <div
                     key={note.id}
-                    className={`absolute rounded-lg shadow-lg border backdrop-blur-sm flex flex-col group transition-all ${
+                    className={`absolute rounded-lg shadow-lg border backdrop-blur-sm flex flex-col group transition-[background-color,box-shadow,border-color] ${
                         isActive 
                             ? 'z-50 shadow-2xl ring-2 ring-blue-400 border-amber-300' 
                             : 'z-20 hover:z-30 border-amber-200/50'
@@ -547,7 +569,7 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
           </div>
         </div>
       ) : (
-        <div className="text-center z-10 flex flex-col items-center gap-8">
+        <div className="editorial-pdf-empty text-center z-10 flex flex-col items-center gap-8">
           <div className="max-w-md bg-white/60 backdrop-blur-sm p-10 rounded-[32px] border border-white shadow-xl">
             <div className="bg-white p-6 rounded-full shadow-sm inline-block mb-6 ring-8 ring-amber-50">
               <Coffee className="w-12 h-12 text-amber-400" />

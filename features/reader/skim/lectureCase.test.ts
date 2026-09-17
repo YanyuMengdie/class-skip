@@ -14,7 +14,7 @@ const manifest: LectureCaseManifest = {
   pageStart: 1,
   pageEnd: 4,
   pages: [
-    { page: 1, kind: 'title', unitIds: [], reason: '标题页，保留为案件入口。' },
+    { page: 1, kind: 'title', unitIds: [], reason: '标题页，保留为推演入口。' },
     { page: 2, kind: 'substantive', unitIds: ['u1'], reason: '提出核心主张。' },
     { page: 3, kind: 'substantive', unitIds: ['u2'], reason: '提供反驳证据。' },
     { page: 4, kind: 'duplicate', unitIds: [], reason: '第 3 页图表的动画递进版本。' },

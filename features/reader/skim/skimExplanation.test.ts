@@ -46,7 +46,7 @@ describe('skim explanation variants', () => {
   it('recognizes a substantive legacy record explanation but excludes transitions', () => {
     expect(isLegacyRecordExplanationCandidate({
       role: 'model',
-      text: '这是一条旧唱片里已经生成的完整讲解，其中包含概念、关系、例子与详细的原文说明。',
+      text: '这是一条旧分段里已经生成的完整讲解，其中包含概念、关系、例子与详细的原文说明。',
       timestamp: 1,
     })).toBe(true);
     expect(isLegacyRecordExplanationCandidate({ role: 'model', text: '好的，我们继续。', timestamp: 1 })).toBe(false);

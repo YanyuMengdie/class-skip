@@ -87,11 +87,11 @@ export const validateLectureCasePlan = (
   manifest: LectureCaseManifest,
 ): LectureCaseValidationResult => {
   const errors: string[] = [];
-  if (!plan.centralQuestion.trim()) errors.push('案件计划缺少贯穿问题。');
-  if (plan.episodes.length < 3) errors.push('案件计划少于 3 个章节。');
+  if (!plan.centralQuestion.trim()) errors.push('推演计划缺少贯穿问题。');
+  if (plan.episodes.length < 3) errors.push('推演计划少于 3 个章节。');
 
   const episodeIds = new Set(plan.episodes.map((episode) => episode.id));
-  if (episodeIds.size !== plan.episodes.length) errors.push('案件章节 ID 重复。');
+  if (episodeIds.size !== plan.episodes.length) errors.push('推演章节 ID 重复。');
   const assignments = new Map<string, number>();
   const unitIds = new Set(manifest.units.map((unit) => unit.id));
 
@@ -126,8 +126,8 @@ export const passesStrictLectureCaseGate = (
 ): LectureCaseValidationResult => {
   const errors: string[] = [];
   if (!report.centralQuestion.trim()) errors.push('没有识别出清晰的贯穿问题。');
-  if (report.suitabilityScore < LECTURE_CASE_MIN_SCORE) errors.push('案件结构适配度不足。');
-  if (report.mappableRate < LECTURE_CASE_MIN_MAPPABLE_RATE) errors.push('可进入案件主线的实质内容不足 85%。');
+  if (report.suitabilityScore < LECTURE_CASE_MIN_SCORE) errors.push('推演结构适配度不足。');
+  if (report.mappableRate < LECTURE_CASE_MIN_MAPPABLE_RATE) errors.push('可进入推演主线的实质内容不足 85%。');
   if (report.episodePreviews.length < 3) errors.push('无法形成至少 3 个连贯章节。');
   if (!manifest.units.some((unit) => unit.narrativeRole === 'spine')) errors.push('内容账本中没有主线单元。');
   return { valid: errors.length === 0, errors };

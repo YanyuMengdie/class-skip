@@ -48,6 +48,8 @@ export interface ExamWorkspaceMaterialPreviewProps {
   } | null;
   /** P3 C：回到对话中对应段落 */
   onBackToParagraph?: () => void;
+  /** Records only successfully displayed full pages, including manual navigation. */
+  onPageViewed?: (materialId: string, page: number) => void;
 }
 
 export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreviewProps> = ({
@@ -57,7 +59,10 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
   canvasScrollClassName = 'max-h-[min(60vh,520px)]',
   previewJumpRequest = null,
   onBackToParagraph,
+  onPageViewed,
 }) => {
+  const onPageViewedRef = useRef(onPageViewed);
+  onPageViewedRef.current = onPageViewed;
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const canvasWrapRef = useRef<HTMLDivElement | null>(null);
   const modalCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -275,6 +280,7 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
       setRenderBusy(true);
       try {
         await renderPdfPageToCanvas(pdf, page, canvas, 1.35);
+        if (!cancelled) onPageViewedRef.current?.(selectedLink.id, page);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : '渲染失败');
       } finally {
@@ -595,7 +601,7 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
         const res = await computeQuoteHighlightRects(page, viewport, q);
         if (cancelled) return;
         if (res.kind === 'rects' && res.rects.length > 0) {
-          setQuoteHighlightRects(res.rects);
+          setQuoteHighlightRects(res.rects.map(rect => ({ left: rect.left / viewport.width * 100, top: rect.top / viewport.height * 100, width: rect.width / viewport.width * 100, height: rect.height / viewport.height * 100 })));
           setQuoteFallbackBanner(null);
         } else if (res.kind === 'scan') {
           setScanNotice('该页可能为扫描件，无法自动高亮文本。');
@@ -754,7 +760,7 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
   if (!materials.length) {
     return (
       <div className={`rounded-2xl border border-stone-200 bg-white/90 p-4 text-sm text-slate-600 ${className}`}>
-        <p className="font-bold text-slate-800 mb-1">讲义预览（P0 手动）</p>
+        <p className="font-bold text-slate-800 mb-1">讲义原文</p>
         <p>请选择本场关联材料（考试中心关联 PDF 后刷新）。</p>
       </div>
     );
@@ -767,8 +773,8 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
       <div className="shrink-0 border-b border-stone-100 px-3 py-2 space-y-1.5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
-            <p className="text-xs font-bold text-slate-800">讲义预览（P0 手动）</p>
-            <p className="text-[10px] text-slate-500 mt-0.5">可手动选页；助手引用可带段落对齐（P3）与文本高亮（文本型 PDF）。</p>
+            <p className="text-xs font-bold text-slate-800">讲义原文</p>
+            <p className="text-[10px] text-slate-500 mt-0.5">引用会定位到对应页；你也可以自行翻阅。</p>
           </div>
           {onBackToParagraph && (
             <button
@@ -777,7 +783,7 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
               className="shrink-0 inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50/80 px-2 py-1 text-[10px] font-bold text-indigo-800 hover:bg-indigo-100"
             >
               <CornerUpLeft className="w-3.5 h-3.5" />
-              回到本段引用
+              返回回答
             </button>
           )}
         </div>
@@ -786,7 +792,7 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
         )}
         {quoteFallbackBanner && (
           <p className="text-[10px] text-slate-700 bg-amber-50/90 border border-amber-200 rounded px-2 py-1.5 leading-snug">
-            未能在文本层定位摘录，请在下方讲义中自行查找：
+            已打开引用页，暂时未能高亮这段文字：
             <span className="font-medium block mt-0.5 break-words">{quoteFallbackBanner}</span>
           </p>
         )}
@@ -917,7 +923,7 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
                   <div
                     key={`${hi}-${r.left}-${r.top}`}
                     className="absolute pointer-events-none rounded-sm bg-amber-400/35 border border-amber-600/40 mix-blend-multiply"
-                    style={{ left: r.left, top: r.top, width: r.width, height: r.height }}
+                    style={{ left: `${r.left}%`, top: `${r.top}%`, width: `${r.width}%`, height: `${r.height}%` }}
                   />
                 ))}
                 {renderBusy && (
@@ -945,7 +951,7 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
         zoomModalOpen &&
         createPortal(
           <div
-            className="fixed inset-0 z-[130] flex items-center justify-center p-4"
+            className="fixed inset-0 z-[220] flex items-center justify-center p-4"
             role="dialog"
             aria-modal="true"
             aria-labelledby="pdf-zoom-dialog-title"
@@ -977,9 +983,9 @@ export const ExamWorkspaceMaterialPreview: React.FC<ExamWorkspaceMaterialPreview
                 </button>
               </div>
               <div className="relative min-h-0 flex-1 overflow-auto bg-stone-100/90 p-3">
-                {/* 弹窗内不复现 P3 quote 高亮，侧栏保留即可；若需对齐可后续接同一 rects + scale 映射 */}
-                <div className="inline-block min-w-0">
+                <div className="relative inline-block min-w-0 max-w-full">
                   <canvas ref={modalCanvasRef} className="h-auto max-w-full bg-white shadow-md" />
+                  {quoteHighlightRects.map((rect, index) => <div key={index} className="absolute pointer-events-none rounded-sm bg-amber-400/35 border border-amber-600/40 mix-blend-multiply" style={{ left: `${rect.left}%`, top: `${rect.top}%`, width: `${rect.width}%`, height: `${rect.height}%` }} />)}
                 </div>
                 {modalRenderBusy && (
                   <div className="absolute inset-0 flex items-center justify-center bg-white/50">

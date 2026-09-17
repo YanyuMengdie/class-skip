@@ -38,12 +38,10 @@ interface HeaderProps {
   onToggleImmersive: () => void;
   onLayoutPreset?: (ratio: number) => void;
 
-  // Guided Reading + Layered Reading Mode
+  // Reading mode
   viewMode: ViewMode;
   /** 切换领读 ↔ 页面工具（内部仍兼容使用 'skim' / 'deep'） */
   onToggleSkim: () => void;
-  /** 切换递进阅读 ↔ 领读 */
-  onToggleLayered: () => void;
   hasStudyMap: boolean;
 
   // History
@@ -91,8 +89,6 @@ interface HeaderProps {
   /** P0：备考工作台（全屏一级工作区）；考试中心请从备考工作台内「考试中心」进入 */
   onOpenExamWorkspace?: () => void;
 
-  /** 只学 5 分钟（学习兴致低时的快捷入口） */
-  onOpenFiveMin?: () => void;
 
   // 海龟汤
   onOpenTurtleSoup?: () => void;
@@ -144,7 +140,6 @@ export const Header: React.FC<HeaderProps> = ({
   onLayoutPreset,
   viewMode,
   onToggleSkim,
-  onToggleLayered,
   hasStudyMap,
   onOpenHistory,
   onEnterGalgameMode,
@@ -171,7 +166,6 @@ export const Header: React.FC<HeaderProps> = ({
   isTranscriptionSupported,
   onOpenReview,
   onOpenExamWorkspace,
-  onOpenFiveMin,
   onOpenTurtleSoup,
   pomodoroSegmentSeconds = 25 * 60,
   pomodoroBreakSeconds = 5 * 60,
@@ -238,13 +232,15 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className={`craft-reader-header ${isImmersive ? 'border-b border-stone-200' : 'border-b border-stone-100'} z-[260] relative flex flex-col transition-all`}>
       {/* Top Bar */}
-      <div className="h-16 flex items-center justify-between px-6">
-        <div className="flex items-center space-x-3 min-w-[200px]">
+      <div className="reading-toolbar flex items-center justify-between">
+        <div className="reading-toolbar-brand flex items-center">
           
           {/* Menu Toggle */}
           <button 
              onClick={onToggleSidebar}
-             className="p-2 mr-1 hover:bg-stone-100 rounded-lg text-stone-500 hover:text-stone-800 transition-colors"
+             className="p-2 hover:bg-stone-100 rounded-lg text-stone-500 hover:text-stone-800 transition-colors"
+             title="资料与页面缩略图"
+             aria-label="资料与页面缩略图"
           >
              <Menu className="w-5 h-5" />
           </button>
@@ -253,9 +249,9 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={onOpenDashboard}
-              className="p-2 mr-1 hover:bg-stone-100 rounded-lg text-stone-500 hover:text-stone-800 transition-colors"
-              title="Dashboard"
-              aria-label="Dashboard"
+              className="p-2 hover:bg-stone-100 rounded-lg text-stone-500 hover:text-stone-800 transition-colors"
+              title="返回资料库"
+              aria-label="返回资料库"
             >
               <LayoutDashboard className="w-5 h-5" />
             </button>
@@ -264,17 +260,17 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="craft-brand-mark p-2 rounded-lg transform hover:scale-105 transition-transform">
             <FileText className="w-5 h-5 text-white" />
           </div>
-          <div className="hidden md:block">
-            <h1 className="text-lg font-bold text-slate-800 tracking-tight flex items-center gap-1.5">
+          <div className="reading-toolbar-file min-w-0">
+            <h1 className="text-lg text-slate-800 tracking-tight">
               逃课神器
             </h1>
-            {fileName && <p className="text-[10px] text-slate-400 max-w-[150px] truncate font-medium">{fileName}</p>}
+            {fileName && <p className="text-[11px] text-slate-400 truncate" title={fileName}>{fileName}</p>}
           </div>
         </div>
 
         {/* Center: Navigation */}
-        <div className="flex items-center space-x-4">
-             <div className="flex items-center bg-white shadow-sm shadow-stone-200 rounded-full p-1 border border-stone-100">
+        <div className="reading-toolbar-navigation flex items-center">
+             <div className="reading-page-navigation flex items-center" aria-label="原文翻页">
                 <button
                     onClick={onPrev}
                     disabled={currentPage <= 1}
@@ -283,7 +279,7 @@ export const Header: React.FC<HeaderProps> = ({
                 >
                     <ChevronLeft className="w-5 h-5" />
                 </button>
-                <span className="mx-4 text-sm font-bold text-slate-600 font-mono w-16 text-center">
+                <span className="reading-page-counter text-sm text-slate-600 font-mono text-center" title="当前原文页码">
                     {totalPages > 0 ? `${currentPage} / ${totalPages}` : "0 / 0"}
                 </span>
                 <button
@@ -296,32 +292,26 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
              </div>
 
+             {fileName && (
+               <span className="reading-toolbar-current-file" title={fileName} aria-label={`当前资料：${fileName}`}>
+                 {fileName}
+               </span>
+             )}
+
              {/* Mode Toggle Button — 领读 / 页面工具 */}
              {hasStudyMap && (
                  <button
                     onClick={onToggleSkim}
-                    className={`flex items-center space-x-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm ${
+                    className={`editorial-toolbar-control reading-page-tools flex items-center space-x-2 px-3 py-1.5 text-xs font-bold transition-all ${
                         viewMode === 'skim'
-                        ? 'bg-indigo-600 text-white shadow-indigo-200 hover:bg-indigo-700'
-                        : 'bg-white text-slate-600 border border-stone-200 hover:bg-stone-50'
+                        ? 'is-active'
+                        : 'is-secondary'
                     }`}
                  >
                     {viewMode === 'skim' ? <Layers className="w-3.5 h-3.5" /> : <Rocket className="w-3.5 h-3.5" />}
                     <span>{viewMode === 'skim' ? '页面工具' : '进入领读'}</span>
                  </button>
              )}
-
-             {/* Mode Toggle Button — 递进阅读（不依赖 hasStudyMap，铁律 2；视觉为朴素默认样式，阶段 3 再精修） */}
-             <button
-                onClick={onToggleLayered}
-                className={`flex items-center space-x-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all shadow-sm border ${
-                    viewMode === 'layered'
-                    ? 'bg-slate-700 text-white border-slate-700 hover:bg-slate-800'
-                    : 'bg-white text-slate-600 border-stone-200 hover:bg-stone-50'
-                }`}
-             >
-                <span>{viewMode === 'layered' ? '返回领读' : '进入递进阅读'}</span>
-             </button>
 
              {/* Immersive Layout Controls */}
              {isImmersive && onLayoutPreset && viewMode === 'deep' && (
@@ -340,16 +330,16 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right: 与 3001 一致 = 学习工具、更多、上传、背景音（+ 账户）*/}
-        <div className="flex items-center gap-x-2 min-w-[200px] justify-end">
+        <div className="reading-toolbar-actions flex items-center justify-end">
           {onStartStudySession && onEndStudySession && (
             <button
               type="button"
               onClick={isStudySessionActive ? onEndStudySession : onStartStudySession}
               disabled={isProcessing || totalPages === 0}
-              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+              className={`editorial-toolbar-control flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold transition-colors disabled:cursor-not-allowed ${
                 isStudySessionActive
-                  ? 'bg-rose-500 text-white hover:bg-rose-600'
-                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  ? 'is-danger'
+                  : 'is-primary'
               }`}
               title={isStudySessionActive ? '结束本次学习并生成小结' : '开始记录本次学习'}
               aria-label={isStudySessionActive ? '结束本次学习' : '开始本次学习'}
@@ -361,7 +351,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* 学习工具 */}
           {onOpenReview && (
-            <button onClick={onOpenReview} className="flex items-center space-x-1.5 px-3 py-1.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl text-xs font-bold shadow-sm" title="选择文档进行测验、闪卡、考前速览等" aria-label="学习工具">
+            <button onClick={onOpenReview} className="editorial-toolbar-control reading-toolbar-tool is-emphasized flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold" title="选择文档进行测验、闪卡、考前速览等" aria-label="学习工具">
               <BookOpen className="w-3.5 h-3.5" />
               <span>学习工具</span>
             </button>
@@ -369,7 +359,7 @@ export const Header: React.FC<HeaderProps> = ({
           {onOpenExamWorkspace && (
             <button
               onClick={onOpenExamWorkspace}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-teal-600 text-white hover:bg-teal-700 rounded-xl text-xs font-bold shadow-sm"
+              className="editorial-toolbar-control reading-toolbar-tool is-secondary flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold"
               title="备考工作台：选择当前考试、查看材料、进入考前预测"
               aria-label="考试复习"
             >
@@ -390,7 +380,7 @@ export const Header: React.FC<HeaderProps> = ({
               <MoreHorizontal className="w-5 h-5" />
             </button>
             {moreMenuOpen && (
-              <div className="absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-stone-200 py-1 z-[300]">
+              <div className="reading-toolbar-more-menu absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-stone-200 py-1 z-[300]">
                 {onStartClass && !isClassroomMode && (
                   <button type="button" onClick={() => { onStartClass(); setMoreMenuOpen(false); }} disabled={isTranscriptionSupported === false} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50 disabled:opacity-50">
                     <Mic className="w-4 h-4 text-slate-500" /> 上课
@@ -422,9 +412,7 @@ export const Header: React.FC<HeaderProps> = ({
                       {onOpenTurtleSoup && <button type="button" onClick={() => { onOpenTurtleSoup(); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
                         <Swords className="w-3.5 h-3.5" /> 海龟汤
                       </button>}
-                      {fileName && onOpenFiveMin && <button type="button" onClick={() => { onOpenFiveMin(); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
-                        <Timer className="w-3.5 h-3.5" /> 只学 5 分钟
-                      </button>}
+
                       <button type="button" onClick={() => { setRestPopoverOpen(true); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
                         <Timer className="w-3.5 h-3.5" /> 休息一下
                       </button>
@@ -461,13 +449,14 @@ export const Header: React.FC<HeaderProps> = ({
           {/* 上传 */}
           <div className="relative">
             <input type="file" id="file-upload" className="hidden" accept=".pdf,image/*" multiple={false} onChange={onUpload} />
-            <label htmlFor="file-upload" className={`flex items-center space-x-2 bg-slate-800 text-white px-4 py-2 rounded-xl cursor-pointer hover:bg-slate-700 transition-all text-xs font-bold ${isProcessing ? 'opacity-70 cursor-not-allowed' : ''}`} aria-label={isProcessing ? '处理中' : '上传'}>
+            <label htmlFor="file-upload" className={`editorial-toolbar-control reading-toolbar-tool is-secondary flex items-center space-x-2 px-3 py-1.5 cursor-pointer transition-all text-xs font-bold ${isProcessing ? 'opacity-70 cursor-not-allowed' : ''}`} aria-label={isProcessing ? '处理中' : '上传'}>
               {isProcessing ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
               <span className="hidden sm:inline">{isProcessing ? '处理中...' : '上传'}</span>
             </label>
           </div>
 
           {/* 背景音 */}
+          <div className="reading-toolbar-music">
           <MusicPlayer
             isPlaying={isPlayingAudio}
             currentTrack={currentTrackName}
@@ -479,6 +468,7 @@ export const Header: React.FC<HeaderProps> = ({
             open={musicPanelOpen}
             onOpenChange={onMusicPanelOpenChange}
           />
+          </div>
 
           {/* 账户 */}
           {user ? (

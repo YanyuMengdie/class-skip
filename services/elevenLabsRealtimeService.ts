@@ -27,6 +27,7 @@ let reconnectAttempt = 0;
 let activeHandlers: ElevenLabsRealtimeHandlers | null = null;
 let lastCommitted = '';
 let lastCommittedAt = 0;
+let activeMicrophoneDeviceId: string | undefined;
 
 const fetchRealtimeToken = async (): Promise<string> => {
   const response = await fetch('/api/elevenlabs/realtime-token', {
@@ -58,6 +59,7 @@ const connect = async (generation: number, reconnecting: boolean) => {
       token,
       modelId: 'scribe_v2_realtime',
       microphone: {
+        ...(activeMicrophoneDeviceId ? { deviceId: { exact: activeMicrophoneDeviceId } } : {}),
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
@@ -122,7 +124,8 @@ const connect = async (generation: number, reconnecting: boolean) => {
 };
 
 export const startElevenLabsRealtimeTranscription = async (
-  handlers: ElevenLabsRealtimeHandlers
+  handlers: ElevenLabsRealtimeHandlers,
+  microphoneDeviceId?: string
 ) => {
   stopElevenLabsRealtimeTranscription();
   activeGeneration += 1;
@@ -131,14 +134,16 @@ export const startElevenLabsRealtimeTranscription = async (
   activeHandlers = handlers;
   lastCommitted = '';
   lastCommittedAt = 0;
+  activeMicrophoneDeviceId = microphoneDeviceId;
   await connect(activeGeneration, false);
 };
 
 export const retryElevenLabsRealtimeTranscription = async () => {
   if (!activeHandlers) return;
   const handlers = activeHandlers;
+  const microphoneDeviceId = activeMicrophoneDeviceId;
   stopElevenLabsRealtimeTranscription();
-  await startElevenLabsRealtimeTranscription(handlers);
+  await startElevenLabsRealtimeTranscription(handlers, microphoneDeviceId);
 };
 
 export const stopElevenLabsRealtimeTranscription = () => {
@@ -153,4 +158,5 @@ export const stopElevenLabsRealtimeTranscription = () => {
     }
   }
   connection = null;
+  activeMicrophoneDeviceId = undefined;
 };

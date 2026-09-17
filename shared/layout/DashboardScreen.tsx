@@ -39,6 +39,7 @@ import {
   createJointReviewPack,
   deleteCalendarEvent,
   deleteCloudSession,
+  deleteCloudFolderPreservingContents,
   deleteJointReviewPack,
   deleteMemo,
   getCalendarEvents,
@@ -47,6 +48,7 @@ import {
   getTinyStudyEntrySessionFromCloud,
   getUserSessions,
   moveSession,
+  renameCloudSession,
   saveTinyStudyEntrySessionToCloud,
   updateJointReviewPack,
   uploadPDF,
@@ -54,6 +56,16 @@ import {
 import { extractPdfText, fetchFileFromUrl, readFileAsDataURL, renderPdfFirstPagePreview, renderPdfPagePreview } from '@/lib/pdf/pdfUtils';
 import { TaskHug } from '@/features/energyRefuel/TaskHug';
 import { ChatHug } from '@/features/energyRefuel/ChatHug';
+import { CanvasImportDialog } from '@/features/canvas/CanvasImportDialog';
+import { CanvasWeeklyBrief } from '@/features/canvas/brief/CanvasWeeklyBrief';
+import { CanvasBriefSummary } from '@/features/canvas/brief/CanvasBriefSummary';
+import type { CourseBriefReport } from '@/features/canvas/brief/types';
+import { ReluctantHome, OverviewStyleChoices, ReluctantPdfPicker, reluctantModeLabel, type ReluctantMode } from '@/features/reluctant/ReluctantChoices';
+import { StudyBookLoader } from '@/features/reluctant/StudyBookLoader';
+import { ReluctantOverviewReader } from '@/features/reluctant/OverviewReader';
+import { CuriosityEntryReader } from '@/features/reluctant/CuriosityEntryReader';
+import type { OverviewStyle } from '@/features/reluctant/overview';
+import { readingFailureMessage } from '@/services/readingAstraClient';
 import {
   chatWithJointReviewGuide,
   generateJointReviewBriefing,
@@ -80,6 +92,11 @@ import {
   type AppLanguage,
 } from '@/types';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
+import { LibraryFileActions } from './LibraryFileActions';
+import { LibraryFolderTree } from './LibraryFolderTree';
+import { getFolderPath } from './libraryFolders';
+import { dashboardFeatures, isDashboardFeatureVisible } from '@/shared/dashboardFeatures';
+import './libraryFolders.css';
 
 type DashboardTab = 'library' | 'jointReview' | 'reluctant' | 'calendar' | 'memo' | 'energy' | 'growth' | 'profile' | 'settings';
 
@@ -148,14 +165,6 @@ const toLocalDateString = (date: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
-const buildChildrenCount = (sessions: CloudSession[]): Record<string, number> => {
-  const counts: Record<string, number> = {};
-  for (const item of sessions) {
-    if (item.type === 'file' && item.parentId) counts[item.parentId] = (counts[item.parentId] ?? 0) + 1;
-  }
-  return counts;
-};
-
 const normalizeName = (name: string): string => name.trim().toLowerCase();
 
 const getUniqueFileName = (name: string, usedNames: Set<string>): string => {
@@ -180,6 +189,7 @@ const getUniqueFolderName = (name: string, folders: CloudSession[]): string => {
 };
 
 type LibraryUploadStatus = {
+  targetName?: string;
   total: number;
   completed: number;
   currentName: string;
@@ -211,13 +221,6 @@ const TINY_STUDY_ENTRY_META: Record<TinyStudyEntryType, { label: string; accent:
   counterintuitive: { label: '反直觉发现', accent: 'text-rose-700', tint: 'bg-rose-50' },
   debate: { label: '理论争论', accent: 'text-violet-700', tint: 'bg-violet-50' },
   real_life: { label: '现实连接', accent: 'text-amber-700', tint: 'bg-amber-50' },
-};
-
-const TINY_STUDY_ENTRY_ACTION_LABELS: Record<TinyStudyEntryAction, string> = {
-  start: '开始讲',
-  simpler: '再讲白一点',
-  interesting: '为什么有意思',
-  deeper: '沿着它深入一点',
 };
 
 const TINY_STUDY_ENTRY_LOCAL_KEY_PREFIX = 'class-skip:tiny-study-entries:';
@@ -300,7 +303,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   initialTab = 'library',
 }) => {
   const { text } = useAppLanguage();
-  const [activeTab, setActiveTab] = useState<DashboardTab>(initialTab);
+  const [activeTab, setActiveTab] = useState<DashboardTab>(isDashboardFeatureVisible(initialTab) ? initialTab : 'library');
   const [sessions, setSessions] = useState<CloudSession[]>([]);
   const [jointReviewPacks, setJointReviewPacks] = useState<JointReviewPack[]>([]);
   const [events, setEvents] = useState<CalendarEvent[]>([]);
@@ -319,8 +322,28 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [openingSessionId, setOpeningSessionId] = useState<string | null>(null);
   const [coverPreviews, setCoverPreviews] = useState<Record<string, string>>({});
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [deletingFolder, setDeletingFolder] = useState(false);
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const renameFolderRequestRef = useRef(false);
+  const [movingFileId, setMovingFileId] = useState<string | null>(null);
+  const [libraryMoveNotice, setLibraryMoveNotice] = useState<{ message: string; parentId: string | null } | null>(null);
+  const moveRequestRef = useRef<{ fileId: string; ownerId: string } | null>(null);
+  const libraryOwnerRef = useRef(user?.uid);
+  libraryOwnerRef.current = user?.uid;
+  useEffect(() => { setLibraryMoveNotice(null); }, [user?.uid]);
   const [libraryUploadStatus, setLibraryUploadStatus] = useState<LibraryUploadStatus | null>(null);
-  const [reluctantView, setReluctantView] = useState<'home' | 'tiny'>('home');
+  const [canvasImportOpen, setCanvasImportOpen] = useState(false);
+  const [calendarView, setCalendarView] = useState<'brief' | 'personal'>('brief');
+  const [verifiedCourseBrief, setVerifiedCourseBrief] = useState<CourseBriefReport | null>(null);
+  useEffect(() => {
+    setVerifiedCourseBrief(null);
+    const clearBrief = () => setVerifiedCourseBrief(null);
+    window.addEventListener('canvas-connection-changed', clearBrief);
+    return () => window.removeEventListener('canvas-connection-changed', clearBrief);
+  }, [user?.uid]);
+  const [reluctantView, setReluctantView] = useState<'home' | 'styles' | 'pick' | 'tiny'>('home');
+  const [reluctantMode, setReluctantMode] = useState<ReluctantMode>('overview');
+  const [overviewStyle, setOverviewStyle] = useState<OverviewStyle>('plain');
   const [tinySelectedSessionId, setTinySelectedSessionId] = useState<string>('');
   const [tinyStudyDoc, setTinyStudyDoc] = useState<{ sessionId: string; fileName: string; content: string } | null>(null);
   const [tinyStudyTurns, setTinyStudyTurns] = useState<TinyStudyTurn[]>([]);
@@ -362,12 +385,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const tinyEntrySessionRef = useRef<TinyStudyEntrySession | null>(null);
   const tinyEntryScrollRef = useRef<HTMLDivElement | null>(null);
   const tinyEntryRequestRef = useRef(0);
+  const tinyLinearRequestRef = useRef(0);
+  const tinyLinearAutoStartRef = useRef(false);
   const tinyEntryScrollSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tinyEntryForceScanRef = useRef(false);
   const profile = profileNotebook;
 
   useEffect(() => {
-    setActiveTab(initialTab);
+    setActiveTab(isDashboardFeatureVisible(initialTab) ? initialTab : 'library');
   }, [initialTab]);
 
   useEffect(() => {
@@ -437,12 +462,30 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     [activeFolderId, folders]
   );
 
+  const activeFolderPath = useMemo(() => getFolderPath(activeFolderId, folders), [activeFolderId, folders]);
+  const folderFileTotals = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const file of fileSessions) {
+      for (const folder of getFolderPath(file.parentId, folders)) counts[folder.id] = (counts[folder.id] ?? 0) + 1;
+    }
+    return counts;
+  }, [fileSessions, folders]);
+  const visibleSubfolders = useMemo(() => {
+    if (!activeFolder) return [];
+    const needle = search.trim().toLowerCase();
+    return folders.filter(folder => folder.parentId === activeFolder.id
+      && (!needle || (folder.customTitle || folder.fileName).toLowerCase().includes(needle)));
+  }, [activeFolder, folders, search]);
+
+  const openLibraryFolder = (folderId: string) => {
+    setActiveFolderId(folderId);
+    setSearch('');
+  };
+
   const jointReviewActiveFolder = useMemo(
     () => (jointReviewFolderId === 'all' ? null : folders.find((folder) => folder.id === jointReviewFolderId) ?? null),
     [jointReviewFolderId, folders]
   );
-
-  const folderCounts = useMemo(() => buildChildrenCount(sessions), [sessions]);
 
   const visibleFiles = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -461,13 +504,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   );
 
   const jointReviewVisibleFiles = useMemo(
-    () => fileSessions.filter((session) => jointReviewFolderId === 'all' || session.parentId === jointReviewFolderId),
-    [fileSessions, jointReviewFolderId]
+    () => fileSessions.filter((session) => jointReviewFolderId === 'all'
+      || getFolderPath(session.parentId, folders).some(folder => folder.id === jointReviewFolderId)),
+    [fileSessions, folders, jointReviewFolderId]
   );
 
   useEffect(() => {
     if (tinySelectedSessionId && fileSessions.some((session) => session.id === tinySelectedSessionId)) return;
-    setTinySelectedSessionId(fileSessions[0]?.id ?? '');
+    setTinySelectedSessionId('');
   }, [fileSessions, tinySelectedSessionId]);
 
   useEffect(() => {
@@ -527,21 +571,61 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   };
 
   const handleCreateFolder = async () => {
-    if (!user || creatingFolder) {
+    if (!user || creatingFolder || deletingFolder || renameFolderRequestRef.current) {
       if (!user) onLogin();
       return;
     }
-    const rawName = window.prompt('新文件夹名称');
+    const parentId = activeFolder?.id ?? null;
+    const parentName = activeFolder ? activeFolder.customTitle || activeFolder.fileName : '根目录';
+    const rawName = window.prompt(activeFolder ? `在「${parentName}」中新建子文件夹，例如 Reading 或 Lecture` : '新文件夹名称');
     const name = rawName?.trim();
     if (!name) return;
-    const uniqueName = getUniqueFolderName(name, folders);
+    const uniqueName = getUniqueFolderName(name, folders.filter(folder => (folder.parentId ?? null) === parentId));
+    const ownerId = user.uid;
     setCreatingFolder(true);
     try {
-      const id = await createCloudFolder(user, uniqueName, null);
-      await reloadSessions();
-      setActiveFolderId(id);
+      const id = await createCloudFolder(user, uniqueName, parentId);
+      if (libraryOwnerRef.current !== ownerId) return;
+      const folder: CloudSession = { id, userId: ownerId, fileName: uniqueName, fileUrl: '', type: 'folder', parentId, createdAt: Date.now() };
+      setSessions(previous => [folder, ...previous]);
+      setSearch('');
+      setLibraryMoveNotice({ parentId: id, message: `已在「${parentName}」中新建「${uniqueName}」。` });
+    } catch {
+      window.alert('创建文件夹失败，请稍后重试。');
     } finally {
       setCreatingFolder(false);
+    }
+  };
+
+  const handleRenameFolder = async (folder: CloudSession) => {
+    if (!user) { onLogin(); return; }
+    if (renameFolderRequestRef.current || creatingFolder || deletingFolder || moveRequestRef.current) return;
+    const current = folders.find(item => item.id === folder.id && item.userId === user.uid);
+    if (!current) return;
+    const oldName = current.customTitle || current.fileName;
+    const rawName = window.prompt('重命名文件夹', oldName);
+    if (rawName === null) return;
+    const name = rawName.trim();
+    if (!name) { window.alert('文件夹名称不能为空。'); return; }
+    if (name === oldName) return;
+    const duplicate = folders.some(item => item.id !== current.id
+      && (item.parentId ?? null) === (current.parentId ?? null)
+      && normalizeName(item.customTitle || item.fileName) === normalizeName(name));
+    if (duplicate) { window.alert('这一层已经有同名文件夹，请换一个名称。'); return; }
+    const ownerId = user.uid;
+    renameFolderRequestRef.current = true;
+    setRenamingFolderId(current.id);
+    try {
+      await renameCloudSession(current.id, name);
+      if (libraryOwnerRef.current !== ownerId) return;
+      setSessions(previous => previous.map(item => item.id === current.id ? { ...item, customTitle: name } : item));
+      setSearch('');
+      setLibraryMoveNotice({ parentId: current.id, message: `已将「${oldName}」重命名为「${name}」。` });
+    } catch {
+      if (libraryOwnerRef.current === ownerId) window.alert('重命名失败，原名称已保留，请稍后重试。');
+    } finally {
+      renameFolderRequestRef.current = false;
+      setRenamingFolderId(null);
     }
   };
 
@@ -550,55 +634,74 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       onLogin();
       return;
     }
+    if (deletingFolder || creatingFolder || movingFileId || renameFolderRequestRef.current) return;
     const folderName = folder.customTitle || folder.fileName;
-    const containedFiles = fileSessions.filter((session) => session.parentId === folder.id);
-    const message = containedFiles.length > 0
-      ? `确定删除文件夹“${folderName}”吗？里面的 ${containedFiles.length} 个 PDF 会保留，并移回根目录。`
+    const parentId = folder.parentId ?? null;
+    const parent = folders.find(item => item.id === parentId);
+    const parentName = parent ? parent.customTitle || parent.fileName : '根目录';
+    const containedItems = sessions.filter((session) => session.parentId === folder.id);
+    const message = containedItems.length > 0
+      ? `确定删除文件夹“${folderName}”吗？里面的 PDF 和子文件夹都会保留，并移到「${parentName}」。`
       : `确定删除文件夹“${folderName}”吗？`;
     if (!window.confirm(message)) return;
-
-    const previousFolderId = activeFolderId;
-    setSessions((prev) => prev
-      .filter((session) => session.id !== folder.id)
-      .map((session) => (session.parentId === folder.id ? { ...session, parentId: null } : session))
-    );
-    if (activeFolderId === folder.id) setActiveFolderId('all');
-    if (jointReviewFolderId === folder.id) setJointReviewFolderId('all');
-
+    const ownerId = user.uid;
+    setDeletingFolder(true);
     try {
-      await Promise.all(containedFiles.map((session) => moveSession(session.id, null)));
-      await deleteCloudSession(folder.id);
-      await reloadSessions();
-    } catch {
-      setActiveFolderId(previousFolderId);
-      await reloadSessions();
-      window.alert('删除文件夹失败，请稍后重试。');
+      await deleteCloudFolderPreservingContents(user, folder);
+      if (libraryOwnerRef.current !== ownerId) return;
+      setSessions(previous => previous.filter(session => session.id !== folder.id)
+        .map(session => session.parentId === folder.id ? { ...session, parentId } : session));
+      setActiveFolderId(current => current === folder.id ? parentId ?? 'all' : current);
+      setJointReviewFolderId(current => current === folder.id ? parentId ?? 'all' : current);
+      setLibraryMoveNotice(null);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : '删除文件夹失败，请稍后重试。');
+    } finally {
+      setDeletingFolder(false);
     }
   };
 
-  const handleLibraryBatchUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const selected = Array.from(event.target.files ?? []);
-    event.target.value = '';
-    if (!user) {
-      onLogin();
-      return;
+  const handleMoveLibraryFile = async (fileId: string, parentId: string | null) => {
+    const file = fileSessions.find(session => session.id === fileId);
+    const destination = parentId === null ? null : folders.find(folder => folder.id === parentId);
+    if (!user || !file || file.userId !== user.uid || moveRequestRef.current || deletingFolder || renameFolderRequestRef.current
+      || parentId !== null && (!destination || destination.userId !== user.uid)) throw new Error('Invalid move destination');
+    if ((file.parentId ?? null) === parentId) return;
+    const operation = { fileId, ownerId: user.uid };
+    moveRequestRef.current = operation;
+    setMovingFileId(fileId);
+    try {
+      await moveSession(fileId, parentId);
+      if (libraryOwnerRef.current !== operation.ownerId) return;
+      // Keep the PDF/session identity and all study data; reflect the saved folder only after success.
+      setSessions(previous => previous.map(session => session.id === fileId ? { ...session, parentId } : session));
+      setLibraryMoveNotice({ parentId, message: destination
+        ? text(`已移至「${getFolderPath(destination.id, folders).map(folder => folder.customTitle || folder.fileName).join(' / ')}」。`, `Moved to “${getFolderPath(destination.id, folders).map(folder => folder.customTitle || folder.fileName).join(' / ')}”.`)
+        : text('已移出文件夹，可以在「全部资料」里找到。', 'Removed from the folder. Find it in All materials.') });
+    } finally {
+      if (moveRequestRef.current === operation) { moveRequestRef.current = null; setMovingFileId(null); }
     }
-    const pdfFiles = selected.filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
-    if (pdfFiles.length === 0) return;
+  };
 
-    const targetParentId = activeFolderId === 'all' ? null : activeFolderId;
+  const uploadLibraryFiles = async (pdfFiles: File[], targetParentId: string | null = activeFolderId === 'all' ? null : activeFolderId): Promise<string[]> => {
+    if (!user || pdfFiles.length === 0) return [];
+    if (targetParentId !== null && !folders.some(folder => folder.id === targetParentId && folder.userId === user.uid))
+      throw new Error('目标文件夹已不存在，请重新选择保存位置。');
+    const targetName = targetParentId === null ? '资料库根目录'
+      : getFolderPath(targetParentId, folders).map(folder => folder.customTitle || folder.fileName).join(' / ');
     const usedNames = new Set(
       fileSessions
         .filter((session) => (session.parentId ?? null) === targetParentId)
         .map((session) => normalizeName(session.fileName))
     );
     const failures: string[] = [];
-    setLibraryUploadStatus({ total: pdfFiles.length, completed: 0, currentName: pdfFiles[0]?.name ?? '', failures: [] });
+    setLibraryUploadStatus({ total: pdfFiles.length, completed: 0, currentName: pdfFiles[0]?.name ?? '', failures: [], targetName });
 
     for (let index = 0; index < pdfFiles.length; index += 1) {
       const file = pdfFiles[index];
       const uniqueName = getUniqueFileName(file.name, usedNames);
       setLibraryUploadStatus((prev) => ({
+        targetName,
         total: prev?.total ?? pdfFiles.length,
         completed: prev?.completed ?? index,
         currentName: uniqueName,
@@ -614,6 +717,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         failures.push(uniqueName);
       } finally {
         setLibraryUploadStatus({
+          targetName,
           total: pdfFiles.length,
           completed: index + 1,
           currentName: index + 1 < pdfFiles.length ? pdfFiles[index + 1].name : '',
@@ -623,6 +727,31 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     }
 
     await reloadSessions();
+    return failures;
+  };
+
+  const handleLibraryBatchUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    if (!user) {
+      onLogin();
+      return;
+    }
+    const pdfFiles = selected.filter((file) => file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'));
+    if (pdfFiles.length === 0) return;
+    await uploadLibraryFiles(pdfFiles);
+  };
+
+  const handleCanvasImport = async (files: File[], parentId?: string | null) => {
+    if (!user) {
+      onLogin();
+      throw new Error('请先登录，再把课件放入资料库。');
+    }
+    const failures = await uploadLibraryFiles(files, parentId);
+    if (failures.length > 0) {
+      throw new Error(`${failures.length} 份材料导入失败，请稍后重试。`);
+    }
+    if (parentId !== undefined) setActiveFolderId(parentId ?? 'all');
   };
 
   const selectedTinyStudySession = useMemo(
@@ -649,8 +778,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     const scanRequested = tinyEntryScanRequestedFor === source?.id;
     const requestId = ++tinyEntryRequestRef.current;
     let cancelled = false;
+    setTinyEntryActionLoading(null);
+    setTinyEntryActionTargetId(null);
+    if (tinyEntryScrollSaveTimerRef.current) clearTimeout(tinyEntryScrollSaveTimerRef.current);
 
-    if (!user || !source?.fileUrl) {
+    if (!user || !source?.fileUrl || reluctantView !== 'tiny' || reluctantMode !== 'interest') {
       tinyEntryDocRef.current = null;
       tinyEntrySessionRef.current = null;
       setTinyEntrySession(null);
@@ -710,6 +842,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           }
         }
 
+        if (cancelled || requestId !== tinyEntryRequestRef.current) return;
+
         if (restored && (restored.fingerprintVersion !== 2 || restored.fileFingerprint !== fingerprint)) {
           restored = {
             ...restored,
@@ -730,6 +864,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           const generated = await generateTinyStudyEntries(content, pageTexts, {
             fileName: source.customTitle || source.fileName,
           });
+          if (cancelled || requestId !== tinyEntryRequestRef.current) return;
           restored = {
             version: 1,
             fingerprintVersion: 2,
@@ -767,11 +902,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         if (!cancelled && requestId === tinyEntryRequestRef.current) {
           setTinyEntryPreviews(Object.fromEntries(previewPairs.filter(([, value]) => Boolean(value))));
         }
-      } catch {
+      } catch (error) {
         if (!cancelled && requestId === tinyEntryRequestRef.current) {
-          setTinyEntryError(scanRequested
+          setTinyEntryError(readingFailureMessage(error, scanRequested
             ? '暂时没能整理出兴趣入口。你仍然可以从头用大白话开始。'
-            : '暂时没能读取这份资料。你仍然可以从头用大白话开始。');
+            : '暂时没能读取这份资料。你仍然可以从头用大白话开始。'));
         }
       } finally {
         if (!cancelled && requestId === tinyEntryRequestRef.current) setTinyEntryScanLoading(false);
@@ -780,7 +915,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
     void prepareEntries();
     return () => { cancelled = true; };
-  }, [selectedTinyStudySession?.id, tinyEntryScanNonce, tinyEntryScanRequestedFor, user?.uid]);
+  }, [selectedTinyStudySession?.id, tinyEntryScanNonce, tinyEntryScanRequestedFor, user?.uid, reluctantView, reluctantMode]);
 
   useEffect(() => {
     if (tinyStudyViewMode !== 'entry') return;
@@ -798,6 +933,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     const doc = tinyEntryDocRef.current;
     const entry = entrySession?.entries.find((item) => item.id === entryId);
     if (!entrySession || !doc || !entry || tinyEntryActionLoading) return;
+    const requestId = tinyEntryRequestRef.current;
     setTinyEntryActionLoading(action);
     setTinyEntryActionTargetId(entryId);
     setTinyEntryError(null);
@@ -810,6 +946,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         pageTexts: doc.pageTexts,
         previousTurns: entry.turns,
       });
+      if (requestId !== tinyEntryRequestRef.current) return;
       const nextSession: TinyStudyEntrySession = {
         ...entrySession,
         activeEntryId: entryId,
@@ -830,9 +967,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       window.requestAnimationFrame(() => {
         if (tinyEntryScrollRef.current) tinyEntryScrollRef.current.scrollTop = tinyEntryScrollRef.current.scrollHeight;
       });
-    } catch {
-      setTinyEntryError('这次没有讲出来。可以再点一次，或者换一个入口。');
+    } catch (error) {
+      if (requestId !== tinyEntryRequestRef.current) return;
+      setTinyEntryError(readingFailureMessage(error, '这次没有讲出来。可以再点一次，或者换一个入口。'));
     } finally {
+      if (requestId !== tinyEntryRequestRef.current) return;
       setTinyEntryActionLoading(null);
       setTinyEntryActionTargetId(null);
     }
@@ -887,6 +1026,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     if (!selectedTinyStudySession || tinyEntryScanLoading) return;
     setTinyEntryError(null);
     setTinyEntryScanRequestedFor(selectedTinyStudySession.id);
+    setTinyEntryScanNonce(value => value + 1);
   };
 
   const handleRegenerateTinyEntries = () => {
@@ -901,13 +1041,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   };
 
   const handleSelectTinyStudySession = (sessionId: string) => {
+    ++tinyLinearRequestRef.current;
+    ++tinyEntryRequestRef.current;
+    if (tinyEntryScrollSaveTimerRef.current) clearTimeout(tinyEntryScrollSaveTimerRef.current);
+    setTinyStudyLoading(false);
+    setTinyEntryActionLoading(null);
+    setTinyEntryActionTargetId(null);
     setTinySelectedSessionId(sessionId);
     setTinyStudyDoc(null);
     setTinyStudyTurns([]);
     setTinyStudyLoadingTargetId(null);
     setTinyStudyLoadingAction(null);
     setTinyStudyError(null);
-    setTinyStudyViewMode('shelf');
+    setTinyStudyViewMode(reluctantMode === 'linear' ? 'linear' : 'shelf');
     setTinyEntrySession(null);
     tinyEntrySessionRef.current = null;
     tinyEntryDocRef.current = null;
@@ -926,6 +1072,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     const isFollowUpAction = action === 'simpler' || action === 'deeper' || action === 'example';
     const targetTurn = targetTurnId ? tinyStudyTurns.find((turn) => turn.id === targetTurnId) : null;
     if (isFollowUpAction && !targetTurn) return;
+    const requestId = ++tinyLinearRequestRef.current;
     setTinyStudyLoading(true);
     setTinyStudyLoadingTargetId(isFollowUpAction ? targetTurnId ?? null : null);
     setTinyStudyLoadingAction(action);
@@ -940,6 +1087,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           fileName: selectedTinyStudySession.customTitle || selectedTinyStudySession.fileName,
           content,
         };
+        if (requestId !== tinyLinearRequestRef.current) return;
         setTinyStudyDoc(doc);
       }
 
@@ -960,6 +1108,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           text: targetTurn.text,
         } : undefined,
       });
+      if (requestId !== tinyLinearRequestRef.current) return;
       const nextId = `tiny-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
       setTinyStudyTurns((prev) => {
         if (action === 'start') {
@@ -974,14 +1123,29 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             : turn
         ));
       });
-    } catch {
-      setTinyStudyError('这次没能读到 PDF。可以稍后再试，或者换一份资料。');
+    } catch (error) {
+      if (requestId !== tinyLinearRequestRef.current) return;
+      setTinyStudyError(readingFailureMessage(error, '这次没有讲出来。可以再试一次，或者换一份资料。'));
     } finally {
+      if (requestId !== tinyLinearRequestRef.current) return;
       setTinyStudyLoading(false);
       setTinyStudyLoadingTargetId(null);
       setTinyStudyLoadingAction(null);
     }
   };
+
+  useEffect(() => {
+    if (reluctantView === 'tiny' && reluctantMode === 'linear' && selectedTinyStudySession && tinyLinearAutoStartRef.current) {
+      tinyLinearAutoStartRef.current = false;
+      void runTinyStudyStep('start');
+    }
+  }, [reluctantView, reluctantMode, selectedTinyStudySession?.id]);
+
+  useEffect(() => () => {
+    ++tinyLinearRequestRef.current;
+    ++tinyEntryRequestRef.current;
+    if (tinyEntryScrollSaveTimerRef.current) clearTimeout(tinyEntryScrollSaveTimerRef.current);
+  }, [user?.uid]);
 
   const handleOpenTinyStudyMaterial = () => {
     if (!selectedTinyStudySession) return;
@@ -1241,7 +1405,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <div className="space-y-1">
           <button
             type="button"
-            onClick={() => setActiveFolderId('all')}
+            onClick={() => openLibraryFolder('all')}
             className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm font-bold transition-colors ${
               activeFolderId === 'all' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white'
             }`}
@@ -1252,53 +1416,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             </span>
             <span className="text-xs opacity-70">{fileSessions.length}</span>
           </button>
-          {folders.map((folder) => {
-            const active = activeFolderId === folder.id;
-            return (
-              <div
-                key={folder.id}
-                className={`group flex items-center gap-1 rounded-lg pr-1 transition-colors ${
-                  active ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-white'
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setActiveFolderId(folder.id)}
-                  className="min-w-0 flex-1 flex items-center justify-between gap-2 px-3 py-2 text-sm font-bold"
-                >
-                  <span className="flex items-center gap-2 min-w-0">
-                    <Folder className="w-4 h-4 shrink-0" />
-                    <span className="truncate">{folder.customTitle || folder.fileName}</span>
-                  </span>
-                  <span className="text-xs opacity-70">{folderCounts[folder.id] ?? 0}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDeleteFolder(folder)}
-                  className={`shrink-0 p-1.5 rounded-md transition-colors ${
-                    active
-                      ? 'text-white/60 hover:bg-white/10 hover:text-white'
-                      : 'text-slate-300 hover:bg-rose-50 hover:text-rose-500'
-                  }`}
-                  aria-label={`删除文件夹 ${folder.customTitle || folder.fileName}`}
-                  title="删除文件夹"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            );
-          })}
+          <LibraryFolderTree folders={folders} activeFolderId={activeFolderId} counts={folderFileTotals}
+            deleting={deletingFolder || creatingFolder || movingFileId !== null || renamingFolderId !== null}
+            onOpen={openLibraryFolder} onDelete={handleDeleteFolder} onRename={handleRenameFolder} />
         </div>
 
         <div className="space-y-2">
           <button
             type="button"
             onClick={handleCreateFolder}
-            disabled={!user || creatingFolder}
+            disabled={!user || creatingFolder || deletingFolder || renamingFolderId !== null}
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-bold text-slate-700 hover:border-slate-400 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {creatingFolder ? <Loader2 className="w-4 h-4 animate-spin" /> : <Folder className="w-4 h-4" />}
-            <span>{creatingFolder ? '创建中' : '新建文件夹'}</span>
+            <span>{creatingFolder ? '创建中' : activeFolder ? '新建子文件夹' : '新建文件夹'}</span>
           </button>
           <label className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white border border-dashed border-indigo-300 text-sm font-bold text-indigo-700 hover:border-indigo-500 hover:text-indigo-900 cursor-pointer transition-colors ${!user || isLibraryUploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
             {isLibraryUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
@@ -1312,6 +1443,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               onChange={handleLibraryBatchUpload}
             />
           </label>
+          <button
+            type="button"
+            onClick={() => (user ? setCanvasImportOpen(true) : onLogin())}
+            disabled={isLibraryUploading}
+            className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-[#B7C7BC] bg-[#E4EBE5] text-sm font-semibold text-[#294B3B] hover:border-[#789583] hover:bg-[#DCE6DE] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+          >
+            <GraduationCap className="w-4 h-4" />
+            <span>从 Canvas 导入</span>
+          </button>
         </div>
 
         <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white border border-dashed border-slate-300 text-sm font-bold text-slate-600 hover:border-slate-500 hover:text-slate-900 cursor-pointer transition-colors">
@@ -1325,11 +1465,30 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
           <div>
             <h2 className="text-2xl font-black text-slate-900 tracking-tight">资料库</h2>
-            <p className="text-sm text-slate-500 mt-1">
-              {activeFolder ? `当前文件夹：${activeFolder.customTitle || activeFolder.fileName}` : currentFileName ? `上次打开：${currentFileName}` : '选一份资料进去，学习页会接住你。'}
-            </p>
+            {activeFolder ? (
+              <nav className="library-folder-breadcrumb" aria-label="文件夹路径">
+                <button type="button" onClick={() => openLibraryFolder('all')}>全部资料</button>
+                {activeFolderPath.map((folder, index) => (
+                  <React.Fragment key={folder.id}>
+                    <ChevronRight size={12} />
+                    {index === activeFolderPath.length - 1
+                      ? <span aria-current="page">{folder.customTitle || folder.fileName}</span>
+                      : <button type="button" onClick={() => openLibraryFolder(folder.id)}>{folder.customTitle || folder.fileName}</button>}
+                  </React.Fragment>
+                ))}
+              </nav>
+            ) : <p className="text-sm text-slate-500 mt-1">{currentFileName ? `上次打开：${currentFileName}` : '选一份资料进去，学习页会接住你。'}</p>}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 md:items-center">
+            <button
+              type="button"
+              onClick={() => (user ? setCanvasImportOpen(true) : onLogin())}
+              disabled={isLibraryUploading}
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-[#B7C7BC] bg-[#E4EBE5] px-3 py-2 text-sm font-semibold text-[#294B3B] transition-colors hover:border-[#789583] hover:bg-[#DCE6DE] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <GraduationCap className="h-4 w-4" />
+              <span>Canvas</span>
+            </button>
             <label className={`inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-slate-900 text-white text-sm font-bold cursor-pointer hover:bg-slate-700 transition-colors ${!user || isLibraryUploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
               {isLibraryUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
               <span>{isLibraryUploading ? '上传中' : `上传到${uploadTargetName}`}</span>
@@ -1354,6 +1513,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </div>
         </div>
 
+        {libraryMoveNotice && <div className="library-move-notice" role="status">
+          <Check className="h-4 w-4 shrink-0" aria-hidden="true" /><span>{libraryMoveNotice.message}</span>
+          <button type="button" className="library-move-view" onClick={() => { setActiveFolderId(libraryMoveNotice.parentId ?? 'all'); setSearch(''); }}>
+            {libraryMoveNotice.parentId ? text('查看文件夹', 'View folder') : text('查看全部资料', 'View all materials')}
+          </button>
+          <button type="button" aria-label={text('关闭移动提示', 'Dismiss move notification')} onClick={() => setLibraryMoveNotice(null)}><X className="h-4 w-4" /></button>
+        </div>}
+
         {libraryUploadStatus && (
           <div className="mb-4 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3">
             <div className="flex items-start justify-between gap-3">
@@ -1363,7 +1530,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 </p>
                 <p className="mt-1 text-xs text-slate-500 truncate">
                   {uploadCompleted
-                    ? `已放入${uploadTargetName}${libraryUploadStatus.failures.length ? `，${libraryUploadStatus.failures.length} 个失败` : ''}`
+                    ? `已放入${libraryUploadStatus.targetName || uploadTargetName}${libraryUploadStatus.failures.length ? `，${libraryUploadStatus.failures.length} 个失败` : ''}`
                     : libraryUploadStatus.currentName}
                 </p>
                 {libraryUploadStatus.failures.length > 0 && (
@@ -1384,6 +1551,41 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </div>
         )}
 
+        {user && activeFolder && !loadingSessions && (
+          <>
+            <div className="library-folder-location-bar">
+              <button type="button" onClick={() => openLibraryFolder(activeFolder.parentId ?? 'all')}>
+                <ChevronLeft size={15} />{activeFolder.parentId ? '返回上级文件夹' : '返回全部资料'}
+              </button>
+              <div className="flex items-center gap-5">
+                <button type="button" onClick={() => handleRenameFolder(activeFolder)}
+                  disabled={creatingFolder || deletingFolder || renamingFolderId !== null || movingFileId !== null}>
+                  {renamingFolderId === activeFolder.id ? <Loader2 size={15} className="animate-spin" /> : <PencilLine size={15} />}
+                  {renamingFolderId === activeFolder.id ? '重命名中' : '重命名'}
+                </button>
+                <button type="button" onClick={handleCreateFolder} disabled={creatingFolder || deletingFolder || renamingFolderId !== null}>
+                  {creatingFolder ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}新建子文件夹
+                </button>
+              </div>
+            </div>
+            {visibleSubfolders.length > 0 && (
+              <div className="library-subfolders">
+                {visibleSubfolders.map(folder => {
+                  const childCount = folders.filter(item => item.parentId === folder.id).length;
+                  return (
+                    <button type="button" key={folder.id} className="library-subfolder-card" onClick={() => openLibraryFolder(folder.id)}>
+                      <Folder size={26} />
+                      <span><strong>{folder.customTitle || folder.fileName}</strong>
+                        <small>{folderFileTotals[folder.id] ?? 0} 份 PDF{childCount > 0 ? ` · ${childCount} 个子文件夹` : ''}</small></span>
+                      <ChevronRight size={16} />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </>
+        )}
+
         {!user ? (
           <div className="min-h-[320px] bg-white border border-slate-200 rounded-lg flex flex-col items-center justify-center text-center p-8">
             <CloudOff className="w-10 h-10 text-slate-300 mb-4" />
@@ -1401,19 +1603,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <div className="min-h-[320px] flex items-center justify-center text-slate-400">
             <Loader2 className="w-7 h-7 animate-spin" />
           </div>
-        ) : visibleFiles.length === 0 ? (
+        ) : visibleFiles.length === 0 && visibleSubfolders.length === 0 ? (
           <div className="min-h-[320px] bg-white border border-slate-200 rounded-lg flex flex-col items-center justify-center text-center p-8">
             <FileText className="w-10 h-10 text-slate-300 mb-4" />
-            <p className="text-lg font-black text-slate-800">这里还没有资料</p>
+            <p className="text-lg font-black text-slate-800">{search.trim() ? '没有找到匹配的资料或文件夹' : '这里还没有资料'}</p>
+            {activeFolder && !search.trim() && <p className="mt-2 text-sm text-slate-500">可以新建子文件夹、上传 PDF，或从其他文件夹移入资料。</p>}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-5">
             {visibleFiles.map((session, index) => (
+              <div key={session.id} className="library-card-shell">
               <button
-                key={session.id}
                 type="button"
                 onClick={() => handleOpenSession(session)}
-                disabled={openingSessionId !== null}
+                disabled={openingSessionId !== null || movingFileId === session.id}
                 className="craft-library-card group text-left border rounded-lg overflow-hidden disabled:cursor-wait disabled:opacity-80"
               >
                 <div className="h-44 bg-[#f7faf9] border-b border-slate-100 p-5 overflow-hidden relative">
@@ -1468,6 +1671,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   <p className="mt-2 text-xs text-slate-500">{formatDate(session.createdAt, language)}</p>
                 </div>
               </button>
+              <LibraryFileActions file={session} folders={folders} inFolder={activeFolderId !== 'all'}
+                disabled={openingSessionId !== null || movingFileId !== null || deletingFolder || renamingFolderId !== null} onMove={handleMoveLibraryFile} />
+              </div>
             ))}
           </div>
         )}
@@ -1564,9 +1770,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                           >
                             <span className="flex min-w-0 items-center gap-2">
                               <Folder className="h-4 w-4 shrink-0" />
-                              <span className="truncate">{folder.customTitle || folder.fileName}</span>
+                              <span className="truncate" title={getFolderPath(folder.id, folders).map(item => item.customTitle || item.fileName).join(' / ')}>
+                                {getFolderPath(folder.id, folders).map(item => item.customTitle || item.fileName).join(' / ')}
+                              </span>
                             </span>
-                            <span className="text-xs opacity-70">{folderCounts[folder.id] ?? 0}</span>
+                            <span className="text-xs opacity-70">{folderFileTotals[folder.id] ?? 0}</span>
                           </button>
                         );
                       })}
@@ -1574,7 +1782,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   </div>
 
                   <p className="mt-3 text-xs font-bold text-slate-400">
-                    {jointReviewActiveFolder ? `当前文件夹：${jointReviewActiveFolder.customTitle || jointReviewActiveFolder.fileName}` : '当前显示：全部资料'}
+                    {jointReviewActiveFolder ? `当前文件夹：${getFolderPath(jointReviewActiveFolder.id, folders).map(folder => folder.customTitle || folder.fileName).join(' / ')}（含子文件夹）` : '当前显示：全部资料'}
                   </p>
 
                   <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1 custom-scrollbar">
@@ -1976,7 +2184,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     );
   };
 
-  const renderCalendar = () => {
+  const renderPersonalCalendar = () => {
     const firstDay = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1).getDay();
     const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
 
@@ -2092,6 +2300,23 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       </div>
     );
   };
+
+  const renderCalendar = () => (
+    <div className="space-y-6">
+      <div className="flex flex-wrap gap-2" aria-label="课程和个人日历视图">
+        <button type="button" aria-pressed={calendarView === 'brief'} onClick={() => setCalendarView('brief')}
+          className={`px-4 py-2 rounded-lg border text-sm font-bold ${calendarView === 'brief' ? 'bg-[#315c4a] border-[#315c4a] text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+          {text('本周课程', 'Course brief')}
+        </button>
+        <button type="button" aria-pressed={calendarView === 'personal'} onClick={() => setCalendarView('personal')}
+          className={`px-4 py-2 rounded-lg border text-sm font-bold ${calendarView === 'personal' ? 'bg-[#315c4a] border-[#315c4a] text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+          {text('我的日历', 'My calendar')}
+        </button>
+      </div>
+      {calendarView === 'brief' ? <CanvasWeeklyBrief key={user?.uid || 'local'} ownerId={user?.uid || 'local'}
+        onImport={user ? handleCanvasImport : undefined} onReportChange={setVerifiedCourseBrief} /> : renderPersonalCalendar()}
+    </div>
+  );
 
   const renderMemo = () => (
     <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-6">
@@ -2339,89 +2564,23 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       && tinyEntryActionLoading !== null;
 
     if (tinyStudyViewMode === 'entry' && activeEntry) {
-      const meta = TINY_STUDY_ENTRY_META[activeEntry.type];
-      return (
-        <section className="rounded-lg border border-slate-200 bg-white min-h-[560px] flex flex-col overflow-hidden">
-          <div className="border-b border-slate-100 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="min-w-0">
-              <button
-                type="button"
-                onClick={() => setTinyStudyViewMode('shelf')}
-                className="mb-3 inline-flex items-center gap-2 text-xs font-black text-slate-500 hover:text-slate-900"
-              >
-                <ChevronLeft className="h-4 w-4" />
-                换一个入口
-              </button>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className={`rounded-full px-2.5 py-1 text-xs font-black ${meta.tint} ${meta.accent}`}>{meta.label}</span>
-                <span className="text-xs font-bold text-slate-400">第 {activeEntry.pageStart}-{activeEntry.pageEnd} 页</span>
-              </div>
-              <h3 className="mt-2 text-xl font-black text-slate-900">{activeEntry.title}</h3>
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">{activeEntry.teaser}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => void handleOpenTinyEntryPage(activeEntry)}
-              disabled={openingSessionId !== null}
-              className="shrink-0 inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-40"
-            >
-              <BookOpen className="h-4 w-4" />
-              打开原页
-            </button>
-          </div>
-
-          <div
-            ref={tinyEntryScrollRef}
-            onScroll={handleTinyEntryScroll}
-            className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50/40 p-5 md:p-6"
-          >
-            <div className="mx-auto max-w-3xl space-y-4">
-              {activeEntry.turns.map((turn) => (
-                <article key={turn.id} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                  <p className="mb-3 text-xs font-black text-slate-400">{TINY_STUDY_ENTRY_ACTION_LABELS[turn.action]}</p>
-                  <div className="prose prose-slate max-w-none prose-p:leading-8 prose-li:leading-7 prose-headings:font-black">
-                    <ReactMarkdown>{turn.text}</ReactMarkdown>
-                  </div>
-                </article>
-              ))}
-
-              {isActiveEntryLoading && (
-                <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-4 text-indigo-700 flex items-center gap-3">
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                  <span className="text-sm font-black">正在{TINY_STUDY_ENTRY_ACTION_LABELS[tinyEntryActionLoading!]}...</span>
-                </div>
-              )}
-
-              {tinyEntryError && (
-                <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-600">
-                  {tinyEntryError}
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="border-t border-slate-100 bg-white p-4 flex flex-wrap items-center gap-2">
-            {(['simpler', 'interesting', 'deeper'] as TinyStudyEntryAction[]).map((action) => (
-              <button
-                key={action}
-                type="button"
-                onClick={() => void runTinyEntryAction(activeEntry.id, action)}
-                disabled={tinyEntryActionLoading !== null}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-              >
-                {TINY_STUDY_ENTRY_ACTION_LABELS[action]}
-              </button>
-            ))}
-            <button
-              type="button"
-              onClick={() => setTinyStudyViewMode('shelf')}
-              className="ml-auto rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50"
-            >
-              换一个入口
-            </button>
-          </div>
-        </section>
-      );
+      return <CuriosityEntryReader
+        key={`${selectedTinyStudySession?.id}:${activeEntry.id}`}
+        entry={activeEntry}
+        fileName={selectedTinyStudySession?.customTitle || selectedTinyStudySession?.fileName || ''}
+        previewUrl={tinyEntryPreviews[activeEntry.id]}
+        language={language}
+        loadingAction={isActiveEntryLoading ? tinyEntryActionLoading : null}
+        actionsDisabled={tinyEntryActionLoading !== null}
+        openingSource={openingSessionId !== null}
+        error={tinyEntryError}
+        cloudWarning={tinyEntryCloudWarning}
+        scrollRef={tinyEntryScrollRef}
+        onScroll={handleTinyEntryScroll}
+        onBack={() => setTinyStudyViewMode('shelf')}
+        onOpenSource={() => void handleOpenTinyEntryPage(activeEntry)}
+        onAction={action => void runTinyEntryAction(activeEntry.id, action)}
+      />;
     }
 
     return (
@@ -2435,7 +2594,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
               {tinyEntrySession?.documentSummary
                 || (selectedTinyStudySession
-                  ? '先确认这就是你现在想读的资料。确认后，我再帮你找几个有意思且有原文依据的入口。'
+                  ? '从资料里挑出几个有意思的问题、实验或现象，选你想先看的那一点。'
                   : '从左边选一份资料。')}
             </p>
           </div>
@@ -2446,7 +2605,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               disabled={tinyEntryScanLoading}
               className="shrink-0 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-600 hover:bg-slate-50 disabled:opacity-40"
             >
-              <RefreshCcw className={`h-4 w-4 ${tinyEntryScanLoading ? 'animate-spin' : ''}`} />
+              {tinyEntryScanLoading ? <StudyBookLoader size="compact" /> : <RefreshCcw className="h-4 w-4" />}
               重新找入口
             </button>
           )}
@@ -2461,15 +2620,6 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             </div>
           ) : (
             <div className="space-y-5">
-              <button
-                type="button"
-                onClick={() => setTinyStudyViewMode('linear')}
-                className="w-full rounded-lg border border-slate-900 bg-slate-900 p-4 text-left text-white shadow-sm hover:bg-slate-800"
-              >
-                <span className="flex items-center gap-2 text-sm font-black"><BookOpen className="h-4 w-4" /> 从头开始，用大白话讲</span>
-                <span className="mt-1 block text-xs leading-relaxed text-white/65">保留原来的方式，从资料开头一小段一小段往后听。</span>
-              </button>
-
               {!tinyEntrySession && !tinyEntryScanLoading && (
                 <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-5">
                   <p className="text-xs font-black uppercase text-indigo-600">已经选中</p>
@@ -2477,21 +2627,21 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     {selectedTinyStudySession.customTitle || selectedTinyStudySession.fileName}
                   </h4>
                   <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                    我还没有开始扫描。确认后才会通读这份 PDF，并寻找几个真正有原文依据的兴趣入口。
+                    暂时没能准备好这份资料，可以再试一次。
                   </p>
                   <button
                     type="button"
                     onClick={handleConfirmTinyEntryScan}
                     className="mt-4 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-black text-white hover:bg-indigo-500"
                   >
-                    就读这份，帮我找入口
+                    再试一次，帮我找入口
                   </button>
                 </div>
               )}
 
               {tinyEntryScanLoading && !tinyEntrySession ? (
-                <div className="min-h-[300px] flex flex-col items-center justify-center text-center">
-                  <Loader2 className="h-8 w-8 animate-spin text-indigo-500" />
+                <div role="status" className="min-h-[300px] flex flex-col items-center justify-center text-center">
+                  <StudyBookLoader />
                   <p className="mt-4 font-black text-slate-800">正在翻一遍资料，找有意思的入口...</p>
                   <p className="mt-2 text-sm text-slate-500">只保留能在原文里找到依据的内容，不强行凑数。</p>
                 </div>
@@ -2550,265 +2700,43 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const renderReluctant = () => {
     const canStartTinyStudy = !!selectedTinyStudySession && !tinyStudyLoading;
-    const recentTinySessions = fileSessions.slice(0, 3);
-    const featuredTinySession = selectedTinyStudySession || recentTinySessions[0] || null;
-    const openTinyShelf = (sessionId?: string) => {
-      if (sessionId) handleSelectTinyStudySession(sessionId);
-      setTinyStudyViewMode('shelf');
+    const chooseMode = (mode: ReluctantMode) => {
+      setReluctantMode(mode);
+      setReluctantView(mode === 'overview' ? 'styles' : 'pick');
+    };
+    const choosePdf = (sessionId: string) => {
+      if (sessionId !== tinySelectedSessionId) handleSelectTinyStudySession(sessionId);
+      setTinyStudyViewMode(reluctantMode === 'linear' ? 'linear' : 'shelf');
+      if (reluctantMode === 'interest') setTinyEntryScanRequestedFor(sessionId);
+      tinyLinearAutoStartRef.current = reluctantMode === 'linear' && (sessionId !== tinySelectedSessionId || tinyStudyTurns.length === 0);
       setReluctantView('tiny');
     };
-    const openTinyLinear = (sessionId?: string) => {
-      if (sessionId) handleSelectTinyStudySession(sessionId);
-      setTinyStudyViewMode('linear');
-      setReluctantView('tiny');
-    };
-    return (
-      <div className="space-y-6">
-        {reluctantView === 'home' ? (
-          <>
-            <section className="relative overflow-hidden rounded-lg border border-sky-200 bg-[#dff3f7] px-5 py-6 md:px-8 md:py-7">
-              <div aria-hidden="true" className="absolute -bottom-10 -left-8 h-28 w-44 rotate-6 rounded-lg bg-[#f5c1b8]" />
-              <div aria-hidden="true" className="absolute -right-8 -top-12 h-32 w-48 -rotate-6 rounded-lg bg-[#b9dfcc]" />
-              <div className="relative grid gap-5 lg:grid-cols-[minmax(0,1fr)_300px] lg:items-center">
-                <div>
-                  <p className="text-xs font-black uppercase text-sky-700">Low Energy Mode</p>
-                  <h2 className="mt-2 text-3xl font-black text-slate-950 md:text-4xl">今天不用学很多</h2>
-                  <p className="mt-3 max-w-xl text-sm font-semibold leading-relaxed text-slate-600 md:text-base">
-                    选一个让你好奇的地方就够了。你不用先打开 slides，也不用答题或证明自己学会了。
-                  </p>
-                </div>
-                {featuredTinySession ? (
-                  <button
-                    type="button"
-                    onClick={() => openTinyShelf(featuredTinySession.id)}
-                    className="group flex min-w-0 items-center gap-4 rounded-lg border border-white bg-white/90 p-3 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-                  >
-                    <div className="h-20 w-16 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-100">
-                      {coverPreviews[featuredTinySession.id] ? (
-                        <img
-                          src={coverPreviews[featuredTinySession.id]}
-                          alt=""
-                          className="h-full w-full object-cover object-top"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center">
-                          <FileText className="h-5 w-5 text-slate-400" />
-                        </div>
-                      )}
-                    </div>
-                    <span className="min-w-0">
-                      <span className="block text-xs font-black text-sky-700">上次看到的资料</span>
-                      <span className="mt-1 block truncate text-sm font-black text-slate-900">
-                        {featuredTinySession.customTitle || featuredTinySession.fileName}
-                      </span>
-                      <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-slate-500 group-hover:text-slate-900">
-                        找个有意思的地方
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </span>
-                    </span>
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => openTinyShelf()}
-                    className="rounded-lg border border-white bg-white/90 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-                  >
-                    <span className="flex items-center gap-3">
-                      <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-slate-900 text-white">
-                        <BookOpen className="h-5 w-5" />
-                      </span>
-                      <span>
-                        <span className="block text-sm font-black text-slate-900">先选一份资料</span>
-                        <span className="mt-1 block text-xs text-slate-500">我们从最不费劲的地方开始</span>
-                      </span>
-                    </span>
-                  </button>
-                )}
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-4 flex items-end justify-between gap-4">
-                <div>
-                  <p className="text-xs font-black uppercase text-slate-400">Choose a doorway</p>
-                  <h3 className="mt-1 text-2xl font-black text-slate-900">今天先从哪儿开始？</h3>
-                </div>
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1.45fr)_minmax(260px,0.55fr)]">
-                <button
-                  type="button"
-                  onClick={() => openTinyShelf(featuredTinySession?.id)}
-                  className="group grid min-h-[220px] overflow-hidden rounded-lg border border-slate-200 bg-white text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-md md:grid-cols-[220px_minmax(0,1fr)]"
-                >
-                  <div className="min-h-[180px] overflow-hidden bg-slate-100">
-                    {featuredTinySession && coverPreviews[featuredTinySession.id] ? (
-                      <img
-                        src={coverPreviews[featuredTinySession.id]}
-                        alt=""
-                        className="h-full w-full object-cover object-top transition-transform duration-300 group-hover:scale-[1.02]"
-                      />
-                    ) : (
-                      <div className="flex h-full min-h-[180px] items-center justify-center bg-[#edf4ff]">
-                        <Sparkles className="h-9 w-9 text-indigo-400" />
-                      </div>
-                    )}
-                  </div>
-                  <div className="flex flex-col justify-between p-5 md:p-6">
-                    <div>
-                      <span className="inline-flex rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700">
-                        推荐从这里开始
-                      </span>
-                      <h4 className="mt-4 text-xl font-black text-slate-950">先让 AI 替我翻一遍</h4>
-                      <p className="mt-2 text-sm leading-relaxed text-slate-500">
-                        不从第一页硬啃。先从资料里挑出几个反直觉的问题、实验或争论，你只选一个感兴趣的看。
-                      </p>
-                    </div>
-                    <span className="mt-5 inline-flex items-center gap-2 text-sm font-black text-slate-900">
-                      找个有意思的入口
-                      <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                    </span>
-                  </div>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => openTinyLinear(featuredTinySession?.id)}
-                  className="group flex min-h-[220px] flex-col justify-between rounded-lg border border-slate-200 bg-[#fff9e8] p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-amber-200 hover:shadow-md md:p-6"
-                >
-                  <div>
-                    <span className="flex h-11 w-11 items-center justify-center rounded-lg bg-amber-100 text-amber-800">
-                      <BookOpen className="h-5 w-5" />
-                    </span>
-                    <h4 className="mt-5 text-xl font-black text-slate-950">从头听一小段</h4>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                      不挑入口，就从开头用最简单的大白话慢慢讲。一次只读一点点。
-                    </p>
-                  </div>
-                  <span className="mt-5 inline-flex items-center gap-2 text-sm font-black text-slate-900">
-                    直接开始
-                    <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
-                  </span>
-                </button>
-              </div>
-            </section>
-
-            {recentTinySessions.length > 0 && (
-              <section>
-                <div className="mb-3 flex items-center justify-between gap-4">
-                  <h3 className="text-base font-black text-slate-900">最近的资料</h3>
-                  <button
-                    type="button"
-                    onClick={() => openTinyShelf()}
-                    className="text-xs font-black text-slate-500 hover:text-slate-900"
-                  >
-                    查看全部
-                  </button>
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {recentTinySessions.map((session) => (
-                    <button
-                      key={session.id}
-                      type="button"
-                      onClick={() => openTinyShelf(session.id)}
-                      className="group flex min-w-0 items-center gap-3 rounded-lg border border-slate-200 bg-white p-3 text-left transition-all hover:-translate-y-0.5 hover:border-slate-300 hover:shadow-sm"
-                    >
-                      <div className="h-16 w-12 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-100">
-                        {coverPreviews[session.id] ? (
-                          <img src={coverPreviews[session.id]} alt="" className="h-full w-full object-cover object-top" />
-                        ) : (
-                          <div className="flex h-full items-center justify-center">
-                            <FileText className="h-4 w-4 text-slate-400" />
-                          </div>
-                        )}
-                      </div>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-black text-slate-900">
-                          {session.customTitle || session.fileName}
-                        </span>
-                        <span className="mt-1 block text-xs text-slate-400">{formatDate(session.createdAt, language)}</span>
-                        <span className="mt-2 inline-flex items-center gap-1 text-xs font-bold text-slate-500 group-hover:text-slate-900">
-                          看看有什么好玩的
-                          <ArrowRight className="h-3.5 w-3.5" />
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-            )}
-
-            <p className="border-t border-slate-200 pt-4 text-xs font-semibold text-slate-400">
-              慢慢来。以后这里还会加入“帮我挑最容易开始的资料”和“把今天任务缩到最小”。
-            </p>
-          </>
-        ) : (
-          <>
-          <section className="rounded-lg border border-sky-100 bg-[#eef8fa] p-5 md:p-6">
-            <p className="text-xs font-black uppercase text-sky-600">Low Energy Mode</p>
-            <h2 className="mt-2 text-2xl font-black text-slate-900">只学一点点</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">
-              选一份 PDF。你可以从有意思的地方开始，也可以从头听一小段。
-            </p>
-          </section>
-          <section className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-6">
-            <aside className="rounded-lg border border-slate-200 bg-white p-5 h-fit">
-              <button
-                type="button"
-                onClick={() => setReluctantView('home')}
-                className="mb-4 inline-flex items-center gap-2 text-xs font-black text-slate-500 hover:text-slate-900"
-              >
-                <ChevronLeft className="w-4 h-4" />
-                回到不想学
-              </button>
-              <h3 className="text-lg font-black text-slate-900">选一份 PDF</h3>
-              <p className="mt-1 text-sm leading-relaxed text-slate-500">
-                不会打开阅读页，只拿来讲一小段。
-              </p>
-
-              {!user ? (
-                <button
-                  type="button"
-                  onClick={onLogin}
-                  className="mt-5 w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white"
-                >
-                  登录后选择资料
-                </button>
-              ) : fileSessions.length === 0 ? (
-                <div className="mt-5 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                  资料库里还没有 PDF。可以先去资料库上传到云端。
-                </div>
-              ) : (
-                <div className="mt-5 space-y-2 max-h-[520px] overflow-y-auto custom-scrollbar pr-1">
-                  {fileSessions.map((session) => {
-                    const active = session.id === tinySelectedSessionId;
-                    return (
-                      <button
-                        key={session.id}
-                        type="button"
-                        onClick={() => handleSelectTinyStudySession(session.id)}
-                        className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
-                          active
-                            ? 'border-slate-900 bg-slate-900 text-white'
-                            : 'border-slate-200 bg-white text-slate-700 hover:border-slate-400'
-                        }`}
-                      >
-                        <span className="block truncate text-sm font-black">{session.customTitle || session.fileName}</span>
-                        <span className={`mt-1 block text-xs ${active ? 'text-white/60' : 'text-slate-400'}`}>
-                          {formatDate(session.createdAt, language)}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </aside>
-
-            {tinyStudyViewMode === 'linear' ? (
+    if (reluctantView === 'home') return <ReluctantHome language={language} onChoose={chooseMode} />;
+    if (reluctantView === 'styles') return <OverviewStyleChoices language={language} onBack={() => setReluctantView('home')} onChoose={style => {
+      setOverviewStyle(style);
+      setReluctantView('pick');
+    }} />;
+    if (reluctantView === 'pick' || !selectedTinyStudySession || !user) return <ReluctantPdfPicker
+      language={language} mode={reluctantMode} style={overviewStyle} files={fileSessions} folders={folders} covers={coverPreviews}
+      loading={loadingSessions} signedIn={!!user} onChoose={choosePdf} onLogin={onLogin}
+      onBack={() => setReluctantView(reluctantMode === 'overview' ? 'styles' : 'home')}
+      onLibrary={() => setActiveTab('library')}
+    />;
+    return <div className="reluctant-flow space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4">
+        <button type="button" className="reluctant-back" onClick={() => setReluctantView('home')}><ChevronLeft size={16} />{text('换一种方式', 'Change the way you read')}</button>
+        <p className="text-sm font-semibold text-slate-500">{reluctantModeLabel(reluctantMode, language)}</p>
+        <button type="button" className="reluctant-back" onClick={() => setReluctantView('pick')}><FileText size={16} />{text('换一份 PDF', 'Choose another PDF')}</button>
+      </div>
+      {reluctantMode === 'overview' ? <ReluctantOverviewReader
+        key={`${user.uid}:${selectedTinyStudySession.id}:${language}`} userId={user.uid} session={selectedTinyStudySession}
+        style={overviewStyle} onStyleChange={setOverviewStyle} language={language}
+        onOpenPage={page => { void onRestoreSession(selectedTinyStudySession, { initialPage: page }); }}
+      /> : reluctantMode === 'linear' ? (
             <section className="rounded-lg border border-slate-200 bg-white min-h-[560px] flex flex-col overflow-hidden">
               <div className="border-b border-slate-100 p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-black uppercase text-emerald-600">只学一点点</p>
+                  <p className="text-xs font-black uppercase text-emerald-600">大白话从头讲</p>
                   <h3 className="mt-1 text-xl font-black text-slate-900">
                     {selectedTinyStudySession ? (selectedTinyStudySession.customTitle || selectedTinyStudySession.fileName) : '先选一份 PDF'}
                   </h3>
@@ -2817,11 +2745,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setTinyStudyViewMode('shelf')}
+                    onClick={() => setReluctantView('home')}
                     className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50"
                   >
                     <ChevronLeft className="h-4 w-4" />
-                    返回兴趣入口
+                    换一种讲法
                   </button>
                   <button
                     type="button"
@@ -2830,7 +2758,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     {tinyStudyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-                    {tinyStudyTurns.length === 0 ? '开始只学一点点' : '继续下一小段'}
+                    {tinyStudyTurns.length === 0 ? '从开头开始讲' : '继续下一小段'}
                   </button>
                 </div>
               </div>
@@ -2843,7 +2771,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     </div>
                     <p className="mt-5 text-lg font-black text-slate-800">先不用打开资料</p>
                     <p className="mt-2 max-w-sm text-sm leading-7 text-slate-500">
-                      选一份 PDF 后点开始，我只讲一小段。你愿意再看，我们再往后走。
+                      我会从开头讲一小段。你愿意再看，我们再往后走。
                     </p>
                   </div>
                 ) : (
@@ -2872,8 +2800,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                         )}
 
                         {tinyStudyLoading && tinyStudyLoadingTargetId === turn.id && (
-                          <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50/60 p-4 flex items-center gap-3 text-indigo-700">
-                            <Loader2 className="w-4 h-4 animate-spin" />
+                          <div role="status" className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50/60 p-4 flex items-center gap-3 text-indigo-700">
+                            <StudyBookLoader size="compact" />
                             <span className="text-sm font-black">
                               正在{tinyStudyLoadingAction ? TINY_STUDY_FOLLOW_UP_LABELS[tinyStudyLoadingAction as Exclude<TinyStudyAction, 'start' | 'next'>] : '补充'}这段...
                             </span>
@@ -2909,8 +2837,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       </article>
                     ))}
                     {tinyStudyLoading && !tinyStudyLoadingTargetId && (
-                      <div className="rounded-lg border border-slate-200 bg-white p-5 flex items-center gap-3 text-slate-500">
-                        <Loader2 className="w-5 h-5 animate-spin" />
+                      <div role="status" className="rounded-lg border border-slate-200 bg-white p-5 flex items-center gap-3 text-slate-500">
+                        <StudyBookLoader size="compact" />
                         <span className="text-sm font-bold">正在用最简单的话讲给你听...</span>
                       </div>
                     )}
@@ -2943,12 +2871,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 </button>
               </div>
             </section>
-            ) : renderTinyEntryPanel()}
-          </section>
-          </>
-        )}
-      </div>
-    );
+      ) : renderTinyEntryPanel()}
+    </div>;
   };
 
   const renderEnergy = () => (
@@ -2975,11 +2899,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     if (activeTab === 'reluctant') return renderReluctant();
     if (activeTab === 'calendar') return renderCalendar();
     if (activeTab === 'memo') return renderMemo();
-    if (activeTab === 'energy') return renderEnergy();
-    if (activeTab === 'growth') return renderGrowth();
-    if (activeTab === 'profile') return renderProfile();
+    if (activeTab === 'energy' && dashboardFeatures.energy) return renderEnergy();
+    if (activeTab === 'growth' && dashboardFeatures.growth) return renderGrowth();
+    if (activeTab === 'profile' && dashboardFeatures.profile) return renderProfile();
     if (activeTab === 'settings') return renderSettings();
-    return renderLibrary();
+    return <div className="space-y-6"><CanvasBriefSummary report={verifiedCourseBrief?.ownerId === (user?.uid || 'local') ? verifiedCourseBrief : null}
+      onOpen={() => { setCalendarView('brief'); setActiveTab('calendar'); }} />{renderLibrary()}</div>;
   };
 
   return (
@@ -2988,7 +2913,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <div className="p-5 border-b border-slate-200">
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center shadow-sm">
+              <div className="editorial-dashboard-mark w-10 h-10 rounded-lg bg-white border border-slate-200 flex items-center justify-center shadow-sm">
                 <BookOpen className="w-5 h-5 text-slate-800" />
               </div>
               <div className="min-w-0">
@@ -3013,13 +2938,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             { id: 'library', icon: Cloud, label: text('资料库', 'Library') },
             { id: 'jointReview', icon: BookOpen, label: text('联合复习', 'Combined review') },
             { id: 'reluctant', icon: Coffee, label: text('我现在不想学', "I don't want to study") },
-            { id: 'calendar', icon: CalendarDays, label: text('日历', 'Calendar') },
+            { id: 'calendar', icon: CalendarDays, label: text('课程与日历', 'Courses & calendar') },
             { id: 'memo', icon: PencilLine, label: text('便签', 'Notes') },
             { id: 'energy', icon: Coffee, label: text('能量补给', 'Energy refill') },
             { id: 'growth', icon: Sparkles, label: text('我的成长', 'My growth') },
             { id: 'profile', icon: UserRound, label: text('关于我', 'About me') },
             { id: 'settings', icon: Settings2, label: text('设置', 'Settings') },
-          ].map((item) => (
+          ].filter(item => isDashboardFeatureVisible(item.id)).map((item) => (
             <button
               key={item.id}
               type="button"
@@ -3069,7 +2994,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       </aside>
 
       <main className="flex-1 min-w-0 h-screen overflow-y-auto">
-        {activeTab !== 'reluctant' && activeTab !== 'settings' && (
+        {activeTab !== 'reluctant' && activeTab !== 'settings' && activeTab !== 'calendar' && (
         <section className="craft-dashboard-hero border-b border-slate-200">
           <div className="relative px-5 md:px-8 py-6 md:py-8">
             <div className="lg:hidden flex items-center justify-between gap-3 mb-6">
@@ -3089,11 +3014,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               </button>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_360px] gap-6 items-end">
+            <div className={`grid grid-cols-1 ${dashboardFeatures.profile ? 'xl:grid-cols-[minmax(0,1fr)_360px]' : ''} gap-8 xl:gap-16 items-end`}>
               <div className="max-w-3xl">
-                <p className="text-sm font-black text-slate-600 mb-3">{profile.companionName}</p>
-                <h1 className="text-4xl md:text-6xl font-black tracking-tight leading-tight text-slate-950">
-                  {profile.welcomeLine}
+                <p className="editorial-kicker">{text('今日书房', 'Daily study')}</p>
+                {dashboardFeatures.profile && <p className="text-xs font-medium tracking-[0.14em] text-slate-500 mb-3">{profile.companionName}</p>}
+                <h1 className="editorial-display text-slate-950">
+                  {dashboardFeatures.profile ? profile.welcomeLine : text('从这里开始今天的学习', 'Start your study here')}
                 </h1>
                 <div className="mt-6 flex flex-wrap items-center gap-3">
                   {currentFileName && (
@@ -3114,7 +3040,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 </div>
               </div>
 
-              <div className="craft-dashboard-companion rounded-lg p-5">
+              {dashboardFeatures.profile && <div className="craft-dashboard-companion rounded-lg p-5">
                 <div className="flex items-center gap-4">
                   <div className="w-16 h-16 rounded-full bg-white border border-white flex items-center justify-center shadow-sm">
                     <div className={`w-11 h-11 rounded-full ${avatarTone.accent} flex items-center justify-center`}>
@@ -3135,7 +3061,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     <RefreshCcw className="w-4 h-4 text-slate-600" />
                   </button>
                 </div>
-              </div>
+              </div>}
             </div>
           </div>
         </section>
@@ -3147,13 +3073,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               { id: 'library', icon: Cloud, label: text('资料库', 'Library') },
               { id: 'jointReview', icon: BookOpen, label: text('联合复习', 'Review') },
               { id: 'reluctant', icon: Coffee, label: text('不想学', 'Low energy') },
-              { id: 'calendar', icon: CalendarDays, label: text('日历', 'Calendar') },
+              { id: 'calendar', icon: CalendarDays, label: text('课程与日历', 'Courses & calendar') },
               { id: 'memo', icon: PencilLine, label: text('便签', 'Notes') },
               { id: 'energy', icon: Coffee, label: text('能量补给', 'Energy') },
               { id: 'growth', icon: Sparkles, label: text('成长', 'Growth') },
               { id: 'profile', icon: UserRound, label: text('关于我', 'About me') },
               { id: 'settings', icon: Settings2, label: text('设置', 'Settings') },
-            ].map((item) => (
+            ].filter(item => isDashboardFeatureVisible(item.id)).map((item) => (
               <button
                 key={item.id}
                 type="button"
@@ -3181,6 +3107,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           {renderActiveTab()}
         </div>
       </main>
+
+      <CanvasImportDialog
+        open={canvasImportOpen}
+        defaultFolderId={activeFolder?.id ?? null}
+        destinationFolders={folders.map(folder => ({ id: folder.id,
+          label: getFolderPath(folder.id, folders).map(part => part.customTitle || part.fileName).join(' / '),
+        })).sort((a, b) => a.label.localeCompare(b.label))}
+        disabled={!user || !!libraryUploadStatus && libraryUploadStatus.completed < libraryUploadStatus.total}
+        onClose={() => setCanvasImportOpen(false)}
+        onImport={handleCanvasImport}
+      />
     </div>
   );
 };

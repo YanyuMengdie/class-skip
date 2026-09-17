@@ -11,6 +11,7 @@ import type {
 } from '@/types';
 import { buildExtendedScenarioKey, inferFamiliarity, inferUrgencyForFile } from '@/features/exam/lib/studyFlowInference';
 import { getTemplateForScenario } from '@/data/studyFlowTemplates';
+import { dashboardFeatures } from '@/shared/dashboardFeatures';
 
 export interface StudyFlowPanelProps {
   onClose: () => void;
@@ -57,9 +58,10 @@ export const StudyFlowPanel: React.FC<StudyFlowPanelProps> = ({
   const steps = useMemo(() => {
     const factor =
       learnerMood === 'dont_want' ? tiredFactor : learnerMood === 'want_anxious' ? 0.85 : 1;
-    return template.steps.map((s) =>
-      factor < 1 ? { ...s, estimatedMinutes: Math.max(3, Math.round(s.estimatedMinutes * factor)) } : s
-    );
+    return template.steps.filter(s => dashboardFeatures.energy || !(s.action === 'rest' || s.action === 'open_panel' && s.target === 'break')).map((s, index) => ({
+      ...s, order: index + 1,
+      estimatedMinutes: factor < 1 ? Math.max(3, Math.round(s.estimatedMinutes * factor)) : s.estimatedMinutes,
+    }));
   }, [template.steps, learnerMood, tiredFactor]);
 
   const currentIndex = steps.findIndex((s) => !doneIds.has(s.id));
@@ -139,7 +141,7 @@ export const StudyFlowPanel: React.FC<StudyFlowPanelProps> = ({
         </div>
         <p className="text-xs text-violet-700 font-medium">{template.title}</p>
         <p className="text-[10px] text-slate-400">模板键：{scenarioKey}</p>
-        {(learnerMood === 'want_anxious' || learnerMood === 'dont_want') && (
+        {dashboardFeatures.energy && (learnerMood === 'want_anxious' || learnerMood === 'dont_want') && (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-2 flex flex-wrap items-center gap-2">
             <span className="text-xs text-amber-800 font-medium">
               当前状态建议先做情绪/精力恢复，再继续学习。

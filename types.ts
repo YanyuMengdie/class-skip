@@ -1,4 +1,4 @@
-
+import type { UnderstandingSession } from '@/features/reader/understanding/readingUnderstanding';
 /** 全局应用语言。只控制固定界面与未来生成内容，不改写任何既有学习数据。 */
 export type AppLanguage = 'zh-CN' | 'en';
 
@@ -49,7 +49,7 @@ export interface SkimReadingMessageAnchor {
   routeNodeId?: string;
 }
 
-/** 普通 Lecture 整段式/分段唱片式领读的讲解深度；旧会话缺省为 normal。 */
+/** 普通 Lecture 整段式/分段式领读的讲解深度；旧会话缺省为 normal。 */
 export type SkimExplanationDepth = 'simple' | 'normal';
 export type SkimExplanationStyle = 'standard' | 'interesting';
 export type SkimExplanationVariantKey =
@@ -100,7 +100,7 @@ export interface SkimModuleTakeaway {
   connection: string;
   pageRefs: number[];
   status: SkimModuleTakeawayStatus;
-  /** 对应连接式讲解骨架，或唱片式当前消息级来源；旧整段式消息可能为空。 */
+  /** 对应连接式讲解骨架，或分段式当前消息级来源；旧整段式消息可能为空。 */
   sourceIds: string[];
 }
 
@@ -123,10 +123,12 @@ export interface ChatMessage {
   skimReadingAnchors?: SkimReadingMessageAnchor[];
   /** 备考台：仅 model 消息；有快照时优先按 chunk 协议解析链钮 */
   examChunkCitationSnapshot?: ExamChunkCitationSnapshot;
-  /** 案件式领读：本条回复关联的应用内页码，可点击跳回原页。 */
+  /** 推演式领读：本条回复关联的应用内页码，可点击跳回原页。 */
   casePageRefs?: number[];
-  /** 普通 Lecture 整段式/分段唱片式领读：同一卡片内的连接式讲解版本。 */
+  /** 普通 Lecture 整段式/分段式领读：同一卡片内的连接式讲解版本。 */
   skimExplanation?: SkimExplanationState;
+  /** 绑定当前讲解的可选理解对话；独立于主线消息、目录和学习进度。 */
+  skimUnderstanding?: UnderstandingSession;
   /** 普通领读“看要点”触发的一次性提取题；仅用于避免把题面再次当成学习内容。 */
   skimKnowledgeExtraction?: boolean;
   /** 用户回答临时提取题后的即时核对；不应被再次整理成学习要点。 */
@@ -410,204 +412,8 @@ export type SavedArtifact =
   | (SavedArtifactBase & { type: 'flashcard'; payload: { count: number } })
   | (SavedArtifactBase & { type: 'trapList'; payload: { itemIds: string[] } });
 
-export type ViewMode = 'deep' | 'skim' | 'layered' | 'tutor';
+export type ViewMode = 'deep' | 'skim' | 'tutor';
 export type SkimStage = 'diagnosis' | 'tutoring' | 'quiz' | 'reading';
-
-// --- 递进阅读模式（layered reading）---
-// 数据完全独立于 studyMap，详见 docs/inquiries/LAYERED_READING_INQUIRY.md §8.G
-export interface LayeredReadingModule {
-  id: string;
-  index: number;
-  storyTitle: string;
-  pageRange?: string;
-  /** Round 1 内容（大白话故事）；按需填充，未生成时为 null */
-  round1Content?: string | null;
-  /** Round 2 子枝干列表；按需填充 */
-  round2Branches?: LayeredReadingRound2Branch[];
-  /** 各 Round 完成状态 */
-  round1Done?: boolean;
-  round2Done?: boolean;
-  round3Done?: boolean;
-}
-
-export interface LayeredReadingRound2Branch {
-  id: string;
-  index: number;
-  title: string;
-  content?: string | null;
-  /** 阶段 3 新增：溯源页码（铁律 6）。子枝干可能跨页，故为可选；若 AI 生成时给出则按"最关键页"填。 */
-  sourcePage?: number;
-  /** 阶段 3 新增：位置描述（铁律 6）。 */
-  sourceLocation?: string;
-  /** Round 3 细节挂载 */
-  round3Details?: LayeredReadingRound3Detail[];
-  /** Round 3 新数据:结构化 7 块学习单元(阶段 5 新增,优先级高于 round3Details) */
-  round3Unit?: LayeredReadingRound3Unit;
-}
-
-export interface LayeredReadingRound3Detail {
-  id: string;
-  /** "term" | "experiment" | "figure" | "evidence" | "comparison" 等自由文本类型 */
-  kind: string;
-  label: string;
-  description: string;
-  /** 阶段 3 新增：溯源页码（铁律 6，必填——细节就是钉到具体一页一处） */
-  sourcePage: number;
-  /** 阶段 3 新增：位置描述（铁律 6，必填） */
-  sourceLocation: string;
-}
-
-/**
- * 阶段 5 新增:Round 3 结构化学习单元(7 块固定结构)。
- *
- * 与旧 LayeredReadingRound3Detail[] 共存:
- * - 旧数据(round3Details)保留显示,不强制迁移
- * - 新生成的 branch 走 round3Unit
- * - 渲染层根据 branch 上哪个字段有值决定走哪条路径(round3Unit 优先)
- *
- * 7 块顺序固定不可重排,与 buildLayeredRound3UnitPrompt 输出顺序一致。
- * 第 4 块(figureGuide)按需省略——讲义无图时 AI 不输出该字段。
- *
- * 第 7 块 miniQuestion 是纯展示文本,不进 LayeredReadingState.questions[]。
- * 阶段 4 的 application 题独立保留,与本 unit 无任何耦合。
- */
-export interface LayeredReadingRound3Unit {
-  /** 块 1:这一小节在回答什么问题(一句话,问句形式) */
-  coreQuestion: string;
-  /** 块 2:机制 / 逻辑链条(step-by-step,markdown 编号列表) */
-  mechanismChain: string;
-  /** 块 3:关键术语挂载(每条说明在机制中的角色,markdown 列表) */
-  keyTerms: string;
-  /** 块 4:图 / 表 / 实验怎么读(可选——讲义无图时省略) */
-  figureGuide?: string;
-  /** 块 5:考试最低答案骨架(中英对照) */
-  answerSkeleton: string;
-  /** 块 6:易混点("不要把 A 理解成 B" 格式) */
-  confusionPoints: string;
-  /** 块 7:小题(题面 + 参考答案,纯展示文本) */
-  miniQuestion: string;
-  /** 阶段 3 溯源延续:整块 unit 的主要溯源页码(>= 1) */
-  sourcePage: number;
-  /** 阶段 3 溯源延续:位置描述(如"第 12 页中部图示") */
-  sourceLocation: string;
-  /** 生成时间(Unix ms) */
-  generatedAt: number;
-}
-
-/**
- * 阶段 3 新增：递进阅读模式独立的对话消息类型（铁律 7：视觉独立、数据全局）。
- *
- * - 视觉过滤：每 module chat 框只渲染 askedInModuleId === currentModuleId 的消息
- * - 数据全局：调用 chatWithLayeredReadingTutor 时传完整 globalChatHistory(不过滤)
- *   所有消息标记 askedInModuleId 让 AI 看到跨 module 的对话脉络
- */
-export interface LayeredReadingChatMessage {
-  id: string;
-  role: 'user' | 'model';
-  content: string;
-  /** 用户提问时所在的 module id；视觉过滤的关键字段 */
-  askedInModuleId: string;
-  timestamp: number;
-}
-
-/**
- * 阶段 4：递进阅读题目类型(铁律 8/9)。
- *
- * 题型对应:
- * - story:每 module Round 1 末出 1 道(attachedTo = moduleId)
- * - structure:每 branch Round 2 末出 1 道(attachedTo = branchId)
- * - application:每 branch Round 3 末出 1 道(attachedTo = branchId,不是每 detail 一道)
- *
- * 检索方式:复合 `(attachedTo, questionType)` 唯一定位;
- *           id 命名约定 `${attachedTo}-${questionType}`(如 module-1-story / module-1.2-structure)。
- *
- * 软门槛(铁律 8):
- * - 答 / 跳过 / 不答都不阻塞外层"展开到 Round X →"按钮
- * - 跳过后能回头答(status: 'skipped' → 'answered')
- * - 答完后能重答(✏️ 重新答题 → 清空 userAnswer + aiGrade,回到 'unanswered')
- *
- * 题目数据完全独立于 globalChatHistory(铁律 8:不混淆)——题目代码 0 处读 globalChatHistory。
- */
-export type LayeredReadingQuestionType = 'story' | 'structure' | 'application';
-export type LayeredReadingQuestionStatus = 'unanswered' | 'answered' | 'skipped';
-
-/**
- * 阶段 4:批改维度(铁律 9 按题型分组)。
- * - story: 故事感 + 主旨准确
- * - structure: 步骤完整 + 步骤顺序
- * - application: 推理逻辑 + 细节抓取
- */
-export interface LayeredReadingQuestionDimension {
-  /** 维度名称(中文,与 prompt 输出对齐) */
-  label: string;
-  /** ★1-5 评分 */
-  stars: 1 | 2 | 3 | 4 | 5;
-  /** 一句话说明,必须指出具体好/差在哪(prompt 强约束) */
-  comment: string;
-}
-
-export interface LayeredReadingQuestionGrade {
-  /** 2 个维度,顺序与题型对应表一致 */
-  dimensions: LayeredReadingQuestionDimension[];
-  /** 批改完成时间 */
-  gradedAt: number;
-}
-
-export interface LayeredReadingQuestion {
-  /** 主键;命名约定 `${attachedTo}-${questionType}` 保证唯一 */
-  id: string;
-  /** 题型决定批改维度(铁律 9) */
-  questionType: LayeredReadingQuestionType;
-  /** 挂载点:story → moduleId;structure / application → branchId */
-  attachedTo: string;
-  /** AI 出的题(开放题) */
-  questionText: string;
-  /** 参考答案(150-300 字大白话) */
-  referenceAnswer: string;
-  /** 用户答案;null 时表示未答或跳过 */
-  userAnswer?: string | null;
-  /** 答题状态(软门槛三态,铁律 8) */
-  status: LayeredReadingQuestionStatus;
-  /** AI 批改结果(仅 status === 'answered' 时有) */
-  aiGrade?: LayeredReadingQuestionGrade | null;
-  /** 题目生成时间 */
-  generatedAt: number;
-  /** 最后一次答题/跳过时间 */
-  answeredAt?: number;
-}
-
-/**
- * 阶段 4:学习状态记忆(铁律 8 / 用户拍板交互维度 g)。
- *
- * 触发:用户每次切换/展开树节点 / 答题完成时更新。
- * 显示:进入 panel 时(距上次时间 > 1 小时)弹 banner;本次会话只显示一次。
- */
-export interface LayeredReadingLastVisited {
-  moduleId: string;
-  round: 1 | 2 | 3;
-  /** round=1 时无;round=2/3 时为当前展开的 branch.id */
-  branchId?: string;
-  lastUpdatedAt: number;
-}
-
-export interface LayeredReadingState {
-  /** 本模式独立 module 列表，与 studyMap 无关 */
-  modules: LayeredReadingModule[];
-  /** 用户上次浏览到的位置（学习状态记忆，阶段 4 升级为 LayeredReadingLastVisited） */
-  lastVisited?: LayeredReadingLastVisited;
-  /** 题目作答记录(阶段 4 钉死结构;铁律 8 不进 globalChatHistory) */
-  questions: LayeredReadingQuestion[];
-  /** 阶段 3 新增：全局对话历史（铁律 7：视觉独立、数据全局） */
-  globalChatHistory?: LayeredReadingChatMessage[];
-  /** 进度统计快照 */
-  progressSnapshot?: {
-    round1: { done: number; total: number };
-    round2: { done: number; total: number };
-    round3: { done: number; total: number };
-  };
-  /** 创建时间 */
-  createdAt: number;
-}
 
 // --- PAGE MARK TYPES ---
 export type MarkType = 'core' | 'formula' | 'example' | 'trap' | 'exam' | 'difficult' | 'summary' | 'custom';
@@ -1050,7 +856,7 @@ export interface LectureCaseTurnResult {
 export type SkimRecordStatus = 'not_started' | 'in_progress' | 'completed';
 export type SkimRecordDeckView = 'shelf' | 'reader';
 
-/** 离开唱片时生成的轻量上下文，供下次续读和跨唱片关联使用。 */
+/** 离开分段时生成的轻量上下文，供下次续读和跨分段关联使用。 */
 export interface SkimRecordDigest {
   clarified: string[];
   unresolved: string[];
@@ -1114,15 +920,15 @@ export interface PersistedSkimSession {
   auxiliaryMaterial?: SkimAuxiliaryMaterial | null;
   /** V1：可导航主线的结构化路线。旧 session 无此字段 → 读取时按 null 兜底。 */
   readingRoute?: SkimReadingRoute | null;
-  /** Lecture 专用：整段式或分段唱片式；旧数据缺省为整段式。 */
+  /** Lecture 专用：整段式或分段式；旧数据缺省为整段式。 */
   studyStyle?: SkimStudyStyle;
-  /** 普通 Lecture 整段式/分段唱片式领读的后续讲解深度；旧数据缺省为 normal。 */
+  /** 普通 Lecture 整段式/分段式领读的后续讲解深度；旧数据缺省为 normal。 */
   explanationDepth?: SkimExplanationDepth;
   /** 整段式领读独立保存的 PDF 停留页；旧数据缺省为第 1 页。 */
   continuousLastPage?: number;
-  /** 唱片式路线、状态和各唱片轻量元数据。 */
+  /** 分段式路线、状态和各分段轻量元数据。 */
   recordDeck?: SkimRecordDeck | null;
-  /** Lecture 案件式领读：适配报告、完整内容账本、章节与学习证据。 */
+  /** Lecture 推演式领读：适配报告、完整内容账本、章节与学习证据。 */
   caseLearning?: LectureCaseLearningState | null;
   /** paper/文章模式：AI 是否已讲过梗概（阶段四才真正写它，此处先占位存储）。 */
   briefingDone?: boolean;
@@ -1166,8 +972,6 @@ export interface FilePersistedState {
   /** 略读「专注模式」:隐藏上半块 + splitter,对话占满整个面板 */
   skimFocusMode?: boolean;
   studyMap: StudyMap | null;
-  /** 递进阅读模式独立 state；与 studyMap 完全独立（铁律 2） */
-  layeredReadingState?: LayeredReadingState | null;
   skimStage?: SkimStage;
   quizData?: QuizData | null;
   /** 阶段二：略读多会话列表（本地持久化）。字段存在 ⇒ 新格式；不存在 ⇒ 旧格式（用上面扁平字段迁移成单段）。
@@ -1329,8 +1133,6 @@ export interface CloudSession {
   skimMessages?: ChatMessage[];
   viewMode?: ViewMode;
   studyMap?: StudyMap | null;
-  /** 递进阅读模式独立 state（铁律 2） */
-  layeredReadingState?: LayeredReadingState | null;
   skimStage?: SkimStage;
   quizData?: QuizData | null;
   /** 阶段三：略读多会话列表（云端 heavy 文档）。存在 ⇒ 新格式；不存在 ⇒ 旧格式（用扁平字段迁移成单段）。
@@ -1617,7 +1419,6 @@ export type StudyFlowPanelTarget =
   | 'trapList'
   | 'flashcard'
   | 'mindMap'
-  | 'fiveMin'
   | 'break'
   | 'skim'
   | 'deep'

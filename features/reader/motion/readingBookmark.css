@@ -1,0 +1,11 @@
+.reading-reply-bookmark {
+  position: absolute;
+  top: -1px;
+  right: 8px;
+  width: 8px;
+  height: 23px;
+  background: #b89654;
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 80%, 0 100%);
+  opacity: 0;
+  pointer-events: none;
+}

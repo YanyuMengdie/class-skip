@@ -78,7 +78,7 @@ describe('skim takeaways', () => {
     const recordMessage: ChatMessage = {
       id: 'record-message-1',
       role: 'model',
-      text: '这张唱片解释了交感与副交感的动态平衡。',
+      text: '这一分段解释了交感与副交感的动态平衡。',
       timestamp: 2,
     };
     const sources = collectSkimTakeawaySources([recordMessage], {
@@ -115,7 +115,7 @@ describe('skim takeaways', () => {
       skimKnowledgeExtractionFeedback: true,
     };
     expect(collectSkimTakeawaySources([feedback], {
-      recordScope: { title: '当前唱片', pageStart: 4, pageEnd: 6 },
+      recordScope: { title: '当前分段', pageStart: 4, pageEnd: 6 },
     })).toEqual([]);
   });
 

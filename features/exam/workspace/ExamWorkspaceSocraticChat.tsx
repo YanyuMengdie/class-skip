@@ -2,6 +2,7 @@ import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useLayo
 import { Loader2, MessageCircle, Send, X } from 'lucide-react';
 import type {
   AtomCoverageByKc,
+  AppLanguage,
   ChatMessage,
   DisciplineBand,
   DocType,
@@ -51,6 +52,7 @@ import { DEFAULT_TOP_K, EXAM_CHUNK_QUERY_ASSISTANT_TAIL_CHARS, retrieveCandidate
 import { loadExamMaterialChunkIndex } from '@/services/examChunkIndexStorage';
 import type { OpenMaterialPageOptions } from '@/features/exam/workspace/ExamWorkspaceCitationBlock';
 import { ExamWorkspaceAssistantMarkdown } from '@/features/exam/workspace/ExamWorkspaceAssistantMarkdown';
+import { useAppLanguage } from '@/shared/i18n/appLanguage';
 
 export interface ExamWorkspaceSocraticChatHandle {
   /** P3：滚动到指定 paragraphIndex 对应的块（data-exam-block-index） */
@@ -341,30 +343,42 @@ function getPromptMode(text: string): PromptMode | null {
   return null;
 }
 
-function getStagedPromptCopy(prompt: StagedPrompt): { title: string; body: string; placeholder: string } {
+function getStagedPromptCopy(prompt: StagedPrompt, language: AppLanguage): { title: string; body: string; placeholder: string } {
   if (prompt.mode === 'closed-book') {
-    return {
+    return language === 'en' ? {
+      title: 'Explain from memory is ready',
+      body: 'Look away from the material and prompts, then reconstruct this block in your own words. I’ll check whether it really holds together.',
+      placeholder: 'Write your explanation from memory…',
+    } : {
       title: '闭卷讲一遍已准备好',
       body: '现在别看材料和提示，直接用自己的话复述这一块。我会判断是不是真的站住了。',
       placeholder: '直接写你的闭卷复述…',
     };
   }
   if (prompt.mode === 'mini-integration') {
-    return {
+    return language === 'en' ? {
+      title: 'Mini synthesis is ready',
+      body: 'Without looking at the route, explain how the recent blocks connect. I’ll check whether you understand more than each block in isolation.',
+      placeholder: 'Explain how these blocks connect…',
+    } : {
       title: '小整合已准备好',
       body: '现在别看路线，试着说清最近几块之间的关系。我会看你是不是只懂单块。',
       placeholder: '写下这几块怎么连起来…',
     };
   }
-  return {
+  return language === 'en' ? {
+    title: 'Whole-route synthesis is ready',
+    body: 'Without looking at the material or route, reconstruct the big picture for the whole exam. I’ll check whether the route holds together.',
+    placeholder: 'Write the big picture for the exam…',
+  } : {
     title: '整场收束已准备好',
     body: '现在别看材料、不看路线，直接重建整场材料的大图。我会判断整条路线是否站住。',
     placeholder: '写下整场材料的大图…',
   };
 }
 
-function buildLocalTaskPromptMessage(prompt: StagedPrompt): LocalChatMessage {
-  const copy = getStagedPromptCopy(prompt);
+function buildLocalTaskPromptMessage(prompt: StagedPrompt, language: AppLanguage): LocalChatMessage {
+  const copy = getStagedPromptCopy(prompt, language);
   return {
     role: 'model',
     text: `${copy.title}\n${copy.body}`,
@@ -374,7 +388,30 @@ function buildLocalTaskPromptMessage(prompt: StagedPrompt): LocalChatMessage {
   };
 }
 
-function buildClosedBookEvaluationDirective(focusLabel?: string, focusKeyPoints: string[] = []): string {
+function buildClosedBookEvaluationDirective(language: AppLanguage, focusLabel?: string, focusKeyPoints: string[] = []): string {
+  if (language === 'en') {
+    const focusLine = focusLabel ? `\n- Current knowledge block: ${focusLabel}` : '';
+    const goalLines = focusKeyPoints.length > 0
+      ? `\n- Minimum goals for this block:\n${focusKeyPoints.slice(0, 3).map((point) => `  · ${point}`).join('\n')}`
+      : '';
+    return `
+
+[CLOSED-BOOK RECONSTRUCTION EVALUATION — REQUIRED THIS TURN]
+The learner has entered closed-book reconstruction. Their current message is an unaided answer.${focusLine}${goalLines}
+
+Evaluate it strictly against the course material and current knowledge block. Do not infer mastery from fluency alone. Choose exactly one level:
+1. Reconstructs unaided: the core problem, main relationship or mechanism, and example are sound, with no major confusion.
+2. Completes with a small prompt: the main line is present but one key relationship, boundary, piece of evidence, or example is missing.
+3. Needs guided support: the answer is off-topic, vague, mechanically repeats terms, or gets the core mechanism wrong.
+
+Use this format:
+**Closed-book evaluation: <one level above>**
+- What holds: one sentence
+- What is missing: one sentence
+- Next step: one very small action
+
+If the learner reconstructs unaided, encourage the next block or a new example. For the middle level, give only one small prompt. For guided support, return to the smallest useful explanation step without giving a long complete answer. Stay under 260 words.`;
+  }
   const focusLine = focusLabel ? `\n- 当前知识块：${focusLabel}` : '';
   const goalLines =
     focusKeyPoints.length > 0
@@ -399,7 +436,29 @@ function buildClosedBookEvaluationDirective(focusLabel?: string, focusKeyPoints:
 如果是“无提示能重建”，下一步应鼓励进入下一块或换例子；如果是“少提示能补全”，只给一个小提示或一个补问；如果是“需要回到支架讲解”，回到最小台阶讲解，但不要长篇讲完整答案。总字数控制在 260 字以内。`;
 }
 
-function buildWholeRouteClosureEvaluationDirective(routeClosureReference?: string): string {
+function buildWholeRouteClosureEvaluationDirective(language: AppLanguage, routeClosureReference?: string): string {
+  if (language === 'en') {
+    const reference = routeClosureReference?.trim()
+      ? `\n\n[INTERNAL ROUTE REFERENCE — DO NOT SHOW THE LEARNER]\n${routeClosureReference.slice(0, 4000)}`
+      : '';
+    return `
+
+[WHOLE-ROUTE CLOSED-BOOK EVALUATION — REQUIRED THIS TURN]
+The learner was asked to reconstruct the whole exam without looking at the material or route. Their current message is that reconstruction.${reference}
+
+Evaluate it strictly against the course material and internal route. Do not infer whole-exam mastery from fluency. Choose exactly one level:
+1. Whole route holds: the big question, progression between major blocks, and likely points of confusion form a sound structure.
+2. Individual blocks hold but connections are missing: the learner recalls pieces but not their relationship, order, or shared problem.
+3. Needs route integration: the answer is vague, off-topic, lists terms, or misses the main thread.
+
+Use this format:
+**Whole-route evaluation: <one level above>**
+- What holds: one sentence
+- What is missing: one sentence
+- Next step: one very small action
+
+Do not predict exam questions or rewrite a complete model answer. Stay under 280 words.`;
+  }
   const reference = routeClosureReference?.trim()
     ? `\n\n【内部路线参考·不要直接展示给学生】\n${routeClosureReference.slice(0, 4000)}`
     : '';
@@ -422,7 +481,29 @@ function buildWholeRouteClosureEvaluationDirective(routeClosureReference?: strin
 不要预测考试题；不要替学生重写完整总述。总字数控制在 280 字以内。`;
 }
 
-function buildMiniIntegrationEvaluationDirective(promptText?: string): string {
+function buildMiniIntegrationEvaluationDirective(language: AppLanguage, promptText?: string): string {
+  if (language === 'en') {
+    const reference = promptText?.trim()
+      ? `\n\n[INTERNAL MINI-SYNTHESIS REFERENCE — DO NOT SHOW THE LEARNER]\n${promptText.slice(0, 2600)}`
+      : '';
+    return `
+
+[MINI-SYNTHESIS EVALUATION — REQUIRED THIS TURN]
+The learner has answered without looking at the route, explaining how several recent knowledge blocks connect.${reference}
+
+Decide whether the learner can connect the blocks into a larger problem. Choose exactly one level:
+1. Relationship holds: the shared problem and the sequence, contrast, or causal relationship between blocks are clear.
+2. Individual blocks are understood but weakly connected: each block is familiar, but why they belong together or how they progress is unclear.
+3. Return to individual blocks: the answer is vague, off-topic, or only lists terms without explaining relationships.
+
+Use this format:
+**Mini-synthesis evaluation: <one level above>**
+- What holds: one sentence
+- What is missing: one sentence
+- Next step: one very small action
+
+Do not replace the learner’s answer with a full summary or a long explanation. Stay under 260 words.`;
+  }
   const reference = promptText?.trim()
     ? `\n\n【内部小整合任务参考·不要直接展示给学生】\n${promptText.slice(0, 2600)}`
     : '';
@@ -482,6 +563,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
     },
     ref
   ) {
+  const { language, text } = useAppLanguage();
   const [messages, setMessages] = useState<LocalChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -538,13 +620,13 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
       if (!mode) return false;
       const nextPrompt: StagedPrompt = {
         id: meta?.id,
-        label: meta?.label ?? (mode === 'closed-book' ? '闭卷讲一遍' : mode === 'mini-integration' ? '小整合' : '整场收束'),
+        label: meta?.label ?? (mode === 'closed-book' ? text('闭卷讲一遍', 'Explain from memory') : mode === 'mini-integration' ? text('小整合', 'Mini synthesis') : text('整场收束', 'Whole-route synthesis')),
         text,
         description: meta?.description,
         mode,
       };
       setStagedPrompt(nextPrompt);
-      const taskMsg = buildLocalTaskPromptMessage(nextPrompt);
+      const taskMsg = buildLocalTaskPromptMessage(nextPrompt, language);
       setMessages((prev) =>
         prev.at(-1)?.localTaskPrompt ? [...prev.slice(0, -1), taskMsg] : [...prev, taskMsg]
       );
@@ -553,7 +635,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
       requestAnimationFrame(() => textareaRef.current?.focus());
       return true;
     },
-    []
+    [language, text]
   );
 
   const usePromptDraft = useCallback((text: string, meta?: { id?: string; label?: string; description?: string }) => {
@@ -610,11 +692,13 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
           timestamp: now,
           revisitAnnotationId: annotationId,
           revisitPhase: 'question',
-          text: `我们现在回访一下你标记为不太熟的「${atom.label}」。先别看材料：请换一种说法解释它，并说明它在什么情况下成立或不成立。`,
+          text: language === 'en'
+            ? `Let’s revisit “${atom.label},” which you marked as unfamiliar. Without looking at the material, explain it in a different way and say when it does or does not apply.`
+            : `我们现在回访一下你标记为不太熟的「${atom.label}」。先别看材料：请换一种说法解释它，并说明它在什么情况下成立或不成立。`,
         }]);
       },
     }),
-    [activeKc, onEvidenceAnnotationsChange, selectedKcs, usePromptDraft, workspaceLsapContentMap]
+    [activeKc, language, onEvidenceAnnotationsChange, selectedKcs, usePromptDraft, workspaceLsapContentMap]
   );
   /** 避免把 workspaceDialogueTranscript 放进 hydration 依赖导致父级每次 setState 都重灌消息 */
   const workspaceDialogueTranscriptRef = useRef(workspaceDialogueTranscript);
@@ -882,8 +966,8 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
             onChunkRetrievalRound?.({ retrieved: [], indexEmpty: true });
             setCitationPipelineHint(
               reviewScope
-                ? '材料索引还没准备好，本轮不会猜页码；我会先按当前知识块边界回答。'
-                : '本场讲义 chunk 索引为空或尚未重建。定位引用已回退为文末 JSON（页码由模型估算，请核对原文）。'
+                ? language === 'en' ? 'The material index is not ready. This response will stay within the current knowledge block and will not guess page numbers.' : '材料索引还没准备好，本轮不会猜页码；我会先按当前知识块边界回答。'
+                : language === 'en' ? 'The lecture index is empty or has not been rebuilt. Source locations are falling back to end-of-response JSON; verify any estimated page numbers.' : '本场讲义 chunk 索引为空或尚未重建。定位引用已回退为文末 JSON（页码由模型估算，请核对原文）。'
             );
           } else if (hasIndex) {
             const lastAssistant = [...historyForApi].reverse().find((m) => m.role === 'model');
@@ -975,7 +1059,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
                   ),
                 };
               } else {
-                setCitationPipelineHint('当前块附近没有命中可定位证据；本轮不会猜页码，会先按当前知识块边界回答。');
+                setCitationPipelineHint(language === 'en' ? 'No locatable evidence was found near this block. This response will stay within the block and will not guess page numbers.' : '当前块附近没有命中可定位证据；本轮不会猜页码，会先按当前知识块边界回答。');
               }
             } else {
               const retrieved = await retrieveCandidateChunks({
@@ -998,7 +1082,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
                 };
               } else if (materials.length > 0) {
                 setCitationPipelineHint(
-                  '本轮检索无命中（或「仅当前预览」下无可用 chunk）。定位引用已回退为文末 JSON，请核对页码。'
+                  language === 'en' ? 'No indexed passage matched this turn. Source locations are falling back to end-of-response JSON; verify the page numbers.' : '本轮检索无命中（或「仅当前预览」下无可用 chunk）。定位引用已回退为文末 JSON，请核对页码。'
                 );
               }
             }
@@ -1009,18 +1093,20 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
           onChunkRetrievalRound?.({ retrieved: [] });
           if (materials.length > 0) {
             setCitationPipelineHint(
-              reviewScope ? 'chunk 检索失败，本轮不会猜页码；我会先按当前知识块边界回答。' : 'chunk 检索失败，已回退为文末 JSON 引用协议。'
+              reviewScope
+                ? language === 'en' ? 'Passage retrieval failed. This response will stay within the current knowledge block and will not guess page numbers.' : 'chunk 检索失败，本轮不会猜页码；我会先按当前知识块边界回答。'
+                : language === 'en' ? 'Passage retrieval failed. Source citations are falling back to the end-of-response JSON format.' : 'chunk 检索失败，已回退为文末 JSON 引用协议。'
             );
           }
         }
       }
 
       let messageForModel = shouldEvaluateWholeRouteClosure
-        ? text + buildWholeRouteClosureEvaluationDirective(routeClosureReference)
+        ? text + buildWholeRouteClosureEvaluationDirective(language, routeClosureReference)
         : shouldEvaluateClosedBook
-          ? text + buildClosedBookEvaluationDirective(focusLabel, focusKeyPoints)
+          ? text + buildClosedBookEvaluationDirective(language, focusLabel, focusKeyPoints)
           : shouldEvaluateMiniIntegration
-            ? text + buildMiniIntegrationEvaluationDirective(activeStagedPrompt?.text)
+            ? text + buildMiniIntegrationEvaluationDirective(language, activeStagedPrompt?.text)
             : text;
 
       const lastRegularMessage = [...messages].reverse().find((message) => !message.localTaskPrompt);
@@ -1224,7 +1310,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
         }
       }
     } catch (e) {
-      setSendError(e instanceof Error ? e.message : '发送失败');
+      setSendError(e instanceof Error ? e.message : language === 'en' ? 'Failed to send.' : '发送失败');
     } finally {
       setSending(false);
     }
@@ -1255,6 +1341,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
     focusKeyPoints,
     routeClosureReference,
     onEvidenceAnnotationsChange,
+    language,
   ]);
 
   const evidenceKcs = reviewScope?.sourceKcs?.length
@@ -1286,7 +1373,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
     evidenceAnnotationsRef.current = next;
     onEvidenceAnnotationsChange(next);
     setReviewPickerMessageId(null);
-    setEvidenceNotice(`记下了：“${match.atom.label}”稍后换一种问法再确认。`);
+    setEvidenceNotice(text(`记下了：“${match.atom.label}”稍后换一种问法再确认。`, `Noted. I’ll revisit “${match.atom.label}” later with a different question.`));
   };
 
   const updateRevisitAfterFeedback = (annotationId: string, resolved: boolean) => {
@@ -1296,28 +1383,28 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
       : deferRevisit(evidenceAnnotationsRef.current, annotationId, currentUserTurnCount);
     evidenceAnnotationsRef.current = next;
     onEvidenceAnnotationsChange(next);
-    setEvidenceNotice(resolved ? '已完成这次回访。' : '保留为不太熟，稍后还会再问。');
+    setEvidenceNotice(resolved ? text('已完成这次回访。', 'This revisit is complete.') : text('保留为不太熟，稍后还会再问。', 'Kept as unfamiliar. I’ll ask again later.'));
   };
 
   const emptyState = contextBlocked || mergedLoading || !!mergedError || !mergedContent.trim();
 
   const subtitle = focusLabel
-    ? `「${examTitle || '本场'}」· 知识块：${focusLabel}`
+    ? text(`「${examTitle || '本场'}」· 知识块：${focusLabel}`, `“${examTitle || 'This exam'}” · Knowledge block: ${focusLabel}`)
     : activeKc
-      ? `「${examTitle || '本场'}」· 锚定：${activeKc.concept}`
-      : `${examTitle ? `「${examTitle}」` : '未选考试'} · 全卷（未锚定知识块）`;
-  const stagedPromptCopy = stagedPrompt ? getStagedPromptCopy(stagedPrompt) : null;
+      ? text(`「${examTitle || '本场'}」· 锚定：${activeKc.concept}`, `“${examTitle || 'This exam'}” · Focus: ${activeKc.concept}`)
+      : text(`${examTitle ? `「${examTitle}」` : '未选考试'} · 全卷（未锚定知识块）`, `${examTitle ? `“${examTitle}”` : 'No exam selected'} · Whole exam (no knowledge block selected)`);
+  const stagedPromptCopy = stagedPrompt ? getStagedPromptCopy(stagedPrompt, language) : null;
 
   return (
     <div
       className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm"
-      aria-label="理解验证对话"
+      aria-label={text('理解验证对话', 'Understanding check')}
     >
       <div className="shrink-0 border-b border-stone-100 px-4 py-3 bg-stone-50/80">
         <div className="flex items-center gap-2 text-slate-800">
           <MessageCircle className="w-5 h-5 text-indigo-600 shrink-0" />
           <div>
-            <h2 className="text-sm font-bold">理解验证对话</h2>
+            <h2 className="text-sm font-bold">{text('理解验证对话', 'Understanding check')}</h2>
             <p className="text-[11px] text-slate-500 truncate">{subtitle}</p>
             {debugScaffold && lastScaffoldInfo && (
               <p className="text-[10px] text-violet-700 font-mono mt-1">
@@ -1336,19 +1423,19 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
             {!contextBlocked && mergedLoading && (
               <p className="inline-flex items-center gap-2">
                 <Loader2 className="w-5 h-5 animate-spin text-indigo-500" />
-                正在合并本场关联材料全文…
+                {text('正在合并本场关联材料全文…', 'Combining the full text of linked materials…')}
               </p>
             )}
             {!contextBlocked && !mergedLoading && mergedError && (
               <div className="space-y-1 text-rose-600">
                 <p>{mergedError}</p>
                 <p className="text-xs text-rose-700/90">
-                  合并讲义失败时无法开始苏格拉底对话，避免模型在空/错误上下文中臆测；请检查材料或网络后重试。
+                  {text('合并讲义失败时无法开始苏格拉底对话，避免模型在空/错误上下文中臆测；请检查材料或网络后重试。', 'The understanding check cannot start because the materials could not be combined. Check the files or your connection and try again.')}
                 </p>
               </div>
             )}
             {!contextBlocked && !mergedLoading && !mergedError && !mergedContent.trim() && (
-              <p>已选考试，但未能从关联材料读出文本。请检查本地是否曾打开过 PDF，或云端文件是否可下载。</p>
+              <p>{text('已选考试，但未能从关联材料读出文本。请检查本地是否曾打开过 PDF，或云端文件是否可下载。', 'An exam is selected, but no text could be read from its linked materials. Check whether local PDFs were opened before or cloud files are available.')}</p>
             )}
           </div>
         ) : messages.length === 0 ? (
@@ -1356,12 +1443,12 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
             {focusLabel ? (
               <>
                 <p className="text-slate-700 font-medium text-sm max-w-md">
-                  先别看答案，用你自己的话讲清楚：
+                  {text('先别看答案，用你自己的话讲清楚：', 'Without looking at the answer, explain in your own words: ')}
                   <span className="text-indigo-800 font-bold">{focusLabel}</span>
                 </p>
                 {focusKeyPoints.length > 0 && (
                   <div className="max-w-md rounded-xl border border-indigo-100 bg-indigo-50/60 px-4 py-3 text-left">
-                    <p className="mb-2 text-[11px] font-black uppercase tracking-wide text-indigo-500">这块至少要能做到</p>
+                    <p className="mb-2 text-[11px] font-black uppercase tracking-wide text-indigo-500">{text('这块至少要能做到', 'Minimum goals for this block')}</p>
                     <ul className="space-y-1.5 text-xs leading-relaxed text-slate-700">
                       {focusKeyPoints.slice(0, 3).map((point) => (
                         <li key={point} className="flex gap-2">
@@ -1373,26 +1460,26 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
                   </div>
                 )}
                 <p className="text-xs text-slate-500 max-w-md leading-relaxed">
-                  我会检查你是否真的理解这一块：能不能解释、连接到材料、换个例子也说得通。
+                  {text('我会检查你是否真的理解这一块：能不能解释、连接到材料、换个例子也说得通。', 'I’ll check whether you can explain this block, connect it to the material, and apply it to a different example.')}
                 </p>
               </>
             ) : activeKc ? (
               <>
                 <p className="text-slate-700 font-medium text-sm max-w-md">
-                  用你自己的话解释：<span className="text-indigo-800 font-bold">{activeKc.concept}</span>
+                  {text('用你自己的话解释：', 'Explain in your own words: ')}<span className="text-indigo-800 font-bold">{activeKc.concept}</span>
                   {activeKc.definition ? `（${activeKc.definition.slice(0, 120)}${activeKc.definition.length > 120 ? '…' : ''}）` : ''}
                 </p>
                 <p className="text-xs text-slate-500 max-w-md leading-relaxed">
-                  对话将围绕当前选中考点；我会结合讲义与逻辑原子逐步追问。若尚未提取原子，仍可先围绕定义与材料讨论。
+                  {text('对话将围绕当前选中考点；我会结合讲义与逻辑原子逐步追问。若尚未提取原子，仍可先围绕定义与材料讨论。', 'The conversation will stay focused on this point, using the lecture and its reasoning steps. You can still begin with the definition and material before those steps are extracted.')}
                 </p>
               </>
             ) : (
               <>
                 <p className="text-slate-700 font-medium text-sm max-w-md">
-                  用你自己的话说说：本场考试里，你最担心的一个考点是什么？
+                  {text('用你自己的话说说：本场考试里，你最担心的一个考点是什么？', 'In your own words, which topic in this exam worries you most?')}
                 </p>
                 <p className="text-xs text-slate-500 max-w-md leading-relaxed">
-                  我会在全卷范围内先问后讲；若需聚焦，请先在左侧选择一个知识块。
+                  {text('我会在全卷范围内先问后讲；若需聚焦，请先在左侧选择一个知识块。', 'I’ll ask before explaining across the whole exam. Select a knowledge block on the left to narrow the focus.')}
                 </p>
               </>
             )}
@@ -1457,9 +1544,9 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
                         />
                         {m.revisitAnnotationId && m.revisitPhase === 'feedback' ? (
                           <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-stone-200 pt-2">
-                            <span className="text-[11px] font-bold text-slate-500">这次回访之后：</span>
-                            <button type="button" onClick={() => updateRevisitAfterFeedback(m.revisitAnnotationId!, true)} className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100">现在可以了</button>
-                            <button type="button" onClick={() => updateRevisitAfterFeedback(m.revisitAnnotationId!, false)} className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100">还是不熟</button>
+                            <span className="text-[11px] font-bold text-slate-500">{text('这次回访之后：', 'After this revisit:')}</span>
+                            <button type="button" onClick={() => updateRevisitAfterFeedback(m.revisitAnnotationId!, true)} className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700 hover:bg-emerald-100">{text('现在可以了', 'I’m good now')}</button>
+                            <button type="button" onClick={() => updateRevisitAfterFeedback(m.revisitAnnotationId!, false)} className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-bold text-amber-800 hover:bg-amber-100">{text('还是不熟', 'Still unfamiliar')}</button>
                           </div>
                         ) : !m.revisitAnnotationId && candidateAtomIds.length > 0 ? (
                           <div className="mt-3 border-t border-stone-200 pt-2">
@@ -1471,11 +1558,11 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
                               }}
                               className="text-[11px] font-bold text-amber-700 hover:text-amber-900"
                             >
-                              这一点不太熟，稍后再问我
+                              {text('这一点不太熟，稍后再问我', 'I’m unsure about this—ask me again later')}
                             </button>
                             {reviewPickerMessageId === (m.id ?? `${m.timestamp}-${i}`) && (
                               <div className="mt-2 space-y-1.5 rounded-xl border border-amber-200 bg-amber-50 p-2.5">
-                                <p className="text-[10px] font-bold text-amber-800">选择要稍后回访的知识点</p>
+                                <p className="text-[10px] font-bold text-amber-800">{text('选择要稍后回访的知识点', 'Choose a point to revisit later')}</p>
                                 {candidateAtomIds.map((atomId) => {
                                   const item = evidenceAtoms.find(({ atom }) => atom.id === atomId);
                                   return item ? (
@@ -1497,7 +1584,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
             {sending && (
               <div className="flex justify-start">
                 <div className="rounded-2xl px-3 py-2 bg-stone-50 border border-stone-200 text-slate-500 text-sm inline-flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 animate-spin" /> 思考中…
+                  <Loader2 className="w-4 h-4 animate-spin" /> {text('思考中…', 'Thinking…')}
                 </div>
               </div>
             )}
@@ -1508,7 +1595,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
         {evidenceNotice && (
           <div className="shrink-0 flex items-center justify-between gap-3 border-t border-amber-100 bg-amber-50/90 px-4 py-2 text-[11px] font-medium text-amber-800">
             <span>{evidenceNotice}</span>
-            <button type="button" onClick={() => setEvidenceNotice(null)} className="font-bold text-amber-700 hover:text-amber-950">知道了</button>
+            <button type="button" onClick={() => setEvidenceNotice(null)} className="font-bold text-amber-700 hover:text-amber-950">{text('知道了', 'Got it')}</button>
           </div>
         )}
         {citationPipelineHint && (
@@ -1522,13 +1609,13 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
             <div className="mb-2 rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-1.5 transition-[opacity,transform] duration-200 ease-out">
               <div className="flex items-center justify-between gap-3">
                 <p className="min-w-0 truncate text-[11px] font-bold text-indigo-800">
-                  当前验证：{stagedPrompt.label}，写完发送即可
+                  {text(`当前验证：${stagedPrompt.label}，写完发送即可`, `Current check: ${stagedPrompt.label}. Write your response and send it.`)}
                 </p>
                 <button
                   type="button"
                   onClick={clearStagedPrompt}
                   className="shrink-0 rounded-full p-1 text-slate-400 transition-[background-color,color,transform] duration-150 ease-out hover:bg-white hover:text-slate-700 active:scale-95"
-                  aria-label="取消当前验证模式"
+                  aria-label={text('取消当前验证模式', 'Cancel the current check')}
                 >
                   <X className="h-3.5 w-3.5" />
                 </button>
@@ -1537,17 +1624,17 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
           )}
           {closedBookAwaitingAnswer && (
             <p className="mb-2 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-[11px] font-medium leading-snug text-emerald-800">
-              闭卷模式：下一条请直接复述这一块，我会按“无提示能重建 / 少提示能补全 / 需要回到支架讲解”来判定。
+              {text('闭卷模式：下一条请直接复述这一块，我会按“无提示能重建 / 少提示能补全 / 需要回到支架讲解”来判定。', 'Closed-book mode: reconstruct this block in your next message. I’ll evaluate whether you can rebuild it unaided, complete it with a small prompt, or need guided support.')}
             </p>
           )}
           {wholeRouteClosureAwaitingAnswer && (
             <p className="mb-2 rounded-xl border border-violet-100 bg-violet-50 px-3 py-2 text-[11px] font-medium leading-snug text-violet-800">
-              整场收束：下一条请不看材料、不看路线，直接复述整场材料的大图。我会判断整场路线是否站住。
+              {text('整场收束：下一条请不看材料、不看路线，直接复述整场材料的大图。我会判断整场路线是否站住。', 'Whole-route synthesis: without looking at the material or route, reconstruct the big picture in your next message.')}
             </p>
           )}
           {!emptyState && quickPrompts.length > 0 && (
             <div className="mb-2 flex flex-wrap items-center gap-2">
-              <span className="text-[11px] font-bold text-slate-400">验证入口</span>
+              <span className="text-[11px] font-bold text-slate-400">{text('验证入口', 'Check options')}</span>
               {quickPrompts.map((prompt) => (
                 <button
                   key={prompt.id}
@@ -1582,12 +1669,12 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
                 stagedPromptCopy
                   ? stagedPromptCopy.placeholder
                   : canSend
-                  ? '输入你的想法或疑问…（Enter 发送，Shift+Enter 换行）'
+                  ? text('输入你的想法或疑问…（Enter 发送，Shift+Enter 换行）', 'Enter your thought or question… (Enter to send, Shift+Enter for a new line)')
                   : noKcSelected
-                    ? '请先选择知识块'
+                    ? text('请先选择知识块', 'Select a knowledge block first')
                     : contextBlocked
-                      ? '请先选择考试并关联材料'
-                      : '等待材料合并完成…'
+                      ? text('请先选择考试并关联材料', 'Select an exam and link materials first')
+                      : text('等待材料合并完成…', 'Waiting for the materials to finish combining…')
               }
               rows={3}
               className="flex-1 min-h-[72px] max-h-40 resize-y rounded-xl border border-stone-200 px-3 py-2 text-sm text-slate-800 transition-[border-color,box-shadow] duration-150 ease-out focus:border-indigo-300 focus:outline-none focus:ring-4 focus:ring-indigo-50 disabled:bg-stone-100 disabled:text-slate-400"
@@ -1599,7 +1686,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
               className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white transition-[background-color,box-shadow,transform] duration-150 ease-out hover:bg-indigo-700 active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-40"
             >
               {sending ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
-              发送
+              {text('发送', 'Send')}
             </button>
           </div>
         </div>

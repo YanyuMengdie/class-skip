@@ -82,7 +82,8 @@ const startAudioMeter = (
 export async function startRecording(
   recordingId: string,
   onAudioProgress?: (recording: LectureAudioRecording) => void,
-  onAudioLevel?: (level: number) => void
+  onAudioLevel?: (level: number) => void,
+  microphoneDeviceId?: string
 ): Promise<LectureAudioRecording> {
   if (!isLectureRecordingSupported()) {
     throw new Error('当前浏览器无法保存课堂录音，建议使用最新版 Chrome 或 Safari');
@@ -107,6 +108,7 @@ export async function startRecording(
     mediaStream = await navigator.mediaDevices.getUserMedia({
       video: false,
       audio: {
+        ...(microphoneDeviceId ? { deviceId: { exact: microphoneDeviceId } } : {}),
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,

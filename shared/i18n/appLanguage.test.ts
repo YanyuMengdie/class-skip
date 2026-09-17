@@ -42,5 +42,15 @@ describe('global app language', () => {
     expect(translateKnownUiText('备考工作台', 'en')).toBe('Exam workspace');
     expect(translateKnownUiText('这是过去生成的一段内容', 'en')).toBe('这是过去生成的一段内容');
   });
-});
 
+  it('translates structured dynamic workspace labels without translating source content', () => {
+    expect(translateKnownUiText('Biomedical Model 等 6 个关键点', 'en')).toBe('Biomedical Model and 6 key points');
+    expect(translateKnownUiText('本节第 1 / 3 块', 'en')).toBe('Block 1 / 3 in this lecture');
+    expect(translateKnownUiText('全场第 1 / 25 块', 'en')).toBe('Block 1 / 25 overall');
+    expect(translateKnownUiText('证据 0/26 · 待回看 2', 'en')).toBe('Evidence 0/26 · Revisit 2');
+    expect(translateKnownUiText('本场 5 份材料 · 共 25 个考点 · 核心 4 · 重要 9 · 细节 12', 'en'))
+      .toBe('5 materials · 25 key points · Core 4 · Important 9 · Detail 12');
+    expect(translateKnownUiText('Biopsychosocial Model', 'en')).toBe('Biopsychosocial Model');
+    expect(translateKnownUiText('本节第 1 / 3 块', 'zh-CN')).toBe('本节第 1 / 3 块');
+  });
+});

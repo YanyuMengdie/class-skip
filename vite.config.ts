@@ -1,6 +1,10 @@
 import path from 'path';
 import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
+import { examAstraProxy } from './server/examAstraProxy';
+import { readingAstraProxy } from './server/readingAstra';
+import { imagesAstraProxy } from './server/imagesAstra';
+import { canvasApiProxy } from './server/canvasProxy';
 import {
   createElevenLabsRealtimeToken,
   ElevenLabsTranscriptionError,
@@ -91,11 +95,14 @@ export default defineConfig(({ mode }) => {
         port: 3001,
         host: '127.0.0.1',
       },
-      plugins: [elevenLabsTranscriptionProxy(env.ELEVENLABS_API_KEY || ''), react()],
-      define: {
-        'process.env.API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-        'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY)
-      },
+      plugins: [
+        // Keep provider credentials server-side; text requests never fall back to OpenAI.
+        examAstraProxy(() => loadEnv(mode, path.resolve(__dirname), '').GEMINI_API_KEY || ''),
+        readingAstraProxy(() => loadEnv(mode, path.resolve(__dirname), '').GEMINI_API_KEY || ''),
+        // Flash outputs text only. Images and realtime transcription retain dedicated providers.
+        imagesAstraProxy(() => loadEnv(mode, path.resolve(__dirname), '').OPENAI_API_KEY || ''),
+        canvasApiProxy(), elevenLabsTranscriptionProxy(env.ELEVENLABS_API_KEY || ''), react(),
+      ],
       resolve: {
         alias: {
           '@': path.resolve(__dirname, '.'),
