@@ -1,3 +1,4 @@
+import { authenticatedApiFetch } from '@/services/authenticatedApi';
 import { getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
 
 export const IMAGE_GENERATION_TIMEOUT_MS = 270_000;
@@ -35,7 +36,7 @@ async function generateImage(kind: 'avatar' | 'background', prompt: string, opti
       timeout = setTimeout(() => { timedOut = true; controller.abort(); reject(failure('timeout')); }, IMAGE_GENERATION_TIMEOUT_MS);
     });
     const work = async () => {
-      const response = await fetch('/api/images/astra', { method: 'POST', credentials: 'same-origin', redirect: 'error',
+      const response = await authenticatedApiFetch('/api/images/astra', { method: 'POST', credentials: 'same-origin', redirect: 'error',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, prompt: prompt.trim() }), signal: controller.signal });
       const body: unknown = await response.json().catch(() => null);
       if (!response.ok) {

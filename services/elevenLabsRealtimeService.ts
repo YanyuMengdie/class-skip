@@ -1,3 +1,4 @@
+import { authenticatedApiFetch } from '@/services/authenticatedApi';
 import {
   CommitStrategy,
   RealtimeEvents,
@@ -30,7 +31,7 @@ let lastCommittedAt = 0;
 let activeMicrophoneDeviceId: string | undefined;
 
 const fetchRealtimeToken = async (): Promise<string> => {
-  const response = await fetch('/api/elevenlabs/realtime-token', {
+  const response = await authenticatedApiFetch('/api/elevenlabs/realtime-token', {
     method: 'POST',
     headers: { Accept: 'application/json' },
   });

@@ -194,7 +194,6 @@ const cleanJsonString = (text: string): string => {
  */
 export const classifyDocument = async (docContent: string): Promise<DocType> => {
   // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/f7788da6-7262-4420-bc72-576f23e0b7d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:classifyDocument',message:'entry',data:{},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
   // #endregion
   try {
     const contentPart = getContentPart(docContent);
@@ -207,12 +206,10 @@ export const classifyDocument = async (docContent: string): Promise<DocType> => 
     const result = response.text?.trim().toUpperCase().replace(/[^AB]/g, '') || "A";
     const docType = result === 'B' ? 'HUMANITIES' : 'STEM';
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f7788da6-7262-4420-bc72-576f23e0b7d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:classifyDocument',message:'exit ok',data:{docType},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
     // #endregion
     return docType;
   } catch (error) {
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f7788da6-7262-4420-bc72-576f23e0b7d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:classifyDocument',message:'catch',data:{err:String(error)},timestamp:Date.now(),hypothesisId:'H1,H3'})}).catch(()=>{});
     // #endregion
     console.error("Classification failed, defaulting to STEM", error);
     return 'STEM';
@@ -1436,7 +1433,6 @@ export const performPreFlightDiagnosis = async (
   provider: 'gemini' | 'astra' = 'astra',
 ): Promise<StudyMap | null> => {
   // #region agent log
-  fetch('http://127.0.0.1:7242/ingest/f7788da6-7262-4420-bc72-576f23e0b7d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:performPreFlightDiagnosis',message:'entry',data:{},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
   // #endregion
   try {
     const contentPart = getContentPart(docContent);
@@ -1493,13 +1489,11 @@ export const performPreFlightDiagnosis = async (
       prerequisites: data.prerequisites.map((p: any) => ({ ...p, mastered: false }))
     };
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f7788da6-7262-4420-bc72-576f23e0b7d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:performPreFlightDiagnosis',message:'exit ok',data:{},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
     // #endregion
     return result;
   } catch (e) {
     if (provider === 'astra') throw e;
     // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/f7788da6-7262-4420-bc72-576f23e0b7d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'geminiService.ts:performPreFlightDiagnosis',message:'catch',data:{err:String(e)},timestamp:Date.now(),hypothesisId:'H1,H3'})}).catch(()=>{});
     // #endregion
     console.error("Diagnosis Error:", e);
     return null;

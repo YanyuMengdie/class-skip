@@ -1,3 +1,4 @@
+import { authenticatedApiFetch } from '@/services/authenticatedApi';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { AlertCircle, ArrowRight, BookOpen, Check, Clock3, Download, Flag, Lightbulb, MessageCircle, Pause, Play, RotateCcw } from 'lucide-react';
@@ -36,7 +37,7 @@ const modelLabel = () => 'Gemini 3.8 Flash';
 export const studyRoundProvider = (_blueprint: RoundBlueprint): StudyRoundProvider => 'gemini';
 
 /** This local read exposes only availability; no key or paid model request enters the browser. */
-export async function readAstraConfiguration(fetchStatus: typeof fetch = fetch): Promise<Exclude<AstraConfiguration, 'checking'>> {
+export async function readAstraConfiguration(fetchStatus: typeof fetch = authenticatedApiFetch): Promise<Exclude<AstraConfiguration, 'checking'>> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {

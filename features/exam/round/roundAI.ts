@@ -1,3 +1,4 @@
+import { authenticatedApiFetch } from '@/services/authenticatedApi';
 import { Type, type Schema } from '@google/genai';
 import { ANSWER_FORMATS, TASK_TYPES, answerFormatInstruction, hasReviewedPresentation, questionAuditKey } from './questionPresentation';
 import type {
@@ -336,7 +337,7 @@ async function request(context: RoundContext, language: RoundLanguage, instructi
     const instructions = `${SOURCE_RULES}\nAll user-facing prose (including requirements, expected answers and feedback) must be ${language === 'en' ? 'natural English' : '自然、简洁的简体中文'}. IDs and literal source/answer quotes are exempt. JSON field names and enum values must remain exactly the schema tokens regardless of prose language. Keep prose concise but retain all scenario observations and conditions needed for fair reasoning; a case can use a short paragraph or small data table. Prefer 1–3 criteria per task and select the smallest sufficient set of evidence IDs.\n${instruction}`;
     const responseSchema = bindIds(schema);
     const transport = async (): Promise<{ text?: string }> => {
-        const response = await fetch('/api/exam/gemini', { method: 'POST',
+        const response = await authenticatedApiFetch('/api/exam/gemini', { method: 'POST',
           headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
           body: JSON.stringify({ instructions, input, schema: responseSchema, maxOutputTokens, language }) });
         let body: Record<string, unknown> | null;

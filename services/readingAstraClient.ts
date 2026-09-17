@@ -1,3 +1,4 @@
+import { authenticatedApiFetch } from '@/services/authenticatedApi';
 import type { GenerateContentParameters } from '@google/genai';
 import { getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
 
@@ -93,7 +94,7 @@ export async function generateReadingContent(params: GenerateContentParameters, 
   try {
     let response: Response;
     try {
-      response = await fetch('/api/reading/gemini', {
+      response = await authenticatedApiFetch('/api/reading/gemini', {
         method: 'POST', credentials: 'same-origin', redirect: 'error', signal: controller.signal,
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });

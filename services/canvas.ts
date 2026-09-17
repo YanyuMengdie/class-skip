@@ -1,3 +1,4 @@
+import { authenticatedApiFetch } from '@/services/authenticatedApi';
 import { localizeText } from '@/shared/i18n/appLanguage';
 import { canvasFileAccessProblem } from '@/shared/canvasFileAccess';
 
@@ -60,7 +61,7 @@ export class CanvasRequestError extends Error {
 export interface CanvasRequestOptions { signal?: AbortSignal }
 
 const fetchCanvasProxy = async (path: string, init: RequestInit): Promise<Response> => {
-  try { return await fetch(path, init); }
+  try { return await authenticatedApiFetch(path, init); }
   catch (error) {
     if (init.signal?.aborted || (error instanceof Error && error.name === 'AbortError')) throw error;
     throw new CanvasRequestError(localizeText('无法连接 Canvas 读取服务，请确认逃课神器仍在运行。', 'Could not reach the Canvas reader. Check that the app is running.'), 'unavailable');

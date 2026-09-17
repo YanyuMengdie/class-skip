@@ -1,3 +1,6 @@
+import { consumeStoredPayload } from '../../server/storedPayload';
+import { ExamAstraError } from '../../server/examAstra';
+import { requireProductionUser, ProductionAuthError } from '../../server/productionAuth';
 import {
   ElevenLabsTranscriptionError,
   transcribeWithElevenLabs,
@@ -35,11 +38,18 @@ export default async function handler(request: any, response: any) {
   }
 
   try {
-    const audio = await readRawBody(request);
+    const uid = await requireProductionUser(request);
+    let audio = await readRawBody(request);
+    if (request.headers['x-classskip-body-type']) {
+      const envelope = JSON.parse(Buffer.from(audio).toString('utf8'));
+      const stored = await consumeStoredPayload(envelope, String(request.headers['x-classskip-token']), uid, 128 * 1024 * 1024);
+      if (!stored) throw new ExamAstraError('invalid_request', 400, '无法识别暂存录音。');
+      audio = stored;
+    }
     const result = await transcribeWithElevenLabs({
       apiKey: process.env.ELEVENLABS_API_KEY || '',
       audio,
-      mimeType: request.headers['content-type'],
+      mimeType: request.headers['x-classskip-body-type'] || request.headers['content-type'],
       fileName: decodeURIComponent(request.headers['x-file-name'] || 'lecture-audio.webm'),
       languageCode: request.headers['x-language-code'],
       numSpeakers: Number(request.headers['x-num-speakers']) || undefined,
@@ -47,7 +57,7 @@ export default async function handler(request: any, response: any) {
     });
     response.status(200).json(result);
   } catch (error) {
-    const status = error instanceof ElevenLabsTranscriptionError ? error.status : 500;
+    const status = (error instanceof ElevenLabsTranscriptionError || error instanceof ProductionAuthError || error instanceof ExamAstraError) ? error.status : 500;
     response.status(status).json({
       error: error instanceof Error ? error.message : 'Transcription failed',
     });

@@ -1,3 +1,4 @@
+import { requireProductionUser, ProductionAuthError } from '../../server/productionAuth';
 import {
   createElevenLabsRealtimeToken,
   ElevenLabsTranscriptionError,
@@ -11,11 +12,12 @@ export default async function handler(request: any, response: any) {
   }
 
   try {
+    await requireProductionUser(request);
     const token = await createElevenLabsRealtimeToken(process.env.ELEVENLABS_API_KEY || '');
     response.setHeader('Cache-Control', 'no-store');
     response.status(200).json({ token });
   } catch (error) {
-    const status = error instanceof ElevenLabsTranscriptionError ? error.status : 500;
+    const status = (error instanceof ElevenLabsTranscriptionError || error instanceof ProductionAuthError) ? error.status : 500;
     response.status(status).json({
       error: error instanceof Error ? error.message : 'Unable to start realtime transcription',
     });

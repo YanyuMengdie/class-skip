@@ -1,3 +1,4 @@
+import { authenticatedApiFetch } from '@/services/authenticatedApi';
 import type {
   LectureAudioQuality,
   LectureTranscriptSegment,
@@ -208,7 +209,7 @@ export const transcribeLectureAudio = async (
   durationMs?: number
 ): Promise<LectureTranscriptionResult> => {
   const keyterms = parseKeyterms(options.keyterms);
-  const response = await fetch('/api/elevenlabs/transcribe', {
+  const response = await authenticatedApiFetch('/api/elevenlabs/transcribe', {
     method: 'POST',
     headers: {
       'Content-Type': audio.type || 'application/octet-stream',
