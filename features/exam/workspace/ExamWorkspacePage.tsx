@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { User } from 'firebase/auth';
+import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import { ArrowLeft, ArrowRight, BookOpen, Check, ChevronRight, Clock3, FileText, GraduationCap, History, Layers3, Loader2, MessageCircle, RefreshCw, X } from 'lucide-react';
 import type { AtomCoverageByKc, Exam, ExamMaterialLink, KcGlossaryEntry, LSAPContentMap, LSAPState } from '@/types';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
@@ -9,7 +9,7 @@ import type { WorkspaceDialogueTurn, WorkspaceEvidenceAnnotation } from '@/featu
 import { ExamWorkspaceGlobalChat } from './ExamWorkspaceGlobalChat';
 import { ExamWorkspaceMaterialPreview } from './ExamWorkspaceMaterialPreview';
 import { KnowledgeChecklist } from '@/features/exam/round/KnowledgeChecklist';
-import type { PrepareLectureKnowledgeOptions } from '@/features/exam/round/lectureKnowledge';
+import { isLectureKnowledgePrepared, type PrepareLectureKnowledgeOptions } from '@/features/exam/round/lectureKnowledge';
 import { summarizeQuestionConditions } from '@/features/exam/round/conditionEvidence';
 import { resumeRoundContext } from '@/features/exam/round/resumeRoundContext';
 import { useThemePlan } from '@/features/exam/round/useThemePlan';
@@ -21,6 +21,9 @@ import '@/features/exam/round/roundWorkspace.css';
 
 export interface ExamWorkspacePageProps {
   user: User;
+  standaloneMaterial?: ExamMaterialLink | null;
+  onChooseReviewScope: () => void;
+  onChooseLecture: () => void;
   activeExamId: string | null;
   onActiveExamIdChange: (id: string | null) => void;
   onBack: () => void;
@@ -64,13 +67,13 @@ export interface ExamWorkspacePageProps {
 
 /** KC/atom structure drives finite rounds; previous conversations and estimates remain historical records. */
 export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
-  const { user, activeExamId, onActiveExamIdChange, onBack, onOpenExamHub, resolveExamMaterialPdf,
+  const { user, standaloneMaterial, activeExamId, onActiveExamIdChange, onBack, onOpenExamHub, resolveExamMaterialPdf,
     workspaceLsapContentMap, workspaceDialogueTranscript, workspaceLsapKey } = props;
   const { language: appLanguage, text } = useAppLanguage();
   const language = appLanguage === 'en' ? 'en' : 'zh';
   const [exams, setExams] = useState<Exam[]>([]);
   const [allMaterials, setAllMaterials] = useState<ExamMaterialLink[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!standaloneMaterial);
   const [loadError, setLoadError] = useState('');
   const [knowledgeError, setKnowledgeError] = useState('');
   const [materialId, setMaterialId] = useState('');
@@ -102,8 +105,8 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
   recordsRef.current = records;
   const storageKey = useMemo(() => roundWorkspaceStorageKey(user.uid, activeExamId || 'none'), [user.uid, activeExamId]);
   const preferenceKey = `${storageKey}:view`;
-  const materials = useMemo(() => allMaterials.filter((item) => item.examId === activeExamId)
-    .sort((a, b) => (a.sortIndex ?? a.addedAt) - (b.sortIndex ?? b.addedAt)), [allMaterials, activeExamId]);
+  const materials = useMemo(() => standaloneMaterial ? [standaloneMaterial] : allMaterials.filter((item) => item.examId === activeExamId)
+    .sort((a, b) => (a.sortIndex ?? a.addedAt) - (b.sortIndex ?? b.addedAt)), [allMaterials, activeExamId, standaloneMaterial]);
   const pdfIdentity = useCallback((material: ExamMaterialLink) => `${user.uid}:${material.id}:${material.fileHash || ''}:${material.cloudSessionId || ''}`, [user.uid]);
   const textsByMaterial = useMemo(() => Object.fromEntries(materials.flatMap(material => {
     const pages = textsByIdentity[pdfIdentity(material)];
@@ -112,17 +115,22 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
   const activeExam = exams.find((exam) => exam.id === activeExamId);
   const activeMaterial = materials.find((item) => item.id === materialId) ?? materials[0] ?? null;
 
+  const refreshSerial = useRef(0);
   const refresh = useCallback(async () => {
+    if (standaloneMaterial) { setLoading(false); setLoadError(''); return; }
+    const serial = ++refreshSerial.current;
     setLoading(true); setLoadError('');
     try {
       const [nextExams, nextMaterials] = await Promise.all([listExams(user), listExamMaterialLinks(user)]);
+      if (refreshSerial.current !== serial) return;
       setExams(nextExams); setAllMaterials(nextMaterials);
       if ((!activeExamId || !nextExams.some((exam) => exam.id === activeExamId)) && nextExams[0]) onActiveExamIdChange(nextExams[0].id);
     } catch (error) {
+      if (refreshSerial.current !== serial) return;
       setLoadError(error instanceof Error ? error.message : text('考试资料暂时没能加载，请重试。', 'Could not load exam materials. Please retry.'));
-    } finally { setLoading(false); }
-  }, [user, activeExamId, onActiveExamIdChange, text]);
-  useEffect(() => { void refresh(); }, [refresh]);
+    } finally { if (refreshSerial.current === serial) setLoading(false); }
+  }, [user, activeExamId, onActiveExamIdChange, standaloneMaterial, text]);
+  useEffect(() => { void refresh(); return () => { refreshSerial.current += 1; }; }, [refresh]);
 
   useEffect(() => {
     setPreviewOpen(false); setCombinedActive(false); setCombining(false); setCombinedIds([]); setMode('round'); setHistoricalContext(null); setKnowledgeError('');
@@ -176,10 +184,18 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
   const atomCount = lectureKcs.reduce((sum, kc) => sum + (kc.atoms?.length ?? 0), 0);
   const knowledgeBusy = props.workspaceLsapGenerating || props.workspaceAtomsGenerating;
   const knowledgeProgress = props.workspaceLsapProgress || props.workspaceAtomsProgress;
+  const knowledgePrepared = isLectureKnowledgePrepared(lectureKcs);
+  const preparationLabel = props.workspaceAtomsGenerating
+    ? text('正在补充细节与原文依据…', 'Adding details and source references…')
+    : text('正在整理知识点…', 'Extracting knowledge points…');
+  const extractionLabel = knowledgeBusy ? preparationLabel : knowledgePrepared
+    ? text('重新提取知识点', 'Extract knowledge points again')
+    : lectureKcs.length ? text('继续提取知识点', 'Continue extracting knowledge points')
+    : text('提取知识点', 'Extract knowledge points');
   const lecturePages = activeMaterial ? textsByMaterial[activeMaterial.id] ?? [] : [];
   const pageCount = lecturePages.length;
   const themes = useThemePlan(storageKey, activeMaterial, lectureKcs, lecturePages, language,
-    !knowledgeBusy && atomCount > 0 && pageCount > 0);
+    !knowledgeBusy && atomCount > 0 && pageCount > 0, !standaloneMaterial);
   const legacyBlocks = useMemo(() => activeMaterial ? buildStudyBlocks(activeMaterial, pageCount,
     lectureKcs, language) : [], [activeMaterial, pageCount, lectureKcs, language]);
   const blocks = useMemo(() => activeMaterial && themes.plan
@@ -201,10 +217,10 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
   })), [records.rounds, blocks, legacyBlocks, textsByMaterial, language]);
   const mappedPages = new Set(blocks.flatMap(block => block.pages));
   const unassignedPages = Array.from({ length: pageCount }, (_, index) => index + 1).filter(page => !mappedPages.has(page));
-  const prepareKnowledge = async (stage: PrepareLectureKnowledgeOptions['stage']) => {
+  const prepareKnowledge = async (restart = false) => {
     if (!activeMaterial || !pageCount || knowledgeBusy) return;
     setKnowledgeError(''); setMode('knowledge'); setHistoricalContext(null);
-    try { await props.onPrepareLectureKnowledge({ materialId: activeMaterial.id, pageTexts: textsByMaterial[activeMaterial.id], stage }); }
+    try { await props.onPrepareLectureKnowledge({ materialId: activeMaterial.id, pageTexts: textsByMaterial[activeMaterial.id], restart }); }
     catch (error) { setKnowledgeError(error instanceof Error ? error.message : text('提取没有完成，原有清单已保留。', 'Extraction did not finish. Your previous map is retained.')); }
   };
 
@@ -303,10 +319,11 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
     <div className="round-workspace">
       <header className="round-workspace-header">
         <button type="button" className="round-shell-button round-shell-quiet" onClick={onBack}><ArrowLeft size={17} />{text('返回学习', 'Back to study')}</button>
-        <div className="round-workspace-brand"><GraduationCap size={25} /><div><h1>{text('备考工作台', 'Exam workspace')}</h1><p>{text('每次练一小块，把答案自己讲完整。', 'One small block. One complete answer of your own.')}</p></div></div>
+        <div className="round-workspace-brand"><GraduationCap size={25} /><div><h1>{text('复习工作台', 'Review workspace')}</h1><p>{standaloneMaterial ? text('复习一讲 · 每次练一小块', 'Lecture review · One small block at a time') : text('准备考试 · 按讲义与主题复习', 'Exam preparation · Review by lecture and theme')}</p></div></div>
         <div className="round-workspace-header-actions">
           <button className="round-shell-button round-shell-quiet" type="button" onClick={() => { if (neutralScope) persistExposure(records.rounds.flatMap(round => round.blueprint.scope.materials), 'feedback'); setHistoryOpen(true); }}><History size={16} />{text('复习记录', 'Records')}</button>
-          <button className="round-shell-button" type="button" onClick={onOpenExamHub}>{text('管理考试与资料', 'Manage exams & materials')}</button>
+          <button className="round-shell-button" type="button" disabled={knowledgeBusy || themes.busy} onClick={props.onChooseReviewScope}>{text('切换复习方式', 'Choose review mode')}</button>
+          {!standaloneMaterial && <button className="round-shell-button" type="button" disabled={knowledgeBusy} onClick={onOpenExamHub}>{text('管理考试与资料', 'Manage exams & materials')}</button>}
         </div>
       </header>
       {loadError && <div className="round-shell-error" role="alert">{loadError}<button onClick={() => void refresh()}>{text('重试', 'Retry')}</button></div>}
@@ -314,14 +331,14 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
       <div className="round-workspace-body">
         <aside className={`round-workspace-sidebar ${mobileBlocksOpen ? 'is-open' : ''}`}>
           <div className="round-sidebar-mobile-heading"><strong>{text('选择复习块', 'Choose a block')}</strong><button aria-label={text('关闭', 'Close')} onClick={() => setMobileBlocksOpen(false)}><X size={20} /></button></div>
-          <label className="round-shell-label">{text('这次准备哪场考试', 'Exam')}<select disabled={knowledgeBusy} aria-label={text('选择考试', 'Select exam')} value={activeExamId ?? ''} onChange={(event) => onActiveExamIdChange(event.target.value)}>
+          {!standaloneMaterial && <label className="round-shell-label">{text('这次准备哪场考试', 'Exam')}<select disabled={knowledgeBusy} aria-label={text('选择考试', 'Select exam')} value={activeExamId ?? ''} onChange={(event) => onActiveExamIdChange(event.target.value)}>
             <option value="" disabled>{loading ? text('正在加载…', 'Loading…') : text('选择考试', 'Select exam')}</option>
             {exams.map((exam, index) => <option key={exam.id} value={exam.id}>{neutralScope ? text(`考试 ${index + 1}`, `Exam ${index + 1}`) : exam.title}</option>)}
-          </select></label>
-          <label className="round-shell-label">{text('当前讲义', 'Lecture')}<select disabled={knowledgeBusy} aria-label={text('选择讲义', 'Select lecture')} value={activeMaterial?.id ?? ''} onChange={(event) => { setMaterialId(event.target.value); setBlockId(''); setKnowledgeError(''); setMode('round'); setHistoricalContext(null); setCombinedIds([]); setCombinedActive(false); setCombining(false); setPreviewOpen(false); }}>
+          </select></label>}
+          {standaloneMaterial ? <div className="round-lecture-selection"><span>{text('当前讲义', 'Current lecture')}</span><strong>{neutralScope ? text('本讲讲义', 'Current lecture') : standaloneMaterial.fileName}</strong><button type="button" className="round-shell-button" disabled={knowledgeBusy || themes.busy} onClick={props.onChooseLecture}>{text('换一份讲义', 'Choose another lecture')}</button></div> : <label className="round-shell-label">{text('当前讲义', 'Lecture')}<select disabled={knowledgeBusy} aria-label={text('选择讲义', 'Select lecture')} value={activeMaterial?.id ?? ''} onChange={(event) => { setMaterialId(event.target.value); setBlockId(''); setKnowledgeError(''); setMode('round'); setHistoricalContext(null); setCombinedIds([]); setCombinedActive(false); setCombining(false); setPreviewOpen(false); }}>
             <option value="" disabled>{text('选择 PDF', 'Select PDF')}</option>
             {materials.map((material, index) => <option key={material.id} value={material.id}>{neutralScope ? text(`讲义 ${index + 1}`, `Lecture ${index + 1}`) : material.fileName}</option>)}
-          </select></label>
+          </select></label>}
           <div className="round-sidebar-heading"><span>{text('按主题复习', 'Review by theme')}</span><span>{themes.plan ? text(`${blocks.length} 个主题`, `${blocks.length} themes`) : '—'}</span></div>
           <p className="round-sidebar-note">{text('把相关知识点放在一起，一轮从主题里选几个要点来练。', 'Related concepts together. Each round checks a few points within one theme.')}</p>
           {neutralScope && <div className="round-scope-privacy-note"><p>{hideThemeNames ? text('作答时先收起主题名称，避免提前给出线索。仍可按编号或页码换块。', 'Theme names are tucked away while answering. You can still switch by number or page.') : text('已查看主题名称，相关页面会保留帮助记录。', 'Theme names were viewed; help is recorded for their source pages.')}</p><button type="button" className="round-shell-button" aria-expanded={!hideThemeNames} onClick={() => hideThemeNames ? revealThemeNames() : setRevealedThemeNamesFor('')}>{hideThemeNames ? text('查看主题名称（记帮助）', 'Show theme names (records help)') : text('收起主题名称', 'Hide theme names')}</button></div>}
@@ -360,17 +377,32 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
             <div className="round-workspace-tabs" role="tablist" aria-label={text('工作台用途', 'Workspace activity')}>
               <button type="button" role="tab" aria-selected={mode === 'knowledge'} onClick={() => setMode('knowledge')} className={mode === 'knowledge' ? 'is-active' : ''}><Layers3 size={16} />{text('知识清单', 'Knowledge map')}</button>
               <button type="button" role="tab" aria-selected={mode === 'round'} onClick={() => setMode('round')} className={mode === 'round' ? 'is-active' : ''}><BookOpen size={16} />{text('主题复习', 'Theme practice')}</button>
-              <button type="button" role="tab" aria-selected={mode === 'global'} onClick={() => { recordWholeChatExposure(); setMode('global'); setPreviewOpen(false); }} className={mode === 'global' ? 'is-active' : ''}><MessageCircle size={16} />{text('整场材料对话', 'All-material chat')}</button>
+              <button type="button" role="tab" aria-selected={mode === 'global'} onClick={() => { recordWholeChatExposure(); setMode('global'); setPreviewOpen(false); }} className={mode === 'global' ? 'is-active' : ''}><MessageCircle size={16} />{standaloneMaterial ? text('本讲对话', 'Lecture chat') : text('整场材料对话', 'All-material chat')}</button>
             </div>
             <button type="button" className="round-shell-button round-shell-quiet" disabled={!activeMaterial} onClick={() => {
               if (previewOpen) { setPreviewOpen(false); return; }
               if (activeMaterial) openOutsideSource(activeMaterial.id, activeBlock?.pages[0] ?? 1);
             }}><FileText size={16} />{previewOpen ? text('收起原文', 'Close source') : text('查看原文', 'View source')}</button>
           </div>
-          {activeMaterial && (mode === 'knowledge' || !atomCount || knowledgeBusy) && <section className="knowledge-structure-bar" aria-label={text('知识提取步骤', 'Knowledge preparation')}>
-            <div className="knowledge-steps"><span data-ready={lectureKcs.length > 0}><b>1</b>{text('提取 KC', 'Extract KCs')}<small>{lectureKcs.length || '—'}</small></span><ChevronRight size={14} /><span data-ready={atomCount > 0}><b>2</b>{text('逻辑原子', 'Logic atoms')}<small>{atomCount || '—'}</small></span><ChevronRight size={14} /><span data-ready={blocks.length > 0}><b>3</b>{text('按主题复习', 'Review by theme')}</span></div>
-            <div className="knowledge-prepare-actions"><button type="button" className="round-shell-button" disabled={knowledgeBusy || !pageCount} onClick={() => void prepareKnowledge('kc')}>{props.workspaceLsapGenerating ? <Loader2 className="animate-spin" size={15} /> : <RefreshCw size={15} />}{lectureKcs.length ? text('重新提取 KC', 'Extract KCs again') : text('提取本讲义 KC', 'Extract lecture KCs')}</button><button type="button" className="round-shell-button round-shell-primary" disabled={knowledgeBusy || !lectureKcs.length || !pageCount} onClick={() => void prepareKnowledge('atoms')}>{props.workspaceAtomsGenerating ? <Loader2 className="animate-spin" size={15} /> : <Layers3 size={15} />}{atomCount ? text('补全逻辑原子与页码', 'Complete atoms & pages') : text('提取逻辑原子', 'Extract logic atoms')}</button>{atomCount > 0 && <button type="button" className="round-shell-button" disabled={knowledgeBusy || themes.busy} onClick={themes.regenerate}><RefreshCw size={15} />{themes.busy ? text('正在整理主题…', 'Organizing themes…') : text('重新整理主题', 'Regroup themes')}</button>}</div>
-            {knowledgeBusy ? <p role="status">{text('正在从原文整理', 'Reading the source')} {knowledgeProgress ? `${knowledgeProgress.current}/${knowledgeProgress.total} · ${knowledgeProgress.fileName}` : '…'}</p> : <p>{text('提取只处理当前讲义；重新提取会替换其知识清单，既有作答与旧 BKT 记录保留。', 'Extraction only changes this lecture’s map. Existing answers and earlier BKT records are retained.')}</p>}
+          {activeMaterial && (mode === 'knowledge' || !knowledgePrepared || knowledgeBusy) && <section className="knowledge-structure-bar" aria-label={text('知识提取步骤', 'Knowledge preparation')}>
+            <div className="knowledge-steps">
+              <span data-ready={knowledgePrepared}><b>1</b>{text('提取知识点', 'Extract knowledge points')}<small>{lectureKcs.length || '—'}</small></span>
+              <ChevronRight size={14} /><span data-ready={blocks.length > 0}><b>2</b>{text('按主题复习', 'Review by theme')}</span>
+            </div>
+            <div className="knowledge-prepare-actions">
+              <button type="button" className="round-shell-button round-shell-primary" disabled={knowledgeBusy || !pageCount} onClick={() => void prepareKnowledge(knowledgePrepared)}>
+                {knowledgeBusy ? <Loader2 className="animate-spin" size={15} /> : <Layers3 size={15} />}{extractionLabel}
+              </button>
+              {atomCount > 0 && <button type="button" className="round-shell-button" disabled={knowledgeBusy || themes.busy} onClick={themes.regenerate}><RefreshCw size={15} />{themes.busy ? text('正在整理主题…', 'Organizing themes…') : text('重新整理主题', 'Regroup themes')}</button>}
+            </div>
+            {knowledgeBusy
+              ? <p role="status">{preparationLabel} {knowledgeProgress ? `${knowledgeProgress.current}/${knowledgeProgress.total} · ${knowledgeProgress.fileName}` : ''}</p>
+              : <p>{knowledgePrepared
+                ? text('知识点已提取，可查看清单与原文依据。重新提取会更新本讲清单，已有作答记录会保留。', 'Knowledge points extracted. Review the list and sources. Extracting again updates this lecture’s map and retains your answers.')
+                : lectureKcs.length
+                  ? text('已有知识点已保留，继续提取会补充细节与原文依据。', 'Your knowledge points are saved. Continue to add details and source references.')
+                  : text('整理本讲知识点及原文依据，已有作答记录会保留。', 'Extract knowledge points and source references for this lecture. Existing answers are retained.')}</p>}
+
           </section>}
           {knowledgeError && <div className="round-shell-error" role="alert">{knowledgeError}</div>}
           {themes.error && <div className="round-shell-error" role="alert">{themes.error}<button type="button" disabled={themes.busy} onClick={themes.regenerate}>{text('重试分组', 'Retry grouping')}</button></div>}
@@ -378,21 +410,21 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
           {mode === 'round' && context && (themes.plan || historicalContext) && context.pages.some(page => !page.text.trim()) && <p className="round-source-coverage-note">{text('部分页面没有可读取文字，图像中的内容尚未纳入出题；可在原文中查看。', 'Some pages have no readable text. Image content is not covered; open the source to inspect it.')}</p>}
           <div className="round-workspace-stage">
             <div ref={contentRef} className="round-workspace-content">
-              {loading && !exams.length ? <div className="round-shell-empty"><Loader2 className="animate-spin" />{text('正在打开备考工作台…', 'Opening your workspace…')}</div>
+              {loading && !exams.length ? <div className="round-shell-empty"><Loader2 className="animate-spin" />{text('正在打开复习工作台…', 'Opening your workspace…')}</div>
                 : !activeExamId || !materials.length ? <div className="round-shell-empty"><BookOpen size={40} /><h2>{text('先选一份要复习的讲义', 'Choose a lecture to review')}</h2><p>{text('在考试中心关联 PDF，回来就能按小块开始。无需先准备样题，也无需先生成整场题库。', 'Link a PDF in the exam center and return to start with one small block. No sample exam or full question bank needed.')}</p><button className="round-shell-button round-shell-primary" onClick={onOpenExamHub}>{text('关联考试资料', 'Link exam materials')}<ArrowRight size={17} /></button></div>
                 : pdfError ? <div className="round-shell-empty" role="alert"><FileText size={36} /><p>{pdfError}</p><button className="round-shell-button" onClick={() => setPdfRetry((n) => n + 1)}><RefreshCw size={16} />{text('重新读取', 'Try again')}</button></div>
-                : mode === 'global' && activeExam ? <div className="round-global-container"><p className="round-global-note">{text('这里可以讨论全部考试资料；对话不会自动计为短轮的独立验证。', 'Discuss all exam materials here. This conversation is not automatically counted as independent round evidence.')}</p><ExamWorkspaceGlobalChat key={`${user.uid}:${activeExamId}`} user={user} examId={activeExamId} examTitle={activeExam.title} materials={materials} workspaceKey={workspaceLsapKey} contentMap={workspaceLsapContentMap} knowledgeBlocks={globalBlocks} resolveExamMaterialPdf={resolveExamMaterialPdf} onOpenMaterialPage={(id, page, options) => openOutsideSource(id, page, options?.quote)} onHandoffToKnowledgeBlock={(id) => { selectBlock(id); setMode('round'); }} /></div>
+                : mode === 'global' && (activeExam || standaloneMaterial) ? <div className="round-global-container"><p className="round-global-note">{standaloneMaterial ? text('围绕这一讲提问；对话不会自动计为独立作答。', 'Ask about this lecture. Chat is not counted as independent practice.') : text('这里可以讨论全部考试资料；对话不会自动计为短轮的独立验证。', 'Discuss all exam materials here. This conversation is not automatically counted as independent round evidence.')}</p><ExamWorkspaceGlobalChat key={`${user.uid}:${activeExamId}`} user={user} examId={activeExamId} examTitle={standaloneMaterial?.fileName ?? activeExam?.title ?? ''} singleLecture={!!standaloneMaterial} materials={materials} workspaceKey={workspaceLsapKey} contentMap={workspaceLsapContentMap} knowledgeBlocks={globalBlocks} resolveExamMaterialPdf={resolveExamMaterialPdf} onOpenMaterialPage={(id, page, options) => openOutsideSource(id, page, options?.quote)} onHandoffToKnowledgeBlock={(id) => { selectBlock(id); setMode('round'); }} /></div>
                 : mode === 'knowledge' || !lectureKcs.length ? <>
                   {lectureKcs.length > 0 ? <KnowledgeChecklist kcs={lectureKcs} targets={allLectureTargets} rounds={records.rounds} pageCount={pageCount} language={language} legacyCoverage={props.workspaceAtomCoverage}
                     onOpenPage={(page, quote) => { if (activeMaterial) openOutsideSource(activeMaterial.id, page, quote); }}
                     onReveal={(kc) => { if (activeMaterial) { const pages = [...new Set([...(kc.sourcePages ?? []), ...(kc.anchorPages ?? []), ...(kc.atoms ?? []).flatMap(atom => atom.sourcePages ?? [])])]; persistExposure([{ materialId: activeMaterial.id, pages, ...(pages.length ? {} : { allPages: true as const }) }], 'explanation'); } }}
                     onPractice={(kcId) => { const target = blocks.find(block => block.kcs.some(kc => kc.id === kcId)); if (target) { selectBlock(target.id); setMode('round'); } }} />
-                    : <div className="round-shell-empty"><Layers3 size={38} /><h2>{text('先提取这份讲义的知识点', 'Start with this lecture’s knowledge map')}</h2><p>{text('先整理 KC，再拆成有原文依据的逻辑原子。复习块、题目和作答记录都会围绕同一份清单展开。', 'Extract KCs, then their source-backed logic atoms. Blocks, questions and answer records will share this map.')}</p><button type="button" className="round-shell-button round-shell-primary" disabled={!pageCount || knowledgeBusy} onClick={() => void prepareKnowledge('kc')}>{text('提取本讲义 KC', 'Extract lecture KCs')}<ArrowRight size={16} /></button></div>}
-                  {lectureKcs.length > 0 && unassignedPages.length > 0 && <details className="knowledge-unmapped"><summary>{text(`${unassignedPages.length} 页尚未对应到 KC`, `${unassignedPages.length} pages are not mapped to a KC`)}</summary><p>{text('可能是封面、参考资料，也可能有遗漏。可以打开核对；这些页不会被默认为已经复习。', 'These may be cover or reference pages, or missing points. Inspect them here; they are not counted as reviewed.')}</p><div className="knowledge-page-links">{unassignedPages.map(page => <button key={page} type="button" onClick={() => { if (activeMaterial) openOutsideSource(activeMaterial.id, page); }}>{text(`第 ${page} 页`, `p. ${page}`)}</button>)}</div></details>}
+                    : <div className="round-shell-empty"><Layers3 size={38} /><h2>{text('先提取这份讲义的知识点', 'Start with this lecture’s knowledge map')}</h2><p>{text('一次点击，整理本讲知识点、具体要点和原文依据。后续复习与作答会对应到这份清单。', 'One click prepares this lecture’s knowledge points, details and source references. Review and answers link back to this list.')}</p><button type="button" className="round-shell-button round-shell-primary" disabled={!pageCount || knowledgeBusy} onClick={() => void prepareKnowledge()}>{extractionLabel}<ArrowRight size={16} /></button></div>}
+                  {lectureKcs.length > 0 && unassignedPages.length > 0 && <details className="knowledge-unmapped"><summary>{text(`${unassignedPages.length} 页尚未对应到知识点`, `${unassignedPages.length} pages are not mapped to a knowledge point`)}</summary><p>{text('可能是封面、参考资料，也可能有遗漏。可以打开核对；这些页不会被默认为已经复习。', 'These may be cover or reference pages, or missing points. Inspect them here; they are not counted as reviewed.')}</p><div className="knowledge-page-links">{unassignedPages.map(page => <button key={page} type="button" onClick={() => { if (activeMaterial) openOutsideSource(activeMaterial.id, page); }}>{text(`第 ${page} 页`, `p. ${page}`)}</button>)}</div></details>}
                 </>
                 : !themes.plan && atomCount > 0 && !historicalContext ? <div className="round-shell-empty round-theme-loading">{themes.busy || pdfLoading ? <Loader2 className="animate-spin" size={30} /> : <Layers3 size={34} />}<h2>{pdfLoading ? text('正在读取讲义…', 'Reading the lecture…') : themes.busy ? text('把相关知识点放到一起', 'Bringing related concepts together') : text('主题还没整理好', 'Themes are not ready yet')}</h2><p>{text('根据讲义内容整理几个复习主题，保留每个知识点和原文位置。', 'Organizing review themes from the lecture while keeping every concept and its source pages.')}</p>{!themes.busy && !pdfLoading && <button type="button" className="round-shell-button round-shell-primary" onClick={themes.regenerate}>{text('整理主题', 'Organize themes')}</button>}<button type="button" className="round-shell-button" onClick={() => setMode('knowledge')}>{text('先看完整知识清单', 'View the full knowledge map')}</button></div>
                 : context ? <><StudyRoundPanel key={`${storageKey}:${context.scope.id}`} context={context} storageKey={storageKey} language={language} onOpenSource={openCitation} onRecordChange={onRecordChange} onStoreChange={onStoreChange} memoryStore={recordsKey === storageKey ? records : undefined} storeChangedToken={storeChangedToken} onIndependentStart={closeForIndependent} onNextBlock={!historicalContext && !combinedActive && activeBlock && blocks.indexOf(activeBlock) < blocks.length - 1 ? nextBlock : undefined} /></>
-                : <div className="round-shell-empty">{pdfLoading ? <Loader2 className="animate-spin" size={28} /> : <FileText size={36} />}<p>{contextResult.error || text('请先提取逻辑原子并补全其原文页码。', 'Extract the logic atoms and their source pages first.')}</p>{activeMaterial && <button className="round-shell-button round-shell-primary" disabled={knowledgeBusy || !lectureKcs.length || !pageCount} onClick={() => void prepareKnowledge('atoms')}>{text('提取或补全逻辑原子', 'Extract or complete logic atoms')}</button>}{contextResult.error && activeMaterial && !!activeBlock?.pages.length && <button className="round-shell-button" onClick={() => openOutsideSource(activeMaterial.id, activeBlock?.pages[0] ?? 1)}>{text('先看原页', 'View the original pages')}</button>}</div>}
+                : <div className="round-shell-empty">{pdfLoading ? <Loader2 className="animate-spin" size={28} /> : <FileText size={36} />}<p>{contextResult.error || text('请先整理知识点及其原文依据。', 'Prepare the knowledge points and source references first.')}</p>{activeMaterial && <button className="round-shell-button round-shell-primary" disabled={knowledgeBusy || !pageCount} onClick={() => void prepareKnowledge()}>{text('继续提取知识点', 'Continue extracting knowledge points')}</button>}{contextResult.error && activeMaterial && !!activeBlock?.pages.length && <button className="round-shell-button" onClick={() => openOutsideSource(activeMaterial.id, activeBlock?.pages[0] ?? 1)}>{text('先看原页', 'View the original pages')}</button>}</div>}
             </div>
             {previewOpen && <aside className="round-source-panel" aria-label={text('原文预览', 'Source preview')}>
               <div className="round-source-heading"><div><strong>{text('讲义原文', 'Original source')}</strong><small>{text('返回后保留答案；查看原文会记录为帮助。', 'Your answer is retained. Viewing a source counts as help.')}</small></div><button type="button" aria-label={text('关闭原文，回到原题', 'Close source and return to the question')} onClick={() => setPreviewOpen(false)}><X size={20} /></button></div>

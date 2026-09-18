@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
-import type { User } from 'firebase/auth';
+import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import type { CloudSession, Exam, ExamMaterialLink, FileHistoryItem } from '@/types';
 import {
   createExam,

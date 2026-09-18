@@ -409,7 +409,6 @@ const ENGLISH_UI: Record<string, string> = {
   '考前预测': 'Exam prediction',
   '自由问答': 'Open Q&A',
   '多文档问答': 'Multi-document Q&A',
-  '展开讲讲': 'Explain further',
   '本次学习': 'This study session',
   '本次学习小结': 'Study-session summary',
   '这次记录到的现象': 'What was observed this time',

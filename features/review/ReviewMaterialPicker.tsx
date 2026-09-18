@@ -4,7 +4,8 @@ import type { CloudSession } from '@/types';
 import { getFolderPath } from '@/shared/layout/libraryFolders';
 
 export function ReviewMaterialPicker({ sessions, loading, error, signedIn, toolLabel, hasCurrentDoc, currentDocName, currentSessionId,
-  selectedIds, useCurrentDoc, onToggleFile, onToggleCurrent, onBack, onStart, onRetry, onLogin, onLibrary }: {
+  selectedIds, useCurrentDoc, onToggleFile, onToggleCurrent, onBack, onStart, onRetry, onLogin, onLibrary, singleSelection = false }: {
+  singleSelection?: boolean;
   sessions: CloudSession[]; loading: boolean; error: string; signedIn: boolean; toolLabel: string;
   hasCurrentDoc: boolean; currentDocName: string | null; currentSessionId?: string | null;
   selectedIds: Set<string>; useCurrentDoc: boolean;
@@ -33,8 +34,8 @@ export function ReviewMaterialPicker({ sessions, loading, error, signedIn, toolL
   const folderCount = (folder: CloudSession) => files.filter(f => getFolderPath(f.parentId, folders).some(p => p.id === folder.id)).length;
   const filePath = (file: CloudSession) => getFolderPath(file.parentId, folders).map(name).join(' / ') || '其他';
   return <section className="review-picker">
-    <button type="button" onClick={onBack} className="review-back"><ChevronLeft size={16} />换一个工具</button>
-    <div className="review-intro"><span className="review-eyebrow">{toolLabel} · 选择资料</span><h2>这次想用哪份资料？</h2><p>打开文件夹，再选择文件。也可以跨文件夹选择多份资料一起使用。</p></div>
+    <button type="button" onClick={onBack} className="review-back"><ChevronLeft size={16} />{singleSelection ? '返回复习工作台' : '换一个工具'}</button>
+    <div className="review-intro"><span className="review-eyebrow">{toolLabel} · 选择资料</span><h2>这次想用哪份资料？</h2><p>{singleSelection ? '打开文件夹，选择一份要复习的 PDF 讲义。' : '打开文件夹，再选择文件。也可以跨文件夹选择多份资料一起使用。'}</p></div>
     <div className="review-picker-toolbar"><label className="review-search"><Search size={18} /><input aria-label="搜索资料或文件夹" placeholder="找一份资料或文件夹" value={query} onChange={e => setQuery(e.target.value)} /></label>{onLibrary && <button type="button" className="review-back" onClick={onLibrary}>去资料库上传 <ArrowRight size={16} /></button>}</div>
     <nav className="review-breadcrumb" aria-label="资料位置"><button type="button" aria-current={atRoot ? 'page' : undefined} onClick={() => navigate({ kind: 'root' })}>全部文件夹</button>{path.map(f => <React.Fragment key={f.id}><ChevronRight size={14} /><button type="button" aria-current={f.id === currentFolder?.id ? 'page' : undefined} onClick={() => navigate({ kind: 'folder', id: f.id })}>{name(f)}</button></React.Fragment>)}{inOther && <><ChevronRight size={14} /><span>其他</span></>}{search && <span className="review-search-note">搜索全部资料</span>}</nav>
     {error && <div role="alert" className="review-notice">{error}<button type="button" onClick={onRetry}>重新读取</button></div>}

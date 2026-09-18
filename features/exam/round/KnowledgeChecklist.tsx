@@ -28,22 +28,22 @@ export function KnowledgeChecklist({ kcs, targets, rounds, pageCount, language, 
     recheck: t('可以间隔复查', 'Ready for a later check'), independent: t('有未借助额外帮助的记录', 'Answer without extra help recorded'), uncertain: t('条件或反馈待核对', 'Conditions or feedback under review'),
   };
   const atomCount = kcs.reduce((sum, kc) => sum + (kc.atoms?.length ?? 0), 0);
-  return <section className="knowledge-checklist" aria-label={t('KC 知识点与逻辑原子', 'Knowledge components and logic atoms')}>
+  return <section className="knowledge-checklist" aria-label={t('知识点与具体要点', 'Knowledge points and details')}>
     <header><div><p className="knowledge-eyebrow">{t('这份讲义的复习清单', 'YOUR LECTURE KNOWLEDGE MAP')}</p><h2>{t('先知道要复习什么', 'See what you will review')}</h2><p>{t('展开知识点，查看组成它的具体要点与原文；每次作答会对应回这里。', 'Expand a knowledge component to see its specific points and sources. Answers are linked back here.')}</p></div><Layers3 size={30} /></header>
-    <div className="knowledge-counts"><span><strong>{kcs.length}</strong> KC</span><span><strong>{atomCount}</strong> {t('个逻辑原子', 'logic atoms')}</span><span><strong>{evidence.filter(row => row.status === 'unchecked').length}</strong> {t('项可检查、尚未作答', 'ready, not checked')}</span></div>
+    <div className="knowledge-counts"><span><strong>{kcs.length}</strong> {t('个知识点', 'knowledge points')}</span><span><strong>{atomCount}</strong> {t('个具体要点', 'supporting points')}</span><span><strong>{evidence.filter(row => row.status === 'unchecked').length}</strong> {t('项可检查、尚未作答', 'ready, not checked')}</span></div>
     <p className="knowledge-help-note">{t('查看知识清单会记为相关内容帮助。旧记录保留，提示条件不明确的题目会标为待核对。', 'Viewing the knowledge map is recorded as related support. Earlier records remain available; unclear cue conditions are marked for review.')}</p>
     <div className="knowledge-kc-list">{kcs.map((kc, index) => {
       const kcPages = pages([...(kc.anchorPages ?? []), ...(kc.sourcePages ?? [])]);
       const localEvidence = evidence.filter(row => row.target.kcId === kc.id);
       const checked = localEvidence.filter(row => row.attempts.length > 0).length;
       return <details className="knowledge-kc" key={kc.id} onToggle={event => { if (event.target === event.currentTarget && event.currentTarget.open) onReveal(kc); }}>
-        <summary><span className="knowledge-kc-index">{String(index + 1).padStart(2, '0')}</span><div><strong>{language === 'zh' ? kc.conceptZh || kc.concept : kc.concept}</strong><span>{kcPages.length ? pageLabel(kcPages, language) : t('原文页码待补全', 'Source pages needed')} · {(kc.atoms ?? []).length} {t('个原子', 'atoms')} · {t(`${checked} 项有作答记录`, `${checked} with answer evidence`)}</span></div><ChevronDown size={17} /></summary>
+        <summary><span className="knowledge-kc-index">{String(index + 1).padStart(2, '0')}</span><div><strong>{language === 'zh' ? kc.conceptZh || kc.concept : kc.concept}</strong><span>{kcPages.length ? pageLabel(kcPages, language) : t('原文页码待补全', 'Source pages needed')} · {(kc.atoms ?? []).length} {t('个具体要点', 'supporting points')} · {t(`${checked} 项有作答记录`, `${checked} with answer evidence`)}</span></div><ChevronDown size={17} /></summary>
         <div className="knowledge-kc-body">
           {language === 'zh' && kc.conceptZh && kc.conceptZh !== kc.concept && <p className="knowledge-original-term">{kc.concept}</p>}
           <p>{language === 'zh' ? kc.definitionZh || kc.definition : kc.definition}</p>
           {kc.reviewFocus && <p className="knowledge-focus">{kc.reviewFocus}</p>}
           <div className="knowledge-page-links">{kcPages.map(page => <button type="button" key={page} onClick={() => onOpenPage(page)}><BookOpen size={13} />{t(`第 ${page} 页`, `p. ${page}`)}</button>)}</div>
-          {!kc.atoms?.length && <p className="knowledge-pending">{t('还没有可核对的逻辑原子。可以提取要点；材料没有写的内容会留空，不会凑数。', 'No source-backed atoms yet. Extract the points; unsupported content stays empty.')}</p>}
+          {!kc.atoms?.length && <p className="knowledge-pending">{t('暂未找到有原文依据的具体要点；材料没有写的内容会留空。', 'No source-backed details available; unsupported content stays empty.')}</p>}
           <ol className="knowledge-atoms">{(kc.atoms ?? []).map(atom => {
             const row = localEvidence.find(item => item.target.atomId === atom.id);
             const atomPages = pages(atom.sourcePages);
@@ -68,7 +68,7 @@ export function KnowledgeChecklist({ kcs, targets, rounds, pageCount, language, 
               })}</details>}
             </li>;
           })}</ol>
-          <button type="button" className="round-shell-button round-shell-primary" onClick={() => onPractice(kc.id)}>{t('复习这个知识点所在的块', 'Practice the block containing this KC')}<ArrowRight size={15} /></button>
+          <button type="button" className="round-shell-button round-shell-primary" onClick={() => onPractice(kc.id)}>{t('复习这个知识点所在的块', 'Practice the block containing this knowledge point')}<ArrowRight size={15} /></button>
         </div>
       </details>;
     })}</div>

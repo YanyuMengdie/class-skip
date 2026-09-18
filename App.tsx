@@ -22,7 +22,6 @@ import { GalgameOverlay } from '@/components/GalgameOverlay';
 import { GalgameSettings } from '@/components/GalgameSettings'; 
 import { WelcomeScreen } from '@/shared/layout/WelcomeScreen';
 import { DashboardScreen } from '@/shared/layout/DashboardScreen';
-import { SideQuestPanel } from '@/features/reader/side-quest/SideQuestPanel';
 import { QuizReviewPanel } from '@/features/review/tools/QuizReviewPanel';
 import { FlashCardReviewPanel } from '@/features/review/tools/FlashCardReviewPanel';
 import { PageMarkPanel } from '@/features/reader/marks/PageMarkPanel';
@@ -46,9 +45,11 @@ import { TurtleSoupPanel } from '@/features/turtleSoup/TurtleSoupPanel';
 import { ExamPredictionPanel } from '@/features/exam/ExamPredictionPanel';
 import { ExamHubModal } from '@/features/exam/ExamHubModal';
 import { ExamWorkspacePage } from '@/features/exam/workspace/ExamWorkspacePage';
+import { ReviewWorkspaceEntry } from '@/features/exam/workspace/ReviewWorkspaceEntry';
+import { createLectureReviewMaterial } from '@/features/exam/lib/lectureReviewScope';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from '@/lib/pdf/pdfUtils';
 import { buildArtifactSourceLabel } from '@/shared/lib/artifactSourceLabel';
-import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, runSideQuestAgent, organizeLectureFromTranscript, organizeLectureWithEvidence, generateLSAPContentMap, generateLogicAtomsForContentMap, generateProfileNotebookUpdateSuggestion, translateLectureTranscriptSegment, type SlideExplanationMode } from '@/services/geminiService';
+import { generateSlideExplanation, chatWithSlide, performPreFlightDiagnosis, classifyDocument, generatePersonaStoryScript, organizeLectureFromTranscript, organizeLectureWithEvidence, generateLSAPContentMap, generateLogicAtomsForContentMap, generateProfileNotebookUpdateSuggestion, translateLectureTranscriptSegment, type SlideExplanationMode } from '@/services/geminiService';
 import { pauseRecording, resumeRecording, startRecording, stopRecording, isLectureRecordingSupported } from '@/services/transcriptionService';
 import {
   retryElevenLabsRealtimeTranscription,
@@ -62,8 +63,9 @@ import {
 } from '@/services/elevenLabsTranscriptionService';
 import { storageService } from '@/services/storageService';
 import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, deleteSkimSessionFromCloud, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud, deleteTutorSessionFromCloud } from '@/services/firebase';
-import { onAuthStateChanged, User } from 'firebase/auth';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, SideQuestState, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, LectureAudioRecording, LectureRealtimeLine, LectureRealtimeStatus, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, TutorSession, SkimContentType, SkimAuxiliaryMaterial, SkimReadingRoute, SkimStudyStyle, SkimExplanationDepth, SkimRecordDeck, SkimRecordCardState, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession, LectureCaseLearningState } from '@/types';
+import { onAuthStateChanged } from 'firebase/auth';
+import { LOCAL_WORKSPACE_USER, isLocalUser, isCloudUser, type WorkspaceUser as User } from '@/services/workspaceUser';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, LectureAudioRecording, LectureRealtimeLine, LectureRealtimeStatus, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, TutorSession, SkimContentType, SkimAuxiliaryMaterial, SkimReadingRoute, SkimStudyStyle, SkimExplanationDepth, SkimRecordDeck, SkimRecordCardState, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession, LectureCaseLearningState } from '@/types';
 import {
   appendLocalPendingSuggestion,
   appendLocalWitnessSession,
@@ -91,7 +93,7 @@ import { filterEvidenceAnnotationsForMap } from '@/features/exam/lib/examLearnin
 import { getActiveIndexAfterDeletion, getNextDefaultSessionSequence } from '@/features/reader/sessionTabs';
 import { computePredictedScore } from '@/features/exam/lib/lsapScore';
 import { normalizeTermKey } from '@/lib/text/extractBoldTermsFromMarkdown';
-import { Sparkles, X, ChevronDown, Loader2, Wand2, Plus, MessageCircle, MoreHorizontal, Pencil, Trash2, PanelRightClose, PanelRightOpen, Mic, Pause, Play, BookOpen, Info } from 'lucide-react';
+import { X, ChevronDown, Loader2, Wand2, Plus, MessageCircle, MoreHorizontal, Pencil, Trash2, PanelRightClose, PanelRightOpen, Mic, Pause, Play, BookOpen, Info } from 'lucide-react';
 import { useAppLanguage, getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
 import { getCloudAppPreferences, saveCloudAppPreferences } from '@/services/appPreferencesService';
 import type { AppLanguage, AppPreferences } from '@/types';
@@ -726,9 +728,13 @@ const App: React.FC = () => {
   const [restoreHash, setRestoreHash] = useState<string | null>(null);
 
   // --- NEW: CLOUD STATES ---
-  const [user, setUser] = useState<User | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [useLocalWorkspace, setUseLocalWorkspace] = useState(() => localStorage.getItem('classskip_workspace_location') === 'local');
+  useEffect(() => { localStorage.setItem('classskip_workspace_location', useLocalWorkspace ? 'local' : 'cloud'); }, [useLocalWorkspace]);
+  const user: User = useLocalWorkspace ? LOCAL_WORKSPACE_USER : authUser ?? LOCAL_WORKSPACE_USER;
   const [authLoading, setAuthLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [storageError, setStorageError] = useState('');
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [studyCloudSessions, setStudyCloudSessions] = useState<CloudSession[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -785,10 +791,6 @@ const App: React.FC = () => {
   // --- 海龟汤 ---
   const [turtleSoupOpen, setTurtleSoupOpen] = useState(false);
   const [turtleSoupState, setTurtleSoupState] = useState<TurtleSoupState | null>(null);
-
-  // --- SIDE QUEST STATE (NEW) ---
-  const [sideQuest, setSideQuest] = useState<SideQuestState>({ isActive: false, anchorText: '', messages: [], isLoading: false });
-  const [triggerPosition, setTriggerPosition] = useState<{ top: number, left: number, text: string } | null>(null);
 
   // --- 复习：Quiz / Flash Card ---
   const [reviewQuizRounds, setReviewQuizRounds] = useState<QuizRound[]>([]);
@@ -859,9 +861,24 @@ const App: React.FC = () => {
   const [examHubInitialTab, setExamHubInitialTab] = useState<'exams' | 'daily' | 'flow'>('exams');
   /** P0：主界面 study vs 全屏备考工作台 */
   const [appMode, setAppMode] = useState<'study' | 'examWorkspace'>('study');
-  const [activeExamId, setActiveExamId] = useState<string | null>(null);
+  const [selectedExamId, setActiveExamId] = useState<string | null>(null);
+  const [reviewWorkspaceMode, setReviewWorkspaceMode] = useState<'home' | 'lecture' | 'exam'>('home');
+  const [reviewEntryPickLecture, setReviewEntryPickLecture] = useState(false);
+  const [lectureReviewMaterial, setLectureReviewMaterial] = useState<ExamMaterialLink | null>(null);
+  const standaloneMaterial = reviewWorkspaceMode === 'lecture' && lectureReviewMaterial?.userId === user?.uid ? lectureReviewMaterial : null;
+  // Existing engine keys accept a review scope. Standalone scopes never create an exam.
+  const activeExamId = reviewWorkspaceMode === 'lecture' ? standaloneMaterial?.examId ?? null : reviewWorkspaceMode === 'exam' ? selectedExamId : null;
+  const currentLectureReviewMaterial = useMemo(() => user && fileName && pdfDataUrl?.startsWith('data:application/pdf')
+    ? createLectureReviewMaterial(user.uid, { cloudSessionId: currentSessionId, fileHash, fileName }) : null,
+  [user?.uid, currentSessionId, fileHash, fileName, pdfDataUrl]);
+  const startLectureReview = (material: ExamMaterialLink) => {
+    setLectureReviewMaterial(material);
+    setReviewWorkspaceMode('lecture');
+    setReviewEntryPickLecture(false);
+    setAppMode('examWorkspace');
+  };
   /** 避免登录后立即用 null 覆盖掉 localStorage 里已存的 activeExamId */
-  const [examWorkspaceStorageReady, setExamWorkspaceStorageReady] = useState(false);
+  const [examWorkspaceStorageReady, setExamWorkspaceStorageReady] = useState<string | null>(null);
   const [lsapContentMap, setLsapContentMap] = useState<LSAPContentMap | null>(null);
   const [lsapState, setLsapState] = useState<LSAPState | null>(null);
   /** M1：备考工作台独立 LSAP（键含 userId+exam+材料，存 localStorage） */
@@ -871,6 +888,7 @@ const App: React.FC = () => {
   const [examWorkspaceMaterials, setExamWorkspaceMaterials] = useState<ExamMaterialLink[]>([]);
   const [workspaceLsapGenerating, setWorkspaceLsapGenerating] = useState(false);
   const workspaceKnowledgeOwnerRef = useRef('');
+  const workspaceKnowledgeInFlightRef = useRef(false);
   workspaceKnowledgeOwnerRef.current = `${user?.uid ?? ''}:${activeExamId ?? ''}`;
   /** P1：按材料逐份生成考点图谱时的进度（与 workspaceLsapGenerating 同时置位） */
   const [workspaceLsapProgress, setWorkspaceLsapProgress] = useState<{
@@ -915,11 +933,12 @@ const App: React.FC = () => {
     workspaceEvidenceAnnotationsRef.current = workspaceEvidenceAnnotations;
   }, [workspaceEvidenceAnnotations]);
   const examWorkspaceMaterialsSorted = useMemo(() => {
+    if (standaloneMaterial) return [standaloneMaterial];
     if (!activeExamId) return [];
     return [...examWorkspaceMaterials]
       .filter((m) => m.examId === activeExamId)
       .sort((a, b) => (a.sortIndex ?? a.addedAt) - (b.sortIndex ?? b.addedAt));
-  }, [activeExamId, examWorkspaceMaterials]);
+  }, [activeExamId, examWorkspaceMaterials, standaloneMaterial]);
   const [multiDocQAPanelOpen, setMultiDocQAPanelOpen] = useState(false);
   const [multiDocQAConversationKey, setMultiDocQAConversationKey] = useState<string | null>(null);
   const multiDocQAInitialMessages = useMemo(() => multiDocQAConversationKey ? loadMultiDocQAMessages(multiDocQAConversationKey) : [], [multiDocQAConversationKey]);
@@ -1028,7 +1047,6 @@ const App: React.FC = () => {
   const pendingNavSegmentRef = useRef<DailySegment | null>(null);
   const applyDailySegRef = useRef<(seg: DailySegment) => void>(() => {});
   const pendingExamPredictionAfterHashRef = useRef<string | null>(null);
-  const selectionTimeoutRef = useRef<number | null>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
   
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
@@ -1047,7 +1065,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     saveLocalProfileNotebook(profileNotebook);
-    if (!user || !profileCloudReadyRef.current) return;
+    if (!isCloudUser(user) || !profileCloudReadyRef.current) return;
     const t = window.setTimeout(() => {
       saveCloudProfileNotebook(user, profileNotebook).catch((e) => console.warn('Profile cloud save failed:', e));
     }, 1200);
@@ -1056,7 +1074,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     profileCloudReadyRef.current = false;
-    if (!user) return;
+    if (!isCloudUser(user)) return;
     let cancelled = false;
     getCloudProfileNotebook(user)
       .then((cloudProfile) => {
@@ -1076,29 +1094,14 @@ const App: React.FC = () => {
     };
   }, [user?.uid]);
 
-  useEffect(() => {
-    if (!user) return;
-    const localSessions = loadLocalWitnessSessions();
-    const localSuggestions = loadLocalPendingSuggestions();
-    if (localSessions.length === 0 && localSuggestions.length === 0) return;
-    Promise.allSettled([
-      ...localSessions.map((session) => saveCloudWitnessSession(user, session)),
-      ...localSuggestions.map((suggestion) => saveCloudPendingSuggestion(user, suggestion)),
-    ]).then((results) => {
-      if (results.some((result) => result.status === 'rejected')) {
-        console.warn('Some local profile artifacts failed to sync.');
-      }
-    });
-  }, [user?.uid]);
-
   /** M1：备考工作台材料；关考试中心后重拉以同步新关联 */
   useEffect(() => {
-    if (appMode !== 'examWorkspace' || !user) {
-      setExamWorkspaceMaterials([]);
-      return;
-    }
-    listExamMaterialLinks(user).then(setExamWorkspaceMaterials).catch(() => setExamWorkspaceMaterials([]));
-  }, [appMode, user, examHubOpen]);
+    if (appMode !== 'examWorkspace' || !user || reviewWorkspaceMode !== 'exam') return;
+    let current = true;
+    listExamMaterialLinks(user).then(items => { if (current) setExamWorkspaceMaterials(items); })
+      .catch(() => { if (current) setExamWorkspaceMaterials([]); });
+    return () => { current = false; };
+  }, [appMode, user, examHubOpen, reviewWorkspaceMode]);
 
   /** M1：本场 LSAP localStorage 恢复（键随考试+材料变） */
   useEffect(() => {
@@ -1258,85 +1261,6 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, [pomodoroPhase, pomodoroSegmentSeconds, pomodoroBreakSeconds]);
 
-  // --- SIDE QUEST SELECTION LISTENER (FIXED) ---
-  useEffect(() => {
-    const handleSelectionChange = () => {
-      // Debounce
-      if (selectionTimeoutRef.current) clearTimeout(selectionTimeoutRef.current);
-
-      selectionTimeoutRef.current = window.setTimeout(() => {
-        const selection = window.getSelection();
-        
-        // 1. Validate Selection
-        if (!selection || selection.isCollapsed || !selection.toString().trim()) {
-          setTriggerPosition(null);
-          return;
-        }
-
-        // 2. Ignore Inputs
-        if (document.activeElement && (['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName))) {
-           setTriggerPosition(null);
-           return;
-        }
-
-        // 3. Calculate Position
-        try {
-          const range = selection.getRangeAt(0);
-          const rect = range.getBoundingClientRect();
-
-          // Safety check for invisible rects
-          if (rect.width === 0 && rect.height === 0) {
-              setTriggerPosition(null);
-              return;
-          }
-
-          // Force position to BOTTOM to avoid conflict with top buttons (e.g. Note taking)
-          setTriggerPosition({
-            top: rect.bottom + 12, 
-            left: rect.left + (rect.width / 2),
-            text: selection.toString().trim()
-          });
-        } catch (e) {
-          setTriggerPosition(null);
-        }
-      }, 150); // 150ms Debounce
-    };
-
-    // 4. Global Click Handler (Click Outside -> Close)
-    const handleGlobalMouseDown = (e: MouseEvent) => {
-        const target = e.target as HTMLElement;
-        const triggerBtn = document.getElementById('side-quest-trigger-btn');
-        
-        // If clicking the button itself, do nothing (let button logic handle it)
-        if (triggerBtn && triggerBtn.contains(target)) {
-            return;
-        }
-
-        // Otherwise (clicking blank space, other elements), hide button
-        setTriggerPosition(null);
-        
-        // Optional: Force clear browser selection to be clean
-        // window.getSelection()?.removeAllRanges(); 
-    };
-
-    // 5. Scroll Handler (Hide on scroll)
-    const handleScroll = () => {
-       // Hide immediately on scroll to prevent floating button from drifting
-       setTriggerPosition(null);
-    };
-
-    document.addEventListener('selectionchange', handleSelectionChange);
-    window.addEventListener('mousedown', handleGlobalMouseDown);
-    window.addEventListener('scroll', handleScroll, true); // Capture phase
-
-    return () => {
-      document.removeEventListener('selectionchange', handleSelectionChange);
-      window.removeEventListener('mousedown', handleGlobalMouseDown);
-      window.removeEventListener('scroll', handleScroll, true);
-      if (selectionTimeoutRef.current) clearTimeout(selectionTimeoutRef.current);
-    };
-  }, []);
-
   // --- 海龟汤：从本地加载 ---
   useEffect(() => {
     const raw = localStorage.getItem('turtleSoupState');
@@ -1375,7 +1299,8 @@ const App: React.FC = () => {
   useEffect(() => {
     storageService.getAllHistory().then(setHistoryItems);
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
+      setAuthUser(currentUser);
+      if (!currentUser) setUseLocalWorkspace(true);
       if (currentUser) {
           console.log("✅ [App] User Authenticated:", currentUser.uid);
           try {
@@ -1408,6 +1333,8 @@ const App: React.FC = () => {
       .catch((error) => console.warn('App language cloud save failed; the local preference is still active.', error));
   }, [setAppLanguage, user]);
 
+  const workspaceOwnerRef = useRef(user.uid);
+  workspaceOwnerRef.current = user.uid;
   const reloadStudyCloudSessions = useCallback(async () => {
     if (!user) {
       setStudyCloudSessions([]);
@@ -1415,7 +1342,7 @@ const App: React.FC = () => {
     }
     try {
       const sessions = await getUserSessions(user);
-      setStudyCloudSessions(sessions);
+      if (workspaceOwnerRef.current === user.uid) setStudyCloudSessions(sessions);
     } catch (error) {
       console.warn('学习页云端资料列表刷新失败', error);
     }
@@ -1436,9 +1363,11 @@ const App: React.FC = () => {
   // 2) 登录后拉云端，与内存（本地）按 id 合并、云端胜（跨设备恢复）。本地优先显示、云端到达再并入。
   useEffect(() => {
     if (!user) return;
+    let active = true;
     getTutorSessionsFromCloud(user)
-      .then(cloud => { if (cloud.length > 0) setTutorSessions(prev => mergeTutorSessions(prev, cloud)); })
+      .then(cloud => { if (active && cloud.length > 0) setTutorSessions(prev => mergeTutorSessions(prev, cloud)); })
       .catch(() => {});
+    return () => { active = false; };
   }, [user?.uid]);
   // 3) 激活会话变化（含新建 / 每次消息更新）→ 防抖写本地 + 云端（各自独立 try/catch，互不阻塞）
   useEffect(() => {
@@ -1453,10 +1382,13 @@ const App: React.FC = () => {
 
   /** P0：备考工作台当前考试 — 登录后从 localStorage 恢复；登出则回到主界面 */
   useEffect(() => {
+    setReviewWorkspaceMode('home');
+    setLectureReviewMaterial(null);
+    setExamWorkspaceMaterials([]);
     if (!user) {
       setAppMode('study');
       setActiveExamId(null);
-      setExamWorkspaceStorageReady(false);
+      setExamWorkspaceStorageReady(null);
       return;
     }
     try {
@@ -1466,19 +1398,26 @@ const App: React.FC = () => {
     } catch {
       setActiveExamId(null);
     }
-    setExamWorkspaceStorageReady(true);
+    setExamWorkspaceStorageReady(user.uid);
   }, [user?.uid]);
 
   useEffect(() => {
-    if (!user || !examWorkspaceStorageReady) return;
+    if (!user || examWorkspaceStorageReady !== user.uid) return;
     try {
       const key = `${EXAM_WORKSPACE_ACTIVE_EXAM_LS}_${user.uid}`;
-      if (activeExamId) localStorage.setItem(key, activeExamId);
+      if (selectedExamId) localStorage.setItem(key, selectedExamId);
       else localStorage.removeItem(key);
     } catch {
       /* ignore */
     }
-  }, [activeExamId, user, examWorkspaceStorageReady]);
+  }, [selectedExamId, user, examWorkspaceStorageReady]);
+
+  useEffect(() => {
+    setCurrentSessionId(null); setTutorSessions([]); setActiveTutorIndex(0); setStudyCloudSessions([]);
+    setReviewPageOpen(false); setAppMode('study'); setStorageError('');
+    setFileName(null); setFileHash(null); setPdfDataUrl(null); setSlides([]); setFullPdfText('');
+    setShellMode('dashboard');
+  }, [user.uid]);
 
   // --- AUTO-SAVE (IndexedDB & Cloud) logic omitted for brevity, same as previous ---
   useEffect(() => {
@@ -1538,6 +1477,9 @@ const App: React.FC = () => {
         // 「读旧不毁旧」复用本地同一套抑制：迁移未触碰前不写新字段、只续写旧扁平字段，不改写云端旧记录。
         ...(isUntouchedSkimMigration() ? {} : { skimSessions, activeSkimIndex }),
         explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode: viewMode === 'tutor' ? 'deep' : viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
+      }, true).then(() => setStorageError('')).catch((error) => {
+        console.error('资料保存失败', error); setIsSyncing(false);
+        setStorageError(isLocalUser(user) ? '本机保存未完成，请检查浏览器存储空间。当前内容仍在页面中。' : '云端保存未完成，请检查网络。当前内容仍在页面中。');
       });
     }, 3000);
     return () => clearTimeout(cloudSaveTimeout);
@@ -1839,7 +1781,7 @@ const App: React.FC = () => {
       // #region agent log
       _debugLog('App.tsx:handleFileUpload', 'processFile resolved', {});
       // #endregion
-      if (user) { setIsSyncing(true); try { const downloadUrl = await uploadPDF(user, file); const sessionId = await createCloudSession(user, file.name, downloadUrl); setCurrentSessionId(sessionId); await reloadStudyCloudSessions(); } catch (e) { console.error("Cloud Sync Failed:", e); alert("云端同步失败，请检查网络。"); } finally { setIsSyncing(false); } }
+      if (user) { setIsSyncing(true); try { const downloadUrl = await uploadPDF(user, file); const sessionId = await createCloudSession(user, file.name, downloadUrl); setCurrentSessionId(sessionId); await reloadStudyCloudSessions(); } catch (e) { console.error("Cloud Sync Failed:", e); alert(isLocalUser(user) ? "本机保存失败，请检查浏览器存储空间。" : "云端同步失败，请检查网络。"); } finally { setIsSyncing(false); } }
     } catch (e) {
       console.error("Local Processing Failed", e);
       // #region agent log
@@ -1909,7 +1851,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.error('Restore failed:', e);
       if (wasInDashboard) setShellMode('dashboard');
-      alert('无法从云端恢复，请重试。');
+      alert(isLocalUser(user) ? '无法读取本机资料，请重新添加文件或检查浏览器存储。' : '无法从云端恢复，请重试。');
     } finally {
       setIsOpeningStudyFile(false);
       setIsProcessingFile(false);
@@ -2251,6 +2193,10 @@ const App: React.FC = () => {
     async (link: ExamMaterialLink): Promise<File | null> => {
       if (!user) return null;
       try {
+        if (link.cloudSessionId && link.cloudSessionId === currentSessionId && pdfDataUrl?.startsWith('data:application/pdf')) {
+          const response = await fetch(pdfDataUrl);
+          return new File([await response.blob()], link.fileName || '讲义.pdf', { type: 'application/pdf' });
+        }
         if (link.sourceType === 'sessionId' && link.cloudSessionId) {
           const sessions = await getUserSessions(user);
           const s = sessions.find((x) => x.id === link.cloudSessionId);
@@ -2271,7 +2217,7 @@ const App: React.FC = () => {
       }
       return null;
     },
-    [user, fileHash, pdfDataUrl, fileName]
+    [user, fileHash, pdfDataUrl, fileName, currentSessionId]
   );
 
   /** P2：备考工作台合并讲义（与保温流同一套逻辑与长度截断）；用于合并预览、逻辑原子整包等 */
@@ -2323,49 +2269,75 @@ const App: React.FC = () => {
     return computePredictedScore(workspaceLsapContentMap, workspaceLsapState.bktState);
   }, [workspaceLsapContentMap, workspaceLsapState]);
 
-  /**
-   * M1 / P1：按 examWorkspaceMaterialsSorted **逐份**拉文本 → generateLSAPContentMap(workspaceChunk) → 合并 KC；
-   * 空文本跳过；单份返回 null 跳过；若最终 0 个 KC 则 alert。
-   */
+  /** Run the existing KC and atom extractors in order, saving each completed stage. */
   const handlePrepareLectureKnowledge = useCallback(async (options: PrepareLectureKnowledgeOptions) => {
     const material = examWorkspaceMaterialsSorted.find(item => item.id === options.materialId);
-    if (!user?.uid || !activeExamId || !material) throw new Error('请先选择考试与讲义。');
-    if (workspaceLsapGenerating || workspaceAtomsGenerating) return;
+    if (!user?.uid || !activeExamId || !material) throw new Error('请先选择要复习的讲义。');
+    if (workspaceKnowledgeInFlightRef.current || workspaceLsapGenerating || workspaceAtomsGenerating) return;
+    workspaceKnowledgeInFlightRef.current = true;
     const owner = workspaceKnowledgeOwnerRef.current;
     const key = computeExamWorkspaceLsapKey(user.uid, activeExamId, examWorkspaceMaterialsSorted);
-    const isKc = options.stage === 'kc';
-    const setBusy = isKc ? setWorkspaceLsapGenerating : setWorkspaceAtomsGenerating;
-    const setProgress = isKc ? setWorkspaceLsapProgress : setWorkspaceAtomsProgress;
-    setBusy(true);
-    try {
-      const map = await prepareLectureKnowledge(workspaceLsapContentMap, material, options.pageTexts, options.stage, {
-        concepts: source => generateLSAPContentMap(source, { mode: 'workspaceChunk' }),
-        atoms: (source, subset) => generateLogicAtomsForContentMap(source, subset, {
-          maxDocChars: source.length, perMaterial: true, preserveExistingAtoms: true,
-        }),
-      }, (current, total) => setProgress({ current, total, fileName: material.fileName }));
-      if (workspaceKnowledgeOwnerRef.current !== owner) return;
-      map.sourceKey = key;
+    let map = workspaceLsapContentMap;
+    const needsConcepts = options.restart || !map?.kcs.some(kc => kc.sourceLinkId === material.id);
+    const persistStage = (next: LSAPContentMap) => {
+      next.sourceKey = key;
       const existingState = workspaceLsapStateRef.current;
-      const state: LSAPState = existingState ? { ...existingState, contentMapId: map.id } : {
-        contentMapId: map.id, bktState: {}, probeHistory: [], lastPredictedScore: 0, lastUpdated: Date.now(),
+      const state: LSAPState = existingState ? { ...existingState, contentMapId: next.id } : {
+        contentMapId: next.id, bktState: {}, probeHistory: [], lastPredictedScore: 0, lastUpdated: Date.now(),
       };
-      // Earlier BKT estimates, atom coverage and conversations remain historical records.
-      const atomCoverage = { ...workspaceAtomCoverageRef.current, ...mergeAtomCoverageForMap(workspaceAtomCoverageRef.current, map) };
+      // Earlier estimates, coverage and conversations remain historical records.
+      const atomCoverage = { ...workspaceAtomCoverageRef.current, ...mergeAtomCoverageForMap(workspaceAtomCoverageRef.current, next) };
       saveWorkspaceLsapBundle(key, {
-        contentMap: map, state, atomCoverage,
+        contentMap: next, state, atomCoverage,
         dialogueTranscript: workspaceDialogueTranscriptRef.current,
         kcGlossary: workspaceKcGlossaryRef.current,
         evidenceAnnotations: workspaceEvidenceAnnotationsRef.current,
         dialogueUpdatedAt: Date.now(), savedAt: Date.now(),
       });
-      setWorkspaceLsapContentMap(map);
+      setWorkspaceLsapContentMap(next);
       workspaceLsapStateRef.current = state;
       setWorkspaceLsapState(state);
       workspaceAtomCoverageRef.current = atomCoverage;
       setWorkspaceAtomCoverage(atomCoverage);
       setWorkspaceLsapKey(key);
-    } finally { setBusy(false); setProgress(null); }
+    };
+    const api = {
+      concepts: (source: string) => generateLSAPContentMap(source, { mode: 'workspaceChunk' }),
+      atoms: (source: string, subset: LSAPContentMap) => generateLogicAtomsForContentMap(source, subset, {
+        maxDocChars: source.length, perMaterial: true, preserveExistingAtoms: true,
+      }),
+    };
+    let stage: 'kc' | 'atoms' = needsConcepts ? 'kc' : 'atoms';
+    try {
+      if (needsConcepts) {
+        setWorkspaceLsapGenerating(true);
+        setWorkspaceLsapProgress(null);
+        map = await prepareLectureKnowledge(map, material, options.pageTexts, 'kc', api,
+          (current, total) => setWorkspaceLsapProgress({ current, total, fileName: material.fileName }));
+        if (workspaceKnowledgeOwnerRef.current !== owner) return;
+        persistStage(map);
+      }
+      stage = 'atoms';
+      setWorkspaceAtomsGenerating(true);
+      setWorkspaceLsapGenerating(false);
+      setWorkspaceLsapProgress(null);
+      // Use the returned map directly: React's state update may not have rendered yet.
+      map = await prepareLectureKnowledge(map, material, options.pageTexts, 'atoms', api,
+        (current, total) => setWorkspaceAtomsProgress({ current, total, fileName: material.fileName }));
+      if (workspaceKnowledgeOwnerRef.current !== owner) return;
+      persistStage(map);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : '请求未完成。';
+      throw new Error(stage === 'atoms'
+        ? `知识点已保留，具体要点与原文依据尚未整理完成。点击“继续提取知识点”可接着完成，无需重做前一步。${detail}`
+        : detail);
+    } finally {
+      workspaceKnowledgeInFlightRef.current = false;
+      setWorkspaceLsapGenerating(false);
+      setWorkspaceAtomsGenerating(false);
+      setWorkspaceLsapProgress(null);
+      setWorkspaceAtomsProgress(null);
+    }
   }, [user, activeExamId, examWorkspaceMaterialsSorted, workspaceLsapContentMap, workspaceLsapGenerating, workspaceAtomsGenerating]);
 
   const handleGenerateWorkspaceLsap = useCallback(async () => {
@@ -3610,45 +3582,6 @@ const App: React.FC = () => {
   };
   const handleNotesSplitterEnd = () => { notesSplitterRef.current = false; document.removeEventListener('mousemove', handleNotesSplitterMove); document.removeEventListener('mouseup', handleNotesSplitterEnd); document.body.style.cursor = ''; document.body.style.userSelect = ''; };
 
-  // --- NEW: SIDE QUEST LOGIC ---
-  const handleTriggerSideQuest = async () => {
-      if (!triggerPosition) return;
-      const text = triggerPosition.text;
-      setTriggerPosition(null);
-      setSideQuest({ isActive: true, anchorText: text, messages: [], isLoading: true });
-      
-      try {
-          // Generate initial deep dive explanation
-          const response = await runSideQuestAgent([], "请开始深度解析", text);
-          setSideQuest(prev => ({ 
-              ...prev, 
-              isLoading: false, 
-              messages: [{ role: 'model', text: response, timestamp: Date.now() }] 
-          }));
-      } catch (e) {
-          setSideQuest(prev => ({ ...prev, isLoading: false, messages: [{role: 'model', text: "解析失败...", timestamp: Date.now()}] }));
-      }
-  };
-
-  const handleSideQuestSend = async (text: string) => {
-      setSideQuest(prev => ({ 
-          ...prev, 
-          isLoading: true, 
-          messages: [...prev.messages, { role: 'user', text, timestamp: Date.now() }] 
-      }));
-
-      try {
-          const response = await runSideQuestAgent(sideQuest.messages, text, sideQuest.anchorText);
-          setSideQuest(prev => ({ 
-              ...prev, 
-              isLoading: false, 
-              messages: [...prev.messages, { role: 'model', text: response, timestamp: Date.now() }] 
-          }));
-      } catch (e) {
-          setSideQuest(prev => ({ ...prev, isLoading: false }));
-      }
-  };
-
   const currentSlide = slides[currentIndex];
 
   /**
@@ -3709,7 +3642,9 @@ const App: React.FC = () => {
       hasStudyMap={slides.length > 0} 
       onOpenHistory={handleOpenHistory} 
       onEnterGalgameMode={() => setIsGalgameMode(true)}
-      user={user}
+      user={authUser}
+      localWorkspace={isLocalUser(user)}
+      saveError={storageError}
       onLogin={handleLogin}
       onLogout={handleLogout}
       isSyncing={isSyncing}
@@ -3736,7 +3671,8 @@ const App: React.FC = () => {
           setLoginModalOpen(true);
           return;
         }
-        setAppMode('examWorkspace');
+        if (currentLectureReviewMaterial) startLectureReview(currentLectureReviewMaterial);
+        else { setReviewWorkspaceMode('home'); setReviewEntryPickLecture(true); setAppMode('examWorkspace'); }
       }}
       onOpenTurtleSoup={() => setTurtleSoupOpen(true)}
       pomodoroSegmentSeconds={pomodoroSegmentSeconds}
@@ -4193,6 +4129,8 @@ const App: React.FC = () => {
         <LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
         <DashboardScreen
           user={user}
+          cloudUser={isCloudUser(authUser) ? authUser : null}
+          onSwitchStorage={() => setUseLocalWorkspace(value => !value)}
           isSyncing={isSyncing}
           isProcessing={isProcessingFile}
           currentFileName={fileName}
@@ -4206,6 +4144,8 @@ const App: React.FC = () => {
               setLoginModalOpen(true);
               return;
             }
+            setReviewWorkspaceMode('home');
+            setReviewEntryPickLecture(false);
             setAppMode('examWorkspace');
           }}
           profileNotebook={profileNotebook}
@@ -4447,29 +4387,6 @@ const App: React.FC = () => {
         customAvatarUrl={customAvatarUrl}
         customBackgroundUrl={customBackgroundUrl} 
         personaSettings={personaSettings} 
-      />
-
-      {/* TRIGGER BUBBLE */}
-      {triggerPosition && !sideQuest.isActive && (
-          <button 
-            id="side-quest-trigger-btn"
-            className="fixed z-[1000] bg-indigo-600 text-white px-4 py-2 rounded-full shadow-xl shadow-indigo-300 transform -translate-x-1/2 animate-in fade-in zoom-in-95 slide-in-from-bottom-2 mt-1 hover:scale-105 transition-transform flex items-center space-x-2 border-2 border-white"
-            style={{ top: triggerPosition.top, left: triggerPosition.left }}
-            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleTriggerSideQuest(); }}
-          >
-              <Sparkles className="w-4 h-4 text-yellow-300 fill-current" />
-              <span className="text-xs font-bold whitespace-nowrap">展开讲讲</span>
-          </button>
-      )}
-
-      {/* SIDE QUEST PANEL */}
-      <SideQuestPanel 
-        isActive={sideQuest.isActive}
-        anchorText={sideQuest.anchorText}
-        messages={sideQuest.messages}
-        isLoading={sideQuest.isLoading}
-        onClose={() => setSideQuest(prev => ({...prev, isActive: false}))}
-        onSend={handleSideQuestSend}
       />
 
       {reviewCacheWarning && <div role="status" className="fixed bottom-4 left-4 z-[400] max-w-md rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">{reviewCacheWarning}</div>}
@@ -4830,8 +4747,18 @@ const App: React.FC = () => {
         className="hidden"
       />
 
-      {appMode === 'examWorkspace' && user ? (
+      {appMode === 'examWorkspace' && user ? (reviewWorkspaceMode === 'home' ? (
+        <ReviewWorkspaceEntry user={user} currentMaterial={currentLectureReviewMaterial} initialPick={reviewEntryPickLecture}
+          onLecture={startLectureReview} onExam={() => setReviewWorkspaceMode('exam')}
+          onBack={() => setAppMode('study')}
+          onLibrary={() => { setAppMode('study'); setShellMode('dashboard'); setDashboardInitialTab('library'); }}
+        />
+      ) : (
         <ExamWorkspacePage
+          key={`${user.uid}:${reviewWorkspaceMode}:${standaloneMaterial?.id ?? 'exam'}`}
+          standaloneMaterial={standaloneMaterial}
+          onChooseReviewScope={() => { setReviewEntryPickLecture(false); setReviewWorkspaceMode('home'); }}
+          onChooseLecture={() => { setReviewEntryPickLecture(true); setReviewWorkspaceMode('home'); }}
           user={user}
           activeExamId={activeExamId}
           onActiveExamIdChange={setActiveExamId}
@@ -4865,7 +4792,7 @@ const App: React.FC = () => {
           onWorkspaceGlossaryAppend={handleWorkspaceGlossaryAppend}
           resolveExamMaterialPdf={resolveExamMaterialPdf}
         />
-      ) : (
+      )) : (
         <>
       <section className={`craft-learning-shell reading-workspace-shell h-screen flex flex-col relative z-20 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.1)] ${isImmersive ? 'bg-[#F3F4F6]' : ''}`}>
         {isEmbeddedDev && !devBannerDismissed && (

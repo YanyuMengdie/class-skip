@@ -3,7 +3,14 @@ import type { ExamMaterialLink, LSAPContentMap } from '@/types';
 export interface PrepareLectureKnowledgeOptions {
   materialId: string;
   pageTexts: string[];
-  stage: 'kc' | 'atoms';
+  /** Otherwise resume from the existing concepts without extracting them again. */
+  restart?: boolean;
+}
+
+export function isLectureKnowledgePrepared(kcs: LSAPContentMap['kcs']): boolean {
+  // An empty result is valid when the source supports no atomic claims. This tracks
+  // preparation, not source coverage or mastery; the checklist still shows gaps.
+  return kcs.length > 0 && kcs.every(kc => Array.isArray(kc.atoms));
 }
 
 interface KnowledgeGenerator {
@@ -34,7 +41,7 @@ export async function prepareLectureKnowledge(
   current: LSAPContentMap | null,
   material: ExamMaterialLink,
   pageTexts: string[],
-  stage: PrepareLectureKnowledgeOptions['stage'],
+  stage: 'kc' | 'atoms',
   api: KnowledgeGenerator,
   progress?: (current: number, total: number) => void,
 ): Promise<LSAPContentMap> {
@@ -63,11 +70,11 @@ export async function prepareLectureKnowledge(
       kcs: [...(current?.kcs ?? []).filter(kc => kc.sourceLinkId !== material.id), ...replacement] };
   }
   const subset = current?.kcs.filter(kc => kc.sourceLinkId === material.id) ?? [];
-  if (!current || !subset.length) throw new Error('请先提取这份讲义的 KC 知识点。');
+  if (!current || !subset.length) throw new Error('请先提取这份讲义的知识点。');
   const source = lectureSourceChunks(pageTexts).join('\n');
   progress?.(1, 1);
   const generated = await api.atoms(source, { ...current, kcs: subset });
-  if (!generated) throw new Error('逻辑原子提取没有完成，原有清单已保留，请重试。');
+  if (!generated) throw new Error('具体要点整理没有完成，已有知识点已保留，可以继续提取。');
   const byId = new Map(generated.kcs.map(kc => [kc.id, kc]));
   return { ...current, kcs: current.kcs.map(kc => {
     const next = kc.sourceLinkId === material.id ? byId.get(kc.id) : undefined;

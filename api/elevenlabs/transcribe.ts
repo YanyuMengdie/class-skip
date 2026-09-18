@@ -1,6 +1,6 @@
-import { consumeStoredPayload } from '../../server/storedPayload';
+import { readRequestPayload } from '../../server/productionApi';
 import { ExamAstraError } from '../../server/examAstra';
-import { requireProductionUser, ProductionAuthError } from '../../server/productionAuth';
+import { ProductionAuthError } from '../../server/productionAuth';
 import {
   ElevenLabsTranscriptionError,
   transcribeWithElevenLabs,
@@ -38,11 +38,10 @@ export default async function handler(request: any, response: any) {
   }
 
   try {
-    const uid = await requireProductionUser(request);
     let audio = await readRawBody(request);
     if (request.headers['x-classskip-body-type']) {
       const envelope = JSON.parse(Buffer.from(audio).toString('utf8'));
-      const stored = await consumeStoredPayload(envelope, String(request.headers['x-classskip-token']), uid, 128 * 1024 * 1024);
+      const stored = await readRequestPayload(request, envelope, 128 * 1024 * 1024);
       if (!stored) throw new ExamAstraError('invalid_request', 400, '无法识别暂存录音。');
       audio = stored;
     }

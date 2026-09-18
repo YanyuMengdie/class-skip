@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { X, Loader2, Sparkles, ArrowRight, Wind } from 'lucide-react';
-import type { User } from 'firebase/auth';
+import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import type {
   CachedMaintenanceBundle,
   Exam,

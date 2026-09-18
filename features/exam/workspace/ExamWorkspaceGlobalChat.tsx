@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { User } from 'firebase/auth';
+import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import {
   BookOpen,
   Check,
@@ -60,6 +60,7 @@ export interface ExamWorkspaceGlobalChatProps {
   user: User;
   examId: string;
   examTitle: string;
+  singleLecture?: boolean;
   materials: ExamMaterialLink[];
   workspaceKey: string | null;
   contentMap: LSAPContentMap | null;
@@ -115,7 +116,7 @@ function makeHandoffDraft(turn: ExamGlobalChatTurn): string {
   const source = (turn.citations ?? [])
     .map((citation) => `${citation.materialName} p.${citation.page}`)
     .join('、');
-  return `我在“整场考试对话”里问了：\n${turn.questionText ?? ''}\n\n全局回答给我的思路：\n${turn.text.slice(0, 1400)}\n\n材料定位：${source || '暂无精确页码'}\n\n请从这个困惑开始验证我的理解，不要因为上面有一段回答就默认我已经会了。`;
+  return `我在“资料对话”里问了：\n${turn.questionText ?? ''}\n\n全局回答给我的思路：\n${turn.text.slice(0, 1400)}\n\n材料定位：${source || '暂无精确页码'}\n\n请从这个困惑开始验证我的理解，不要因为上面有一段回答就默认我已经会了。`;
 }
 
 function buildMemoText(examTitle: string, turn: ExamGlobalChatTurn): string {
@@ -127,6 +128,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
   user,
   examId,
   examTitle,
+  singleLecture = false,
   materials,
   workspaceKey,
   contentMap,
@@ -135,6 +137,8 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
   onOpenMaterialPage,
   onHandoffToKnowledgeBlock,
 }) => {
+  const chatLabel = singleLecture ? '本讲对话' : '整场考试对话';
+  const suggestions = singleLecture ? ['这一讲的几个主题有什么联系？', '帮我区分这一讲里容易混淆的概念', '帮我定位一个概念出现在哪里', '根据我的解释，指出还没讲清楚的地方'] : EMPTY_SUGGESTIONS;
   const sourceSignature = useMemo(() => computeExamGlobalMaterialSignature(materials), [materials]);
   const [chatState, setChatState] = useState<ExamGlobalChatState>(() => loadExamGlobalChatState(user.uid, examId));
   const [memory, setMemory] = useState<ExamGlobalMaterialMemory | null>(() => (
@@ -142,7 +146,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
   ));
   const [chunks, setChunks] = useState<ExamMaterialTextChunk[]>([]);
   const [preparing, setPreparing] = useState(false);
-  const [prepareMessage, setPrepareMessage] = useState('正在读取考试材料…');
+  const [prepareMessage, setPrepareMessage] = useState('正在读取复习材料…');
   const [prepareError, setPrepareError] = useState<string | null>(null);
   const [prepareAttempt, setPrepareAttempt] = useState(0);
   const [input, setInput] = useState('');
@@ -219,7 +223,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
     void (async () => {
       setPreparing(true);
       setPrepareError(null);
-      setPrepareMessage('正在检查全部考试材料…');
+      setPrepareMessage('正在检查复习材料…');
       try {
         let indexed = await loadExamMaterialChunkIndex(workspaceKey) ?? [];
         const existingIds = new Set(indexed.map((chunk) => chunk.materialLinkId));
@@ -329,7 +333,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
         saveExamGlobalMaterialMemory(user.uid, examId, finalMemory);
       } catch (error) {
         if (controller.signal.aborted || cancelled) return;
-        setPrepareError(error instanceof Error ? error.message : '准备考试材料失败');
+        setPrepareError(error instanceof Error ? error.message : '准备复习材料失败');
       } finally {
         if (!cancelled) setPreparing(false);
       }
@@ -428,7 +432,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
 
   const clearConversation = () => {
     if (!chatState.turns.length) return;
-    if (!window.confirm('确定真正清空这场考试的整场对话吗？材料地图不会被删除，但聊天记录无法恢复。')) return;
+    if (!window.confirm(`确定清空${singleLecture ? '这份讲义' : '这场考试'}的对话吗？材料地图不会被删除，但聊天记录无法恢复。`)) return;
     setChatState({ version: 1, examId, turns: [], updatedAt: Date.now() });
     setSendError(null);
     setLastFailedQuestion(null);
@@ -504,13 +508,13 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
   const canSend = availableCount > 0 && !sending && Boolean(input.trim());
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm" aria-label="整场考试对话">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-sm" aria-label={chatLabel}>
       <div className="shrink-0 border-b border-stone-100 bg-stone-50/80 px-4 py-3">
         <div className="flex flex-wrap items-start gap-3">
           <div className="flex min-w-0 flex-1 items-start gap-2">
             <MessageCircle className="mt-0.5 h-5 w-5 shrink-0 text-violet-600" />
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-black text-slate-900">{examTitle || '整场考试对话'}</h2>
+              <h2 className="truncate text-sm font-black text-slate-900">{examTitle || chatLabel}</h2>
               <p className="mt-0.5 text-[11px] text-slate-500">
                 已关联 {materials.length} 份 · 当前可用 {availableCount}/{materials.length} 份
                 {memory?.status === 'ready' ? ' · 全局材料地图已完成' : preparing ? ' · 地图准备中' : memory?.status === 'partial' ? ' · 地图部分完成' : ''}
@@ -543,10 +547,10 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
         {chatState.turns.length === 0 && !sending ? (
           <div className="mx-auto flex h-full max-w-2xl flex-col items-center justify-center text-center">
             <div className="mb-3 rounded-2xl bg-violet-50 p-3 text-violet-600"><Layers3 className="h-7 w-7" /></div>
-            <h3 className="text-base font-black text-slate-900">把所有考试材料放在同一个对话里</h3>
+            <h3 className="text-base font-black text-slate-900">{singleLecture ? '围绕这一讲，把不理解的地方问清楚' : '把所有考试材料放在同一个对话里'}</h3>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-slate-500">直接问就好。回答默认只依据当前材料，并给出可以打开的 PDF 页码；这里的聊天不会改变掌握度或学习证据。</p>
             <div className="mt-5 grid w-full gap-2 sm:grid-cols-2">
-              {EMPTY_SUGGESTIONS.map((suggestion) => (
+              {suggestions.map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
@@ -612,7 +616,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
           </div>
         )}
         {availableCount === 0 && (
-          <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-900">至少需要一份可读取的考试材料才能开始对话。</p>
+          <p className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-900">至少需要一份可读取的资料才能开始对话。</p>
         )}
         <div className="flex items-end gap-2">
           <textarea
@@ -626,7 +630,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
               }
             }}
             disabled={availableCount === 0 || sending}
-            placeholder={availableCount > 0 ? '问这场考试的任何问题…（Enter 发送，Shift+Enter 换行）' : '等待材料准备完成…'}
+            placeholder={availableCount > 0 ? (singleLecture ? '问这一讲的问题…（Enter 发送，Shift+Enter 换行）' : '问这场考试的任何问题…（Enter 发送，Shift+Enter 换行）') : '等待材料准备完成…'}
             className="min-h-[52px] max-h-36 min-w-0 flex-1 resize-y rounded-xl border border-stone-200 px-3 py-2.5 text-sm text-slate-800 outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100 disabled:bg-stone-50"
           />
           {sending ? (
@@ -642,7 +646,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
           <button type="button" className="absolute inset-0 bg-black/35" onClick={() => setEvidenceTurn(null)} aria-label="关闭" />
           <aside className="relative flex h-full w-full max-w-lg flex-col bg-white shadow-2xl">
             <div className="flex items-start justify-between border-b border-stone-200 px-5 py-4">
-              <div><p className="text-xs font-black text-violet-600">本条回答的材料证据</p><h3 className="mt-1 text-base font-black text-slate-900">{evidenceTurn.questionText || '整场考试对话'}</h3></div>
+              <div><p className="text-xs font-black text-violet-600">本条回答的材料证据</p><h3 className="mt-1 text-base font-black text-slate-900">{evidenceTurn.questionText || chatLabel}</h3></div>
               <button type="button" onClick={() => setEvidenceTurn(null)} className="rounded-lg p-2 text-slate-500 hover:bg-stone-100"><X className="h-5 w-5" /></button>
             </div>
             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
@@ -652,7 +656,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
                   <button key={`${citation.chunkId}-${citation.page}`} type="button" disabled={removed} onClick={() => { onOpenMaterialPage(citation.materialLinkId, citation.page, { quote: citation.excerpt.slice(0, 120) }); setEvidenceTurn(null); }} className="w-full rounded-xl border border-stone-200 bg-stone-50 p-3 text-left hover:border-violet-200 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-65">
                     <div className="flex items-center justify-between gap-2"><span className="truncate text-xs font-black text-slate-800">{citation.materialName}</span><span className="shrink-0 text-[11px] font-bold text-violet-700">p.{citation.page}</span></div>
                     <p className="mt-2 text-xs leading-relaxed text-slate-600">{citation.excerpt}</p>
-                    {removed && <p className="mt-2 text-[10px] font-bold text-amber-700">材料已从当前考试移除，历史定位仅供留痕</p>}
+                    {removed && <p className="mt-2 text-[10px] font-bold text-amber-700">材料已不在当前复习范围，历史定位仅供留痕</p>}
                   </button>
                 );
               }) : <div className="rounded-xl border border-dashed border-stone-200 p-5 text-center text-sm text-slate-500">这条回答没有命中可定位的材料证据。</div>}

@@ -1,4 +1,4 @@
-import type { User } from 'firebase/auth';
+import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import { fetchSessionDetails } from '@/services/firebase';
 import type { CloudSession, SavedArtifact } from '@/types';
 

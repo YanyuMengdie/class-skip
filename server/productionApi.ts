@@ -1,3 +1,4 @@
+import { gunzipSync } from 'node:zlib';
 import { consumeStoredPayload } from './storedPayload';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { once } from 'node:events';
@@ -47,9 +48,8 @@ export function modelHandler(options: { key: string; maxBytes: number; request: 
     const controller = new AbortController(); const abort = () => controller.abort();
     response.once('close', abort); request.once('aborted', abort);
     try {
-      const uid = await requireProductionUser(request);
       const envelope = body(request, Math.min(options.maxBytes, 4_000_000));
-      const stored = await consumeStoredPayload(envelope, String(request.headers['x-classskip-token']), uid, options.maxBytes, controller.signal);
+      const stored = await readRequestPayload(request, envelope, options.maxBytes, controller.signal);
       let input: unknown = envelope;
       if (stored) {
         try { input = JSON.parse(stored.toString('utf8')); }
@@ -67,7 +67,7 @@ export function modelHandler(options: { key: string; maxBytes: number; request: 
 export function modelStatusHandler(model: string, key: string) {
   return async (request: Request, response: ServerResponse) => {
     if (request.method !== 'GET') return json(response, 405, { error: { code: 'invalid_request', message: 'Use GET.' } });
-    try { await requireProductionUser(request); await json(response, 200, { configured: !!process.env[key]?.trim(), model }); }
+    try { await json(response, 200, { configured: !!process.env[key]?.trim(), model }); }
     catch (error) { const safe = failure(error); await json(response, safe.status, { error: { code: safe.code, message: safe.message } }); }
   };
 }
@@ -78,7 +78,6 @@ export function canvasHandler(operation: 'request' | 'download') {
     const controller = new AbortController(); const abort = () => controller.abort();
     response.once('close', abort); request.once('aborted', abort);
     try {
-      await requireProductionUser(request);
       const input = body(request, 20_000) as Record<string, unknown>;
       if (!input || typeof input !== 'object' || Array.isArray(input)) throw new CanvasProxyError('invalid_request', 400, '请求格式不正确。');
       const token = request.headers.authorization?.replace(/^Bearer\s+/i, '') || '';
@@ -94,4 +93,20 @@ export function canvasHandler(operation: 'request' | 'download') {
       const safe = failure(error); await json(response, safe.status, { error: safe.message, code: safe.code, incomplete: safe.code === 'incomplete' });
     } finally { response.off('close', abort); request.off('aborted', abort); }
   };
+}
+
+/** Public inline bodies never authorize access to account-owned stored files. */
+export async function readRequestPayload(request: Request, envelope: unknown, maxBytes: number, signal?: AbortSignal): Promise<Buffer | undefined> {
+  if (!envelope || typeof envelope !== 'object') return undefined;
+  if ('__classSkipCompressed' in envelope) {
+    const encoded = (envelope as { __classSkipCompressed: unknown }).__classSkipCompressed;
+    if (typeof encoded !== 'string' || encoded.length > 4_000_000) throw new ExamAstraError('invalid_request', 413, '传输资料过大。');
+    try { return gunzipSync(Buffer.from(encoded, 'base64'), { maxOutputLength: maxBytes }); }
+    catch { throw new ExamAstraError('invalid_request', 400, '无法解压资料，或资料超过处理上限。'); }
+  }
+  if ('__classSkipPayload' in envelope) {
+    const uid = await requireProductionUser(request);
+    return consumeStoredPayload(envelope, String(request.headers['x-classskip-token']), uid, maxBytes, signal);
+  }
+  return undefined;
 }

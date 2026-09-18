@@ -104,3 +104,8 @@
 .round-theme-loading{border:1px solid #e0e5d9;border-radius:18px;background:#fafbf5;max-width:800px;margin:30px auto}.round-theme-loading>svg{color:#6e8e63}.round-theme-loading .round-shell-button{margin:7px}
 .round-shell-error>button{margin-left:12px;text-decoration:underline;text-underline-offset:3px}.round-block-card.is-active .round-block-text strong{color:#355a3e}
 @media(max-width:760px){.round-theme-intro{padding:15px}.round-theme-concepts{gap:6px}.round-theme-concepts>span{font-size:10px}.round-theme-loading{margin:12px 0}}
+
+.round-lecture-selection { display:flex; flex-direction:column; gap:12px; padding-bottom:20px; margin-bottom:16px; border-bottom:1px solid #d9dfd2; }
+.round-lecture-selection>span { font-size:12px; color:#758074; }
+.round-lecture-selection>strong { font-size:15px; font-weight:500; line-height:1.7; overflow-wrap:anywhere; color:#294c3e; }
+.round-lecture-selection>button { align-self:flex-start; }

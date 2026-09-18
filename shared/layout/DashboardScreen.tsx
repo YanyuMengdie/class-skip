@@ -1,3 +1,6 @@
+import { LocalSyllabusBrief } from '@/features/canvas/brief/LocalSyllabusBrief';
+import { isLocalUser, isCloudUser } from '@/services/workspaceUser';
+import { syncLocalWorkspace } from '@/services/syncLocalWorkspace';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import {
@@ -30,7 +33,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import { User as FirebaseUser } from 'firebase/auth';
+import type { WorkspaceUser as FirebaseUser } from '@/services/workspaceUser';
 import {
   addCalendarEvent,
   addMemo,
@@ -102,6 +105,8 @@ type DashboardTab = 'library' | 'jointReview' | 'reluctant' | 'calendar' | 'memo
 
 interface DashboardScreenProps {
   user: FirebaseUser | null;
+  cloudUser: FirebaseUser | null;
+  onSwitchStorage: () => void;
   isSyncing: boolean;
   isProcessing: boolean;
   currentFileName: string | null;
@@ -287,6 +292,8 @@ const getJointReviewRoleLabel = (role: JointReviewMaterialRole): string => (
 
 export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   user,
+  cloudUser,
+  onSwitchStorage,
   isSyncing,
   isProcessing,
   currentFileName,
@@ -303,6 +310,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   initialTab = 'library',
 }) => {
   const { text } = useAppLanguage();
+  const localMode = isLocalUser(user);
+  const [copyingLocal, setCopyingLocal] = useState(false);
+  const [localCopyMessage, setLocalCopyMessage] = useState('');
+  const copyLocalToCloud = async () => {
+    if (!isCloudUser(cloudUser)) { onLogin(); return; }
+    if (copyingLocal) return;
+    setCopyingLocal(true);
+    try { await syncLocalWorkspace(cloudUser, setLocalCopyMessage); await reloadSessions(); }
+    catch (error) { setLocalCopyMessage(error instanceof Error ? error.message : '同步未完成，本机资料仍然保留。'); }
+    finally { setCopyingLocal(false); }
+  };
   const [activeTab, setActiveTab] = useState<DashboardTab>(isDashboardFeatureVisible(initialTab) ? initialTab : 'library');
   const [sessions, setSessions] = useState<CloudSession[]>([]);
   const [jointReviewPacks, setJointReviewPacks] = useState<JointReviewPack[]>([]);
@@ -333,7 +351,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   useEffect(() => { setLibraryMoveNotice(null); }, [user?.uid]);
   const [libraryUploadStatus, setLibraryUploadStatus] = useState<LibraryUploadStatus | null>(null);
   const [canvasImportOpen, setCanvasImportOpen] = useState(false);
-  const [calendarView, setCalendarView] = useState<'brief' | 'personal'>('brief');
+  const [calendarView, setCalendarView] = useState<'brief' | 'personal' | 'local'>('brief');
   const [verifiedCourseBrief, setVerifiedCourseBrief] = useState<CourseBriefReport | null>(null);
   useEffect(() => {
     setVerifiedCourseBrief(null);
@@ -396,54 +414,44 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   }, [initialTab]);
 
   useEffect(() => {
-    if (!user) {
-      setSessions([]);
-      setJointReviewPacks([]);
-      setEvents([]);
-      setMemos([]);
-      return;
-    }
-
-    setLoadingSessions(true);
-    getUserSessions(user)
-      .then(setSessions)
-      .finally(() => setLoadingSessions(false));
-
-    setLoadingJointReviewPacks(true);
-    getJointReviewPacks(user)
-      .then(setJointReviewPacks)
-      .finally(() => setLoadingJointReviewPacks(false));
-
-    setLoadingCalendar(true);
-    getCalendarEvents(user)
-      .then(setEvents)
-      .finally(() => setLoadingCalendar(false));
-
-    setLoadingMemos(true);
-    getMemos(user)
-      .then(setMemos)
-      .finally(() => setLoadingMemos(false));
+    let cancelled = false;
+    setSessions([]); setJointReviewPacks([]); setEvents([]); setMemos([]);
+    setActiveFolderId('all');
+    if (!user) return;
+    const read = async <T,>(loader: () => Promise<T>, apply: (value: T) => void, loading: (value: boolean) => void) => {
+      loading(true);
+      try { const value = await loader(); if (!cancelled) apply(value); }
+      catch (error) { if (!cancelled) setLocalCopyMessage(error instanceof Error ? error.message : '资料读取失败，请重试。'); }
+      finally { if (!cancelled) loading(false); }
+    };
+    void read(() => getUserSessions(user), setSessions, setLoadingSessions);
+    void read(() => getJointReviewPacks(user), setJointReviewPacks, setLoadingJointReviewPacks);
+    void read(() => getCalendarEvents(user), setEvents, setLoadingCalendar);
+    void read(() => getMemos(user), setMemos, setLoadingMemos);
+    return () => { cancelled = true; };
   }, [user]);
 
   const reloadSessions = async () => {
     if (!user) return;
+    const owner = user.uid;
     setLoadingSessions(true);
     try {
       const fresh = await getUserSessions(user);
-      setSessions(fresh);
+      if (libraryOwnerRef.current === owner) setSessions(fresh);
     } finally {
-      setLoadingSessions(false);
+      if (libraryOwnerRef.current === owner) setLoadingSessions(false);
     }
   };
 
   const reloadJointReviewPacks = async () => {
     if (!user) return;
+    const owner = user.uid;
     setLoadingJointReviewPacks(true);
     try {
       const fresh = await getJointReviewPacks(user);
-      setJointReviewPacks(fresh);
+      if (libraryOwnerRef.current === owner) setJointReviewPacks(fresh);
     } finally {
-      setLoadingJointReviewPacks(false);
+      if (libraryOwnerRef.current === owner) setLoadingJointReviewPacks(false);
     }
   };
 
@@ -1433,7 +1441,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </button>
           <label className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white border border-dashed border-indigo-300 text-sm font-bold text-indigo-700 hover:border-indigo-500 hover:text-indigo-900 cursor-pointer transition-colors ${!user || isLibraryUploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
             {isLibraryUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
-            <span>{isLibraryUploading ? '上传中' : '上传到云端'}</span>
+            <span>{isLibraryUploading ? '保存中' : localMode ? '添加到本机' : '上传到云端'}</span>
             <input
               type="file"
               accept=".pdf,application/pdf"
@@ -1464,7 +1472,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <section className="min-w-0">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
           <div>
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">资料库</h2>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">{localMode ? '本机资料库' : '云端资料库'}</h2>
+            <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-[#526B5D]">
+              <span>{localMode ? '资料和记录保存在当前浏览器，清除网站数据会丢失。' : '当前使用账号资料，本机原件仍然保留。'}</span>
+              {isCloudUser(cloudUser)
+                ? <button type="button" disabled={copyingLocal} onClick={onSwitchStorage} className="underline">{localMode ? '切换到云端资料' : '查看本机资料'}</button>
+                : <button type="button" onClick={onLogin} className="underline">登录后可同步云端</button>}
+              {isCloudUser(cloudUser) && <button type="button" disabled={copyingLocal} onClick={() => void copyLocalToCloud()} className="underline">{copyingLocal ? '正在同步…' : '复制本机资料到账号'}</button>}
+            </div>
+            {localCopyMessage && <p role="status" className="mt-2 text-sm">{localCopyMessage}</p>}
             {activeFolder ? (
               <nav className="library-folder-breadcrumb" aria-label="文件夹路径">
                 <button type="button" onClick={() => openLibraryFolder('all')}>全部资料</button>
@@ -2304,6 +2320,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const renderCalendar = () => (
     <div className="space-y-6">
       <div className="flex flex-wrap gap-2" aria-label="课程和个人日历视图">
+        <button type="button" aria-pressed={calendarView === 'local'} onClick={() => setCalendarView('local')} className="px-4 py-2 rounded-lg border text-sm font-bold">本地大纲周报</button>
         <button type="button" aria-pressed={calendarView === 'brief'} onClick={() => setCalendarView('brief')}
           className={`px-4 py-2 rounded-lg border text-sm font-bold ${calendarView === 'brief' ? 'bg-[#315c4a] border-[#315c4a] text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
           {text('本周课程', 'Course brief')}
@@ -2313,7 +2330,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           {text('我的日历', 'My calendar')}
         </button>
       </div>
-      {calendarView === 'brief' ? <CanvasWeeklyBrief key={user?.uid || 'local'} ownerId={user?.uid || 'local'}
+      {calendarView === 'local' ? <LocalSyllabusBrief key={user?.uid || 'local'} ownerId={user?.uid || 'local'} /> : calendarView === 'brief' ? <CanvasWeeklyBrief key={user?.uid || 'local'} ownerId={user?.uid || 'local'}
         onImport={user ? handleCanvasImport : undefined} onReportChange={setVerifiedCourseBrief} /> : renderPersonalCalendar()}
     </div>
   );
@@ -2525,7 +2542,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <div>
             <h3 className="font-black text-slate-900">{text('界面语言', 'Interface language')}</h3>
             <p className="mt-1 text-sm text-slate-500">
-              {user
+              {isCloudUser(user)
                 ? text('已登录：这个选择会同步到你的账户。', 'Signed in: this preference will sync with your account.')
                 : text('未登录：这个选择会保存在当前设备。', 'Signed out: this preference will be saved on this device.')}
             </p>
@@ -2921,7 +2938,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <p className="text-xs text-slate-500 truncate">{user?.displayName || 'My Space'}</p>
               </div>
             </div>
-            {user ? (
+            {isCloudUser(cloudUser) ? (
               <button type="button" onClick={onLogout} className="p-2 rounded-lg hover:bg-white" aria-label="退出登录">
                 <LogOut className="w-4 h-4 text-slate-500" />
               </button>
@@ -2965,7 +2982,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-black bg-slate-900 text-white shadow-sm hover:bg-slate-800 transition-colors"
             >
               <GraduationCap className="w-4 h-4" />
-              <span>{text('备考工作台', 'Exam workspace')}</span>
+              <span>{text('复习工作台', 'Review workspace')}</span>
             </button>
           </div>
         </nav>
@@ -2985,9 +3002,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             </button>
           ) : (
             <div className="rounded-lg bg-white/70 border border-slate-200 p-3 text-xs text-slate-500">
-              {user
+              {isCloudUser(user)
                 ? (isSyncing ? text('同步中', 'Syncing') : text('云端已连接', 'Cloud connected'))
-                : text('未登录', 'Signed out')}
+                : text('本机保存 · 未上传云端', 'Saved on this device')}
             </div>
           )}
         </div>
@@ -3006,11 +3023,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               </div>
               <button
                 type="button"
-                onClick={user ? onLogout : onLogin}
+                onClick={isCloudUser(cloudUser) ? onLogout : onLogin}
                 className="p-2 rounded-lg bg-white/80 border border-white"
-                aria-label={user ? text('退出登录', 'Sign out') : text('登录', 'Sign in')}
+                aria-label={isCloudUser(cloudUser) ? text('退出登录', 'Sign out') : text('登录', 'Sign in')}
               >
-                {user ? <LogOut className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
+                {isCloudUser(cloudUser) ? <LogOut className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
               </button>
             </div>
 
@@ -3098,7 +3115,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold bg-slate-900 text-white"
             >
               <GraduationCap className="w-4 h-4" />
-              {text('备考', 'Exam')}
+              {text('复习', 'Review')}
             </button>
           </div>
         </div>

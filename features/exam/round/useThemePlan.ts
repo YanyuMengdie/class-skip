@@ -7,7 +7,7 @@ import { generateThemePlan, themeSourceKey, validateThemePlan, type ThemePlan } 
 const pendingPlans = new Map<string, Promise<ThemePlan>>();
 
 export function useThemePlan(storageKey: string, material: ExamMaterialLink | null,
-  kcs: LSAPKnowledgeComponent[], pages: string[], language: RoundLanguage, enabled: boolean) {
+  kcs: LSAPKnowledgeComponent[], pages: string[], language: RoundLanguage, enabled: boolean, autoGenerate = true) {
   const sourceKey = useMemo(() => material && kcs.length && pages.length
     ? themeSourceKey(material, kcs, pages, language) : '', [material, kcs, pages, language]);
   const cacheKey = `${storageKey}:themes:${material?.id ?? ''}:${language}`;
@@ -25,6 +25,10 @@ export function useThemePlan(storageKey: string, material: ExamMaterialLink | nu
       if (raw) cached = validateThemePlan(JSON.parse(raw), material, kcs, pages, language);
     } catch { /* An outdated or invalid grouping never changes the knowledge map or records. */ }
     if (cached && !retry) {
+      setState({ identity, plan: cached, busy: false, error: '' });
+      return;
+    }
+    if (!autoGenerate && !retry) {
       setState({ identity, plan: cached, busy: false, error: '' });
       return;
     }
@@ -47,7 +51,7 @@ export function useThemePlan(storageKey: string, material: ExamMaterialLink | nu
         error: error instanceof Error ? error.message : (language === 'en' ? 'Theme grouping did not finish. Please retry.' : '主题分组没有完成，请重试。') });
     });
     return () => { cancelled = true; };
-  }, [identity, enabled, retry]);
+  }, [identity, enabled, retry, autoGenerate]);
 
   const current = state.identity === identity ? state : null;
   return {

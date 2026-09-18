@@ -1292,7 +1292,7 @@ export interface Exam {
 
 export type ExamMaterialSourceType = 'fileHash' | 'sessionId';
 
-/** 考试与材料的关联（Firestore `examMaterials`）*/
+/** 考试材料关联（Firestore `examMaterials`）；单讲复习复用此结构作为本地描述，不写入该集合。 */
 export interface ExamMaterialLink {
   id: string;
   userId: string;
@@ -1462,14 +1462,6 @@ export interface Memo {
     userId: string;
     content: string;
     createdAt: number;
-}
-
-// --- NEW: SIDE QUEST TYPES ---
-export interface SideQuestState {
-  isActive: boolean;
-  anchorText: string;
-  messages: ChatMessage[];
-  isLoading: boolean;
 }
 
 // --- 海龟汤 ---

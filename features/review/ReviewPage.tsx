@@ -1,7 +1,9 @@
+import { isLocalId } from '@/services/localWorkspace';
+import { isLocalUser } from '@/services/workspaceUser';
 import { allReviewCaches, loadReviewCache, saveReviewCache } from './lib/reviewCache';
 import React, { useState, useEffect, useCallback } from 'react';
 import { X, BookOpen, Loader2, Library, Trash2, ChevronRight, RefreshCw } from 'lucide-react';
-import { User } from 'firebase/auth';
+import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import { getUserSessions, fetchSessionDetails, updateCloudSessionState } from '@/services/firebase';
 import { CloudSession } from '@/types';
 import { storageService } from '@/services/storageService';
@@ -210,9 +212,9 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
           <section className="review-library">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <div>
-                <h3 className="text-sm font-bold text-slate-600">本机 + 云端已保存的生成内容</h3>
+                <h3 className="text-sm font-bold text-slate-600">{isLocalUser(user) ? '本机已保存的生成内容' : '本机 + 云端已保存的生成内容'}</h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  以前保存的笔记、练习和导图都在这里；登录后也会显示云端内容。
+                  以前保存的笔记、练习和导图都在这里；可在资料库切换本机或账号资料。
                 </p>
               </div>
               <button
@@ -242,13 +244,14 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
               <ul className="space-y-2">
                 {libraryEntries.map((entry) => {
                   const meta = TYPE_META[entry.artifact.type];
-                  const provLabel = entry.provenance === 'local' ? '本机' : '云端';
+                  const localEntry = entry.provenance === 'local' || isLocalId(entry.cloudSessionId);
+                  const provLabel = localEntry ? '本机' : '云端';
                   const provClass =
-                    entry.provenance === 'local' ? 'bg-stone-200 text-stone-700' : 'bg-sky-100 text-sky-800';
+                    localEntry ? 'bg-stone-200 text-stone-700' : 'bg-sky-100 text-sky-800';
                   const subtitle =
                     entry.provenance === 'local'
                       ? `来自本机：${entry.sourceFileName}`
-                      : `来自云端：${entry.sourceDisplayName}`;
+                      : `来自${localEntry ? '本机' : '云端'}：${entry.sourceDisplayName}`;
                   return (
                     <li
                       key={libraryRowKey(entry)}
@@ -275,7 +278,7 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                           type="button"
                           onClick={(e) => void handleDeleteLibraryEntry(e, entry)}
                           className="p-2 rounded-lg text-stone-400 hover:text-rose-500 hover:bg-rose-50 shrink-0"
-                          title={entry.provenance === 'local' ? '从本机档案删除' : '从云端会话删除'}
+                          title={localEntry ? '从本机资料删除' : '从云端资料删除'}
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -303,7 +306,7 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                 </>
               ) : (
                 <>
-                  <span className="font-semibold text-sky-800">云端</span>
+                  <span className="font-semibold text-sky-800">{isLocalId(previewEntry.cloudSessionId) ? '本机' : '云端'}</span>
                   <span className="mx-2">·</span>
                   <span className="truncate">{previewEntry.sourceDisplayName}</span>
 

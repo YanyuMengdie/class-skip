@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Wand2, Sparkles, Loader2, Image as ImageIcon, User as UserIcon, Heart, Smile } from 'lucide-react';
 import { generateCharacterAvatar, generateGalgameBackground } from '@/services/imageGen';
 import { uploadImageBlob } from '@/services/firebase';
-import { User } from 'firebase/auth';
+import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import { PersonaSettings } from '@/types';
 
 interface GalgameSettingsProps {

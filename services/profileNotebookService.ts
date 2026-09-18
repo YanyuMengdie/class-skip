@@ -1,4 +1,5 @@
-import { User } from 'firebase/auth';
+import { isLocalUser } from './workspaceUser';
+import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import {
   collection,
   doc,
@@ -85,6 +86,7 @@ export const appendLocalPendingSuggestion = (suggestion: ProfileNotebookUpdateSu
 };
 
 export const getCloudProfileNotebook = async (user: User): Promise<LearnerProfileNotebook | null> => {
+  if (isLocalUser(user)) return loadLocalProfileNotebook();
   const ref = doc(db, 'users', user.uid, 'profileNotebook', 'main');
   const snapshot = await getDoc(ref);
   if (!snapshot.exists()) return null;
@@ -92,6 +94,7 @@ export const getCloudProfileNotebook = async (user: User): Promise<LearnerProfil
 };
 
 export const saveCloudProfileNotebook = async (user: User, profile: LearnerProfileNotebook): Promise<void> => {
+  if (isLocalUser(user)) { saveLocalProfileNotebook(profile); return; }
   const ref = doc(db, 'users', user.uid, 'profileNotebook', 'main');
   await setDoc(ref, {
     ...normalizeProfileNotebook(profile),
@@ -101,11 +104,13 @@ export const saveCloudProfileNotebook = async (user: User, profile: LearnerProfi
 };
 
 export const saveCloudWitnessSession = async (user: User, session: StudyWitnessSession): Promise<void> => {
+  if (isLocalUser(user)) return;
   const ref = doc(db, 'users', user.uid, 'studyWitnessSessions', session.id);
   await setDoc(ref, { ...session, userId: user.uid });
 };
 
 export const getCloudWitnessSessions = async (user: User, maxCount = 50): Promise<StudyWitnessSession[]> => {
+  if (isLocalUser(user)) return loadLocalWitnessSessions().slice(0, maxCount);
   const ref = collection(db, 'users', user.uid, 'studyWitnessSessions');
   const q = query(ref, orderBy('startedAt', 'desc'), limit(maxCount));
   const snapshot = await getDocs(q);
@@ -113,6 +118,7 @@ export const getCloudWitnessSessions = async (user: User, maxCount = 50): Promis
 };
 
 export const saveCloudPendingSuggestion = async (user: User, suggestion: ProfileNotebookUpdateSuggestion): Promise<void> => {
+  if (isLocalUser(user)) return;
   const ref = doc(db, 'users', user.uid, 'pendingProfileSuggestions', suggestion.id);
   await setDoc(ref, { ...suggestion, userId: user.uid });
 };

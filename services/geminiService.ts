@@ -5378,56 +5378,6 @@ ${historyText ? `此前对话：\n${historyText}\n\n` : ''}学生问：${userQue
   }
 };
 
-// --- NEW: SIDE QUEST AGENT ---
-export const runSideQuestAgent = async (
-    history: ChatMessage[],
-    newMessage: string,
-    anchorText: string
-): Promise<string> => {
-    try {
-        const SIDE_QUEST_SYSTEM_PROMPT = `
-        # 🌌 Role: The Deep Dive Archivist (Side Quest Guide)
-        
-        The user has paused their main learning journey to trigger a "Side Quest" on the specific term: **"${anchorText}"**.
-        
-        **Your Goal:** Provide an Encyclopedic, Depth-First explanation of this specific concept.
-        
-        **Rules:**
-        1. **Ignore Context Constraints**: You are NO LONGER bound by the document's scope. Use your full external knowledge base.
-        2. **Structure**:
-           - **Definition**: What is it? (Academic & Intuitive).
-           - **Origin/History**: Where did it come from?
-           - **Why it matters**: What is its core value?
-           - **Fun Fact/Counter-Intuitive**: Surprise the user.
-        3. **Tone**: Mysterious, profound, yet highly academic (like opening a secret tome).
-        4. **Language**: Chinese (Simplified).
-        
-        If the user asks follow-up questions, continue to answer in this "Deep Dive" persona.
-        `;
-
-        const contents = [];
-        
-        // Add Chat History
-        history.forEach(msg => {
-            contents.push({ role: msg.role, parts: [{ text: msg.text }] });
-        });
-
-        // Add current message
-        contents.push({ role: 'user', parts: [{ text: newMessage }] });
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-3.8-flash',
-            contents: contents,
-            config: { systemInstruction: SIDE_QUEST_SYSTEM_PROMPT }
-        });
-
-        return response.text || "Archives inaccessible...";
-    } catch (error) {
-        console.error("Side Quest Error:", error);
-        return "支线任务连接失败...";
-    }
-};
-
 // --- 海龟汤 ---
 export const generateTurtleSoupPuzzle = async (): Promise<TurtleSoupPuzzle> => {
     const prompt = `你是一个「海龟汤」出题人。请生成一道海龟汤谜题。

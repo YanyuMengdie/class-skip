@@ -1,3 +1,5 @@
+import { isLocalUser, type WorkspaceUser as User } from './workspaceUser';
+import { isLocalId, localGet, localPut, localList, localCreate, localPatch, localDelete, saveLocalFile, createLocalSession, deleteLocalFolder } from './localWorkspace';
 
 import { initializeApp } from 'firebase/app';
 import {
@@ -5,7 +7,6 @@ import {
   GoogleAuthProvider,
   signInWithPopup,
   signOut,
-  User,
   sendSignInLinkToEmail,
   isSignInWithEmailLink,
   signInWithEmailLink,
@@ -105,10 +106,14 @@ export const completeEmailLinkSignIn = async (email: string, url: string): Promi
 
 // --- Storage Functions (REST API) ---
 export const uploadPDF = async (user: User, file: File): Promise<string> => {
+  if (isLocalUser(user)) return saveLocalFile(file);
+
   return uploadToFirebaseREST(user, file, file.name, file.type || 'application/pdf');
 };
 
 export const uploadImageBlob = async (user: User, blob: Blob): Promise<string> => {
+  if (isLocalUser(user)) return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(blob); });
+
   const filename = `ai_asset_${Date.now()}.png`;
   return uploadToFirebaseREST(user, blob, filename, 'image/png');
 };
@@ -116,7 +121,7 @@ export const uploadImageBlob = async (user: User, blob: Blob): Promise<string> =
 const uploadToFirebaseREST = async (user: User, data: Blob | File, filename: string, contentType: string): Promise<string> => {
   console.group("🚀 [REST API] Upload Pipeline");
   try {
-    if (!user || !user.uid) throw new Error("User object is missing or invalid.");
+    if (!user || isLocalUser(user) || !user.uid) throw new Error("User object is missing or invalid.");
     
     console.log("1. User Verified. Fetching ID Token...");
     const authToken = await user.getIdToken(); 
@@ -206,6 +211,8 @@ export const createCloudSession = async (
   fileUrl: string,
   parentId: string | null = null
 ): Promise<string> => {
+  if (isLocalUser(user)) return createLocalSession(fileName, fileUrl, parentId);
+
   console.group("📝 [Firestore] Session Creation");
   try {
     const sessionsRef = collection(db, "sessions");
@@ -257,6 +264,8 @@ export const createCloudSession = async (
 };
 
 export const createCloudFolder = async (user: User, folderName: string, parentId: string | null = null): Promise<string> => {
+  if (isLocalUser(user)) return createLocalSession(folderName, '', parentId, 'folder');
+
     try {
         const sessionsRef = collection(db, "sessions");
         const docRef = doc(sessionsRef);
@@ -287,6 +296,8 @@ export const createCloudFolder = async (user: User, folderName: string, parentId
  * 子集合为空（当前阶段尚无任何子文档）⇒ 返回 []，调用方据此回退老数组 data/main.skimSessions。
  */
 export const readSkimSessions = async (sessionId: string): Promise<PersistedSkimSession[]> => {
+  if (isLocalId(sessionId)) return (await localGet<CloudSession>('sessions', sessionId))?.skimSessions ?? [];
+
     try {
         const skimsRef = collection(db, "sessions", sessionId, "skims");
         const snapshot = await getDocs(skimsRef);
@@ -326,6 +337,8 @@ export const readSkimSessions = async (sessionId: string): Promise<PersistedSkim
  * 删除清理留待「删除略读 session」功能落地时一并处理（见 deleteDoc 待办）。
  */
 export const writeSkimSessions = async (sessionId: string, skimSessions: PersistedSkimSession[]) => {
+  if (isLocalId(sessionId)) return localPatch('sessions', sessionId, { skimSessions });
+
     for (const s of skimSessions) {
         const batch = writeBatch(db);
         const ref = doc(db, "sessions", sessionId, "skims", s.id);
@@ -367,6 +380,8 @@ export const writeSkimSessions = async (sessionId: string, skimSessions: Persist
 
 /** 永久删除一条领读会话及其分段对话子文档；不会触碰同文件下的其他领读或私教。 */
 export const deleteSkimSessionFromCloud = async (sessionId: string, skimId: string) => {
+  if (isLocalId(sessionId)) { const row = await localGet<CloudSession>('sessions', sessionId); return localPatch('sessions', sessionId, { skimSessions: (row?.skimSessions ?? []).filter(s => s.id !== skimId) }); }
+
     const ref = doc(db, "sessions", sessionId, "skims", skimId);
     const legacyRef = doc(db, "sessions", sessionId, "data", "main");
     const [cardsSnapshot, legacySnapshot] = await Promise.all([
@@ -389,6 +404,8 @@ export const deleteSkimSessionFromCloud = async (sessionId: string, skimId: stri
 };
 
 export const fetchSessionDetails = async (sessionId: string): Promise<Partial<CloudSession>> => {
+  if (isLocalId(sessionId)) return (await localGet<CloudSession>('sessions', sessionId)) ?? {};
+
     try {
         const heavyRef = doc(db, "sessions", sessionId, "data", "main");
         const snapshot = await getDoc(heavyRef);
@@ -405,7 +422,9 @@ export const fetchSessionDetails = async (sessionId: string): Promise<Partial<Cl
     }
 };
 
-export const updateCloudSessionState = async (sessionId: string, data: Partial<CloudSession>) => {
+export const updateCloudSessionState = async (sessionId: string, data: Partial<CloudSession>, strict = false) => {
+  if (isLocalId(sessionId)) return localPatch('sessions', sessionId, Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)));
+
   try {
     // skimSessions 改走子集合（sessions/{id}/skims/{skimId}），不再进 data/main，绕开单文档 1MB 上限。
     // activeSkimIndex 仍随 rest 走 heavy → data/main（轻量字段，原路不变）。
@@ -436,10 +455,13 @@ export const updateCloudSessionState = async (sessionId: string, data: Partial<C
     }
   } catch (error) {
     console.error("[Sync] Update Failed:", error);
+    if (strict) throw error;
   }
 };
 
 export const renameCloudSession = async (sessionId: string, newName: string) => {
+  if (isLocalId(sessionId)) return localPatch('sessions', sessionId, { customTitle: newName });
+
   try {
     const sessionRef = doc(db, "sessions", sessionId);
     await updateDoc(sessionRef, { customTitle: newName });
@@ -450,6 +472,8 @@ export const renameCloudSession = async (sessionId: string, newName: string) => 
 };
 
 export const moveSession = async (sessionId: string, newParentId: string | null) => {
+  if (isLocalId(sessionId)) return localPatch('sessions', sessionId, { parentId: newParentId, updatedAt: Date.now() });
+
     try {
         const sessionRef = doc(db, "sessions", sessionId);
         await updateDoc(sessionRef, { parentId: newParentId, updatedAt: Timestamp.now() });
@@ -460,6 +484,8 @@ export const moveSession = async (sessionId: string, newParentId: string | null)
 };
 
 export const deleteCloudSession = async (sessionId: string) => {
+  if (isLocalId(sessionId)) { const row = await localGet<CloudSession>('sessions', sessionId); await localDelete('sessions', sessionId); if (row?.fileUrl?.startsWith('classskip-local:')) await localDelete('files', row.fileUrl.slice('classskip-local:'.length)); return; }
+
   try {
     const heavyRef = doc(db, "sessions", sessionId, "data", "main");
     await deleteDoc(heavyRef);
@@ -473,6 +499,8 @@ export const deleteCloudSession = async (sessionId: string) => {
 
 /** Delete one folder, promoting its immediate contents without touching their data. */
 export const deleteCloudFolderPreservingContents = async (user: User, folder: CloudSession): Promise<void> => {
+  if (isLocalUser(user)) { if (folder.userId !== user.uid || folder.type !== 'folder') throw new Error('无法删除这个文件夹。'); return deleteLocalFolder(folder); }
+
   if (!user?.uid || folder.userId !== user.uid || folder.type !== 'folder') {
     throw new Error('只能删除自己资料库里的文件夹。');
   }
@@ -514,6 +542,8 @@ export const deleteCloudFolderPreservingContents = async (user: User, folder: Cl
 };
 
 export const getUserSessions = async (user: User): Promise<CloudSession[]> => {
+  if (isLocalUser(user)) return (await localList<CloudSession>('sessions')).sort((a, b) => (b.sortIndex ?? 0) - (a.sortIndex ?? 0));
+
   try {
     const q = query(
       collection(db, "sessions"),
@@ -551,6 +581,8 @@ export const getUserSessions = async (user: User): Promise<CloudSession[]> => {
 // --- Calendar & Memo Cloud Functions (User Subcollections) ---
 
 export const addCalendarEvent = async (user: User, eventData: Omit<CalendarEvent, 'id' | 'userId'>): Promise<CalendarEvent> => {
+  if (isLocalUser(user)) return localCreate('events', eventData);
+
     try {
         const eventsRef = collection(db, "users", user.uid, "events");
         const docRef = await addDoc(eventsRef, { ...eventData, userId: user.uid });
@@ -562,6 +594,8 @@ export const addCalendarEvent = async (user: User, eventData: Omit<CalendarEvent
 };
 
 export const getCalendarEvents = async (user: User): Promise<CalendarEvent[]> => {
+  if (isLocalUser(user)) return localList<CalendarEvent>('events');
+
     try {
         const eventsRef = collection(db, "users", user.uid, "events");
         // We can optimize queries later, for now get all
@@ -575,6 +609,8 @@ export const getCalendarEvents = async (user: User): Promise<CalendarEvent[]> =>
 };
 
 export const deleteCalendarEvent = async (userId: string, eventId: string): Promise<void> => {
+  if (userId === 'local') return localDelete('events', eventId);
+
     try {
         const eventRef = doc(db, "users", userId, "events", eventId);
         await deleteDoc(eventRef);
@@ -585,6 +621,8 @@ export const deleteCalendarEvent = async (userId: string, eventId: string): Prom
 };
 
 export const addMemo = async (user: User, content: string): Promise<Memo> => {
+  if (isLocalUser(user)) return localCreate('memos', { content, createdAt: Date.now() });
+
     try {
         const memosRef = collection(db, "users", user.uid, "memos");
         const newMemo = {
@@ -601,6 +639,8 @@ export const addMemo = async (user: User, content: string): Promise<Memo> => {
 };
 
 export const getMemos = async (user: User): Promise<Memo[]> => {
+  if (isLocalUser(user)) return localList<Memo>('memos');
+
     try {
         const memosRef = collection(db, "users", user.uid, "memos");
         const q = query(memosRef, orderBy("createdAt", "desc"));
@@ -613,6 +653,8 @@ export const getMemos = async (user: User): Promise<Memo[]> => {
 };
 
 export const deleteMemo = async (userId: string, memoId: string): Promise<void> => {
+  if (userId === 'local') return localDelete('memos', memoId);
+
     try {
         const memoRef = doc(db, "users", userId, "memos", memoId);
         await deleteDoc(memoRef);
@@ -629,6 +671,8 @@ export const deleteMemo = async (userId: string, memoId: string): Promise<void> 
 
 /** 单条 upsert：以 session.id 作云端文档 id（setDoc 即存在则覆盖、不存在则建） */
 export const saveTutorSessionToCloud = async (user: User, session: TutorSession): Promise<void> => {
+  if (isLocalUser(user)) return localPut('tutors', session.id, session);
+
     try {
         const ref = doc(db, "users", user.uid, "tutorSessions", session.id);
         await setDoc(ref, { ...session, userId: user.uid });
@@ -640,6 +684,8 @@ export const saveTutorSessionToCloud = async (user: User, session: TutorSession)
 
 /** 拉取当前用户全部私教会话（按 createdAt 降序） */
 export const getTutorSessionsFromCloud = async (user: User): Promise<TutorSession[]> => {
+  if (isLocalUser(user)) return localList<TutorSession>('tutors');
+
     try {
         const ref = collection(db, "users", user.uid, "tutorSessions");
         const q = query(ref, orderBy("createdAt", "desc"));
@@ -653,6 +699,8 @@ export const getTutorSessionsFromCloud = async (user: User): Promise<TutorSessio
 
 /** 按 id 删单条 */
 export const deleteTutorSessionFromCloud = async (userId: string, sessionId: string): Promise<void> => {
+  if (userId === 'local') return localDelete('tutors', sessionId);
+
     try {
         const ref = doc(db, "users", userId, "tutorSessions", sessionId);
         await deleteDoc(ref);
@@ -668,6 +716,8 @@ export const createJointReviewPack = async (
     user: User,
     input: { title: string; materials: JointReviewMaterial[] }
 ): Promise<JointReviewPack> => {
+  if (isLocalUser(user)) return localCreate('joint', { ...input, summaryMarkdown: '', guideMessages: [], examPrepMarkdown: '', createdAt: Date.now(), updatedAt: Date.now(), generatedAt: null, examPrepGeneratedAt: null });
+
     try {
         const now = Date.now();
         const packsRef = collection(db, "users", user.uid, "jointReviewPacks");
@@ -692,6 +742,8 @@ export const createJointReviewPack = async (
 };
 
 export const getJointReviewPacks = async (user: User): Promise<JointReviewPack[]> => {
+  if (isLocalUser(user)) return localList<JointReviewPack>('joint');
+
     try {
         const packsRef = collection(db, "users", user.uid, "jointReviewPacks");
         const q = query(packsRef, orderBy("updatedAt", "desc"));
@@ -708,6 +760,8 @@ export const updateJointReviewPack = async (
     packId: string,
     partial: Partial<Pick<JointReviewPack, 'title' | 'materials' | 'summaryMarkdown' | 'guideMessages' | 'examPrepMarkdown' | 'generatedAt' | 'examPrepGeneratedAt'>>
 ): Promise<void> => {
+  if (isLocalUser(user)) return localPatch('joint', packId, { ...partial, updatedAt: Date.now() });
+
     try {
         const ref = doc(db, "users", user.uid, "jointReviewPacks", packId);
         await updateDoc(ref, {
@@ -721,6 +775,8 @@ export const updateJointReviewPack = async (
 };
 
 export const deleteJointReviewPack = async (userId: string, packId: string): Promise<void> => {
+  if (userId === 'local') return localDelete('joint', packId);
+
     try {
         const ref = doc(db, "users", userId, "jointReviewPacks", packId);
         await deleteDoc(ref);
@@ -781,6 +837,8 @@ export const createExam = async (
     user: User,
     input: { title: string; examAt: number | null; color?: string; notes?: string; disciplineBand?: DisciplineBand }
 ): Promise<Exam> => {
+  if (isLocalUser(user)) return localCreate('exams', { ...input, createdAt: Date.now(), updatedAt: Date.now() });
+
     const now = Timestamp.now();
     const examAtTs = input.examAt != null ? Timestamp.fromMillis(input.examAt) : null;
     const payload = {
@@ -802,6 +860,8 @@ export const updateExam = async (
     examId: string,
     partial: Partial<Pick<Exam, 'title' | 'examAt' | 'color' | 'notes' | 'disciplineBand'>>
 ): Promise<void> => {
+  if (isLocalUser(user)) return localPatch('exams', examId, { ...partial, updatedAt: Date.now() });
+
     const ref = doc(db, 'exams', examId);
     const snap = await getDoc(ref);
     if (!snap.exists() || (snap.data() as { userId?: string }).userId !== user.uid) throw new Error('无权修改该考试');
@@ -817,6 +877,8 @@ export const updateExam = async (
 };
 
 export const deleteExam = async (user: User, examId: string): Promise<void> => {
+  if (isLocalUser(user)) { for (const link of await localList<ExamMaterialLink>('examMaterials')) if (link.examId === examId) await localDelete('examMaterials', link.id); return localDelete('exams', examId); }
+
     const ref = doc(db, 'exams', examId);
     const snap = await getDoc(ref);
     if (!snap.exists() || (snap.data() as { userId?: string }).userId !== user.uid) throw new Error('无权删除该考试');
@@ -829,6 +891,8 @@ export const deleteExam = async (user: User, examId: string): Promise<void> => {
 };
 
 export const listExams = async (user: User): Promise<Exam[]> => {
+  if (isLocalUser(user)) return localList<Exam>('exams');
+
     try {
         const q = query(collection(db, 'exams'), where('userId', '==', user.uid));
         const snap = await getDocs(q);
@@ -850,6 +914,8 @@ export const addExamMaterialLink = async (
     user: User,
     input: Omit<ExamMaterialLink, 'id' | 'userId' | 'addedAt'> & { examId: string }
 ): Promise<ExamMaterialLink> => {
+  if (isLocalUser(user)) return localCreate('examMaterials', { ...input, addedAt: Date.now() });
+
     const now = Timestamp.now();
     const payload = {
         userId: user.uid,
@@ -866,6 +932,8 @@ export const addExamMaterialLink = async (
 };
 
 export const removeExamMaterialLink = async (user: User, linkId: string): Promise<void> => {
+  if (isLocalUser(user)) return localDelete('examMaterials', linkId);
+
     const ref = doc(db, 'examMaterials', linkId);
     const snap = await getDoc(ref);
     if (!snap.exists() || (snap.data() as { userId?: string }).userId !== user.uid) throw new Error('无权删除该关联');
@@ -873,6 +941,8 @@ export const removeExamMaterialLink = async (user: User, linkId: string): Promis
 };
 
 export const listExamMaterialLinks = async (user: User): Promise<ExamMaterialLink[]> => {
+  if (isLocalUser(user)) return localList<ExamMaterialLink>('examMaterials');
+
     try {
         const q = query(collection(db, 'examMaterials'), where('userId', '==', user.uid));
         const snap = await getDocs(q);
@@ -888,6 +958,8 @@ export const listExamMaterialLinks = async (user: User): Promise<ExamMaterialLin
 const dailyPlanDocId = (userId: string, dateStr: string) => `${userId}_${dateStr}`;
 
 export const getDailyPlanCache = async (userId: string, dateStr: string): Promise<DailyPlanCacheDoc | null> => {
+  if (userId === 'local') return localGet<DailyPlanCacheDoc>('daily', dateStr);
+
     try {
         const ref = doc(db, 'dailyPlanCache', dailyPlanDocId(userId, dateStr));
         const snap = await getDoc(ref);
@@ -910,22 +982,26 @@ export const getDailyPlanCache = async (userId: string, dateStr: string): Promis
     }
 };
 
-export const setDailyPlanCache = async (user: User, doc: Omit<DailyPlanCacheDoc, 'userId'> & { date: string }): Promise<void> => {
-    const id = dailyPlanDocId(user.uid, doc.date);
+export const setDailyPlanCache = async (user: User, plan: Omit<DailyPlanCacheDoc, 'userId'> & { date: string }): Promise<void> => {
+  if (isLocalUser(user)) return localPut('daily', plan.date, { ...plan, userId: user.uid });
+
+    const id = dailyPlanDocId(user.uid, plan.date);
     const ref = doc(db, 'dailyPlanCache', id);
     await setDoc(ref, {
         userId: user.uid,
-        date: doc.date,
-        selectedExamIds: doc.selectedExamIds,
-        segments: doc.segments,
-        generatedAt: doc.generatedAt,
-        budgetMinutes: doc.budgetMinutes,
-        version: doc.version,
-        maintenance: doc.maintenance ?? null,
+        date: plan.date,
+        selectedExamIds: plan.selectedExamIds,
+        segments: plan.segments,
+        generatedAt: plan.generatedAt,
+        budgetMinutes: plan.budgetMinutes,
+        version: plan.version,
+        maintenance: plan.maintenance ?? null,
     });
 };
 
 export const deleteDailyPlanCache = async (user: User, dateStr: string): Promise<void> => {
+  if (isLocalUser(user)) return localDelete('daily', dateStr);
+
     try {
         await deleteDoc(doc(db, 'dailyPlanCache', dailyPlanDocId(user.uid, dateStr)));
     } catch (e) {
@@ -937,6 +1013,8 @@ export const saveTinyStudyEntrySessionToCloud = async (
     user: User,
     session: TinyStudyEntrySession
 ): Promise<void> => {
+  if (isLocalUser(user)) return localPut('tiny', session.cloudSessionId, session);
+
     const ref = doc(db, 'users', user.uid, 'tinyStudyEntrySessions', session.cloudSessionId);
     const payload = JSON.parse(JSON.stringify({ ...session, userId: user.uid }));
     await setDoc(ref, payload);
@@ -946,6 +1024,8 @@ export const getTinyStudyEntrySessionFromCloud = async (
     user: User,
     cloudSessionId: string
 ): Promise<TinyStudyEntrySession | null> => {
+  if (isLocalUser(user)) return localGet<TinyStudyEntrySession>('tiny', cloudSessionId);
+
     const ref = doc(db, 'users', user.uid, 'tinyStudyEntrySessions', cloudSessionId);
     const snap = await getDoc(ref);
     if (!snap.exists()) return null;

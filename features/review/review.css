@@ -91,3 +91,4 @@
 
 .review-tool-grid.is-practice { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 760px) { .review-tool-grid.is-practice { grid-template-columns: 1fr; } }
+.review-workspace-record-note { margin-top:28px; font-size:12px; line-height:1.8; color:#758074; }

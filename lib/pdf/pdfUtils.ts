@@ -1,3 +1,4 @@
+import { readLocalFile } from '@/services/localWorkspace';
 
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
@@ -250,6 +251,7 @@ export const generateFileHash = async (file: File): Promise<string> => {
  * Fetches a file from a URL (Firebase Storage) and returns it as a File object.
  */
 export const fetchFileFromUrl = async (url: string, filename: string): Promise<File> => {
+  if (url.startsWith('classskip-local:')) return readLocalFile(url, filename);
   const response = await fetch(url);
   const blob = await response.blob();
   return new File([blob], filename, { type: 'application/pdf' });

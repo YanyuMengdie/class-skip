@@ -1,9 +1,10 @@
+import { isCloudUser } from '@/services/workspaceUser';
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen, Swords, X, Timer, MoreHorizontal, LayoutDashboard } from 'lucide-react';
 import { MusicPlayer } from '@/shared/layout/MusicPlayer';
 import { ViewMode } from '@/types';
-import { User } from 'firebase/auth'; 
+import type { WorkspaceUser as User } from '@/services/workspaceUser'; 
 
 interface HeaderProps {
   fileName: string | null;
@@ -52,6 +53,8 @@ interface HeaderProps {
   
   // Firebase Auth
   user: User | null;
+  localWorkspace?: boolean;
+  saveError?: string;
   onLogin: () => void;
   onLogout: () => void;
   isSyncing: boolean;
@@ -147,6 +150,8 @@ export const Header: React.FC<HeaderProps> = ({
   onLogin,
   onLogout,
   isSyncing,
+  localWorkspace = false,
+  saveError,
   onToggleSidebar,
   onOpenDashboard,
   isStudySessionActive = false,
@@ -360,11 +365,11 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               onClick={onOpenExamWorkspace}
               className="editorial-toolbar-control reading-toolbar-tool is-secondary flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold"
-              title="备考工作台：选择当前考试、查看材料、进入考前预测"
-              aria-label="考试复习"
+              title="直接复习当前讲义，也可以在工作台切换到考试复习"
+              aria-label="复习本讲"
             >
               <LayoutDashboard className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">考试复习</span>
+              <span className="hidden sm:inline">复习本讲</span>
             </button>
           )}
           {/* 更多：上课、学累了/休息、重点标记、沉浸、课堂录音、计时、背景音入口等 */}
@@ -471,11 +476,11 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* 账户 */}
-          {user ? (
+          {isCloudUser(user) ? (
             <div className="relative group">
               <button className="flex items-center space-x-1 p-1.5 pr-3 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 hover:bg-emerald-100 transition-colors" title="已登录" aria-label="账户">
                 {user.photoURL ? <img src={user.photoURL} className="w-6 h-6 rounded-full border border-white" alt="" /> : <UserIcon className="w-5 h-5" />}
-                <span className="text-[10px] font-bold hidden xl:inline">{isSyncing ? '同步中' : '已同步'}</span>
+                <span className="text-[10px] font-bold hidden xl:inline">{localWorkspace ? '本机保存' : isSyncing ? '同步中' : '已同步'}</span>
               </button>
               <div className="absolute top-full right-0 mt-2 w-32 bg-white rounded-xl shadow-xl border border-stone-100 p-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all z-50">
                 <button onClick={onLogout} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-500 hover:bg-rose-50 rounded-lg">
@@ -490,6 +495,8 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
       </div>
+
+      {saveError && <p role="alert" className="px-4 py-2 text-sm bg-amber-50 text-amber-900">{saveError}</p>}
 
       {/* 计时器弹层（Portal 到 body，避免被裁切或误关） */}
       {timerPopoverOpen && createPortal(

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import type { User } from 'firebase/auth';
+import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import type { Exam, ExamMaterialLink, FilePersistedState, StudyFlowStep } from '@/types';
 import { listExams, listExamMaterialLinks } from '@/services/firebase';
 import { ExamCenterPanel } from '@/features/exam/hub/ExamCenterPanel';

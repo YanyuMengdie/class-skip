@@ -1,4 +1,4 @@
-import { authenticatedApiFetch } from '@/services/authenticatedApi';
+import { authenticatedApiFetch, ApiPayloadSizeError } from '@/services/authenticatedApi';
 import type { GenerateContentParameters } from '@google/genai';
 import { getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
 
@@ -98,7 +98,8 @@ export async function generateReadingContent(params: GenerateContentParameters, 
         method: 'POST', credentials: 'same-origin', redirect: 'error', signal: controller.signal,
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof ApiPayloadSizeError) throw new ReadingAstraClientError(error.message, 'payload_too_large');
       if (externalSignal?.aborted) throw abortError();
       throw safeError(timedOut ? 'timeout' : 'unavailable', english);
     }
