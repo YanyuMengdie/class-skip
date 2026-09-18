@@ -1,11 +1,13 @@
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
-import { X, Loader2, GitBranch, ZoomIn, ZoomOut, RotateCcw, Sparkles, Maximize2, MessageSquare } from 'lucide-react';
+import { X, Loader2, GitBranch, ZoomIn, ZoomOut, RotateCcw, Sparkles, Maximize2, MoreHorizontal, ChevronDown } from 'lucide-react';
 import { MindMapNode, MindMapMultiResult } from '@/types';
 import { generateMindMap, generateMindMapMulti, evaluateAndSupplementMindMap, modifyMindMap } from '@/services/geminiService';
 import { MindMapFlowCanvas, type MindMapFlowCanvasRef, type TreePart } from '@/features/review/tools/mindMap/MindMapFlowCanvas';
+import './mindMap.css';
 import type { MindMapFlowNodeHandlers } from '@/features/review/lib/mindMap/mindMapFlowAdapter';
 
 interface MindMapPanelProps {
+  initialPayload?: { tree: MindMapNode } | { multiResult: MindMapMultiResult } | null;
   onClose: () => void;
   pdfContent: string | null;
   fileNames: string[] | null;
@@ -48,16 +50,36 @@ function deleteNodeInTree(root: MindMapNode, targetId: string): MindMapNode {
   return root;
 }
 
-export const MindMapPanel: React.FC<MindMapPanelProps> = ({ onClose, pdfContent, fileNames, displayName, onSaveToStudio }) => {
+export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onClose, pdfContent, fileNames, displayName, onSaveToStudio }) => {
   const [mode, setMode] = useState<'ai' | 'build'>('ai');
+  const [optionsOpen, setOptionsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const [activeDocument, setActiveDocument] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [singleTree, setSingleTree] = useState<MindMapNode | null>(null);
+  const [singleTree, setSingleTree] = useState<MindMapNode | null>(initialPayload && 'tree' in initialPayload ? initialPayload.tree : null);
   const [multiResult, setMultiResult] = useState<{
     perDoc: Array<{ fileName: string; tree: MindMapNode }>;
     crossDoc: Array<{ docA: string; docB: string; similarities: string[] }>;
-  } | null>(null);
+  } | null>(initialPayload && 'multiResult' in initialPayload ? initialPayload.multiResult : null);
+
+  const savedPayloadRef = useRef(JSON.stringify(initialPayload ?? null));
+  useEffect(() => {
+    if (!initialPayload || singleTree || multiResult || loading) return;
+    savedPayloadRef.current = JSON.stringify(initialPayload);
+    if ('tree' in initialPayload) setSingleTree(initialPayload.tree);
+    else setMultiResult(initialPayload.multiResult);
+  }, [initialPayload, singleTree, multiResult, loading]);
+  useEffect(() => {
+    if (loading || mode !== 'ai') return;
+    const payload = multiResult ? { multiResult } : singleTree ? { tree: singleTree } : null;
+    if (!payload) return;
+    const serialized = JSON.stringify(payload);
+    if (serialized === savedPayloadRef.current) return;
+    savedPayloadRef.current = serialized;
+    onSaveToStudio?.(payload);
+  }, [singleTree, multiResult, loading, mode, onSaveToStudio]);
 
   const [userTree, setUserTree] = useState<MindMapNode>(() => ({ id: 'root', label: '中心主题', children: [] }));
   const [evaluateResult, setEvaluateResult] = useState<{
@@ -65,7 +87,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ onClose, pdfContent,
     suggestedNodes: Array<{ parentId: string; node: MindMapNode }>;
   } | null>(null);
 
-  const isMulti = fileNames && fileNames.length > 1;
+  const isMulti = !!multiResult || (!singleTree && fileNames && fileNames.length > 1);
 
   const flowRef = useRef<MindMapFlowCanvasRef | null>(null);
 
@@ -76,12 +98,10 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ onClose, pdfContent,
     }
     setError(null);
     setLoading(true);
-    setSingleTree(null);
-    setMultiResult(null);
     if (isMulti && fileNames && fileNames.length > 0) {
       generateMindMapMulti(pdfContent, fileNames)
         .then((res) => {
-          if (res) setMultiResult(res);
+          if (res) { setMultiResult(res); setSingleTree(null); setActiveDocument(0); }
           else setError('生成失败，请重试');
         })
         .catch(() => setError('生成失败，请重试'))
@@ -89,7 +109,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ onClose, pdfContent,
     } else {
       generateMindMap(pdfContent)
         .then((tree) => {
-          if (tree) setSingleTree(tree);
+          if (tree) { setSingleTree(tree); setMultiResult(null); }
           else setError('生成失败，请重试');
         })
         .catch(() => setError('生成失败，请重试'))
@@ -299,7 +319,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ onClose, pdfContent,
   ]);
 
   const hasFlowContent = flowParts.length > 0;
-  const hasAnyTree = singleTree != null || (multiResult?.perDoc?.length ?? 0) > 0 || mode === 'build';
+  const visiblePart = flowParts[Math.min(activeDocument, Math.max(0, flowParts.length - 1))];
 
   const [modifyDialogOpen, setModifyDialogOpen] = useState(false);
   const [modifyInstruction, setModifyInstruction] = useState('');
@@ -308,17 +328,21 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ onClose, pdfContent,
   const openModifyDialog = useCallback((tree: MindMapNode, onApply: (t: MindMapNode) => void) => {
     setModifyTarget({ tree, onApply });
     setModifyInstruction('');
+    setError(null);
     setModifyDialogOpen(true);
   }, []);
   const handleModifySubmit = useCallback(() => {
     if (!modifyTarget?.tree || !modifyInstruction.trim()) return;
     setModifyLoading(true);
+    setError(null);
     modifyMindMap(modifyTarget.tree, modifyInstruction.trim(), pdfContent ?? undefined)
       .then((newTree) => {
-        if (newTree) modifyTarget.onApply(newTree);
+        if (!newTree) { setError('修改未完成，原导图已保留。'); return; }
+        modifyTarget.onApply(newTree);
         setModifyDialogOpen(false);
         setModifyTarget(null);
       })
+      .catch(() => setError('修改未完成，原导图已保留。'))
       .finally(() => setModifyLoading(false));
   }, [modifyTarget, modifyInstruction, pdfContent]);
 
@@ -336,224 +360,78 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ onClose, pdfContent,
   }, [modifyDialogOpen, modifyLoading]);
 
   return (
-    <div className="fixed inset-0 z-[300] flex flex-col bg-stone-50 animate-in fade-in duration-200">
-      <header className="shrink-0 flex items-center justify-between gap-4 px-4 py-3 border-b border-stone-200 bg-white">
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-2 rounded-xl hover:bg-stone-100 text-stone-500 hover:text-slate-700 shrink-0"
-            title="关闭"
-            aria-label="关闭思维导图"
-          >
-            <X className="w-5 h-5" />
-          </button>
-          <h1 className="font-bold text-slate-800 text-lg flex items-center gap-2 min-w-0 truncate">
-            <GitBranch className="w-5 h-5 text-teal-500 shrink-0" />
-            思维导图
-            {displayName && <span className="text-sm font-normal text-stone-500 truncate">{displayName}</span>}
-          </h1>
-          <div className="flex rounded-xl border border-stone-200 overflow-hidden shrink-0">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('ai');
-                setError(null);
-              }}
-              className={`py-2 px-4 text-sm font-bold ${mode === 'ai' ? 'bg-teal-100 text-teal-800' : 'text-stone-500 hover:bg-stone-50'}`}
-            >
-              AI 生成
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('build');
-                setError(null);
-                setEvaluateResult(null);
-              }}
-              className={`py-2 px-4 text-sm font-bold ${mode === 'build' ? 'bg-teal-100 text-teal-800' : 'text-stone-500 hover:bg-stone-50'}`}
-            >
-              自己构建
-            </button>
+    <div className="mm-panel">
+      <header className="mm-header">
+        <div className="mm-heading">
+          <button type="button" className="mm-icon" onClick={onClose} aria-label="关闭思维导图"><X size={20} /></button>
+          <GitBranch size={22} />
+          <div><h1>思维导图</h1><p title={displayName ?? undefined}>{mode === 'build' ? '自己构建' : displayName || '从主题开始，逐层探索'}</p></div>
+        </div>
+        <div className="mm-header-actions">
+          {hasFlowContent && <div className="mm-zoom-controls">
+            <button className="mm-icon" onClick={() => flowRef.current?.zoomOut()} aria-label="缩小画布" title="缩小"><ZoomOut size={18} /></button>
+            <button className="mm-icon" onClick={() => flowRef.current?.zoomIn()} aria-label="放大画布" title="放大"><ZoomIn size={18} /></button>
+            <button className="mm-icon" onClick={() => flowRef.current?.resetViewport()} aria-label="收起到第一层并恢复阅读大小" title="回到第一层"><RotateCcw size={18} /></button>
+            <button className="mm-icon" onClick={() => flowRef.current?.fitView()} aria-label="查看当前展开的全图" title="查看全图"><Maximize2 size={18} /></button>
+          </div>}
+          {mode === 'ai' && flowParts.length > 1 && <label className="mm-doc-picker"><span className="sr-only">选择文档导图</span><select value={Math.min(activeDocument, flowParts.length - 1)} onChange={e => setActiveDocument(Number(e.target.value))}>
+            {flowParts.map((part, i) => <option key={part.scope} value={i}>{multiResult?.perDoc[i]?.fileName ?? part.tree.label}</option>)}
+          </select></label>}
+          <div className="mm-more">
+            <button type="button" className="mm-button" aria-expanded={optionsOpen} aria-controls="mm-options" onClick={() => setOptionsOpen(v => !v)}><MoreHorizontal size={18} /><span>更多</span></button>
+            {optionsOpen && <><button className="mm-menu-dismiss" aria-label="关闭更多选项" onClick={() => setOptionsOpen(false)} /><div className="mm-menu" id="mm-options" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setOptionsOpen(false); } }}>
+              <button disabled={loading || modifyLoading} onClick={() => { setMode(mode === 'ai' ? 'build' : 'ai'); setActiveDocument(0); setError(null); setOptionsOpen(false); }}>{mode === 'ai' ? '自己构建导图' : '返回资料导图'}</button>
+              {hasFlowContent && onSaveToStudio && <button onClick={() => {
+                if (mode === 'build') onSaveToStudio({ tree: userTree });
+                else if (multiResult) onSaveToStudio({ multiResult });
+                else if (singleTree) onSaveToStudio({ tree: singleTree });
+                setOptionsOpen(false);
+              }}>保存到已保存的内容</button>}
+              {hasFlowContent && mode === 'ai' && <button disabled={!pdfContent?.trim() || loading} onClick={() => { setOptionsOpen(false); handleGenerate(); }}>重新生成导图（使用 AI）</button>}
+              {visiblePart && <button disabled={loading || modifyLoading} onClick={() => {
+                const part = visiblePart;
+                openModifyDialog(part.tree, tree => part.handlers.onUpdate(part.tree.id, () => tree));
+                setOptionsOpen(false);
+              }}>修改当前导图（使用 AI）</button>}
+              {mode === 'build' && <button disabled={!pdfContent?.trim() || loading} onClick={() => { setOptionsOpen(false); setInfoOpen(true); handleEvaluate(); }}>评判与补充（使用 AI）</button>}
+              {(multiResult || evaluateResult) && <button onClick={() => { setInfoOpen(v => !v); setOptionsOpen(false); }}>文档关联与补充建议</button>}
+            </div></>}
           </div>
         </div>
-        {hasAnyTree && (
-          <div className="flex items-center gap-2 shrink-0 flex-wrap justify-end">
-            <div className="flex items-center gap-1 rounded-lg border border-stone-200 bg-stone-50 p-1">
-              <button
-                type="button"
-                onClick={() => flowRef.current?.zoomOut?.()}
-                className="p-1.5 rounded text-stone-600 hover:bg-stone-200"
-                title="缩小"
-                aria-label="缩小画布"
-              >
-                <ZoomOut className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => flowRef.current?.resetViewport?.()}
-                className="px-2 py-1 text-xs font-mono text-stone-600 min-w-[2.5rem] flex items-center justify-center"
-                title="重置视口到 100% 与左上角"
-                aria-label="重置视口"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-              </button>
-              <button
-                type="button"
-                onClick={() => flowRef.current?.zoomIn?.()}
-                className="p-1.5 rounded text-stone-600 hover:bg-stone-200"
-                title="放大"
-                aria-label="放大画布"
-              >
-                <ZoomIn className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => flowRef.current?.fitView?.()}
-                className="p-1.5 rounded text-stone-600 hover:bg-stone-200 border-l border-stone-200 ml-0.5 pl-1.5"
-                title="适应画布：缩放到整图可见"
-                aria-label="适应画布"
-              >
-                <Maximize2 className="w-4 h-4" />
-              </button>
-              <span className="hidden md:inline text-[11px] text-stone-500 max-w-[260px] leading-tight text-right" title="画布操作">
-                滚轮缩放 · 拖移平移 · 右下角小地图
-              </span>
-            </div>
-            {onSaveToStudio && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (mode === 'build') onSaveToStudio({ tree: userTree });
-                  else if (singleTree) onSaveToStudio({ tree: singleTree });
-                  else if (multiResult?.perDoc?.length) onSaveToStudio({ multiResult });
-                }}
-                className="flex items-center gap-2 py-2 px-4 rounded-xl bg-teal-100 text-teal-800 text-sm font-bold hover:bg-teal-200"
-              >
-                保存到 Studio
-              </button>
-            )}
-            {(singleTree || (multiResult?.perDoc?.length ?? 0) > 0) && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (singleTree) openModifyDialog(singleTree, setSingleTree);
-                  else if (multiResult?.perDoc?.length) {
-                    openModifyDialog(multiResult.perDoc[0].tree, (t) =>
-                      setMultiResult((prev) => (prev ? { ...prev, perDoc: prev.perDoc.map((d, i) => (i === 0 ? { ...d, tree: t } : d)) } : null))
-                    );
-                  }
-                }}
-                className="flex items-center gap-2 py-2 px-4 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600"
-              >
-                <Sparkles className="w-4 h-4" /> 让 AI 修改
-              </button>
-            )}
-          </div>
-        )}
       </header>
-
-      <div className="flex flex-col flex-1 min-h-0">
-        <div className="shrink-0 overflow-auto max-h-[min(50vh,480px)] border-b border-stone-200 bg-white px-4 py-3">
-          <div className="max-w-4xl">
-            {error && <p className="text-rose-600 text-sm mb-2">{error}</p>}
-
-            {mode === 'ai' && (
-              <>
-                <p className="text-slate-600 text-sm mb-3">
-                  {isMulti
-                    ? `已选 ${fileNames?.length || 0} 个文档，将生成每份的思维导图并分析文档间关联。节点为中文+英文对照。`
-                    : '根据当前文档生成思维导图，节点为中文+英文对照。'}
-                </p>
-                <button
-                  type="button"
-                  onClick={handleGenerate}
-                  disabled={!pdfContent?.trim() || loading}
-                  className="flex items-center gap-2 py-2.5 px-4 rounded-xl bg-teal-500 text-white text-sm font-bold hover:bg-teal-600 disabled:opacity-50 mb-4"
-                >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <GitBranch className="w-4 h-4" />}
-                  {loading ? '生成中...' : '生成思维导图'}
-                </button>
-                {multiResult && !loading && multiResult.crossDoc.length > 0 && (
-                  <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 max-w-2xl mb-4">
-                    <h3 className="text-sm font-bold text-amber-800 mb-2">文档间关联</h3>
-                    <ul className="space-y-2 text-sm text-slate-700">
-                      {multiResult.crossDoc.map((link, i) => (
-                        <li key={i}>
-                          <span className="font-medium">{link.docA}</span> – <span className="font-medium">{link.docB}</span>
-                          <ul className="list-disc list-inside ml-2 mt-1 text-slate-600">{link.similarities.map((s, j) => <li key={j}>{s}</li>)}</ul>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {multiResult && !loading && (
-                  <div className="space-y-2 text-sm text-slate-600 mb-2">
-                    {multiResult.perDoc.map((d, i) => (
-                      <div key={d.fileName} className="flex flex-wrap items-center gap-2">
-                        <span className="font-bold text-teal-800">文档：{d.fileName}</span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            openModifyDialog(d.tree, (t) =>
-                              setMultiResult((prev) => (prev ? { ...prev, perDoc: prev.perDoc.map((x) => (x.fileName === d.fileName ? { ...x, tree: t } : x)) } : null))
-                            )
-                          }
-                          className="flex items-center gap-1 py-1 px-2 rounded-lg bg-amber-100 text-amber-800 text-xs font-bold hover:bg-amber-200"
-                        >
-                          <Sparkles className="w-3 h-3" /> 让 AI 修改此导图
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-
-            {mode === 'build' && (
-              <>
-                <p className="text-slate-600 text-sm mb-3">自己构建思维导图，双击节点可编辑；完成后可请 AI 评判与补充。</p>
-                <button
-                  type="button"
-                  onClick={handleEvaluate}
-                  disabled={!pdfContent?.trim() || loading}
-                  className="flex items-center gap-2 py-2.5 px-4 rounded-xl bg-amber-500 text-white text-sm font-bold hover:bg-amber-600 disabled:opacity-50 mb-4"
-                >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <MessageSquare className="w-4 h-4" />}
-                  {loading ? '评判中...' : '请 AI 评判与补充'}
-                </button>
-                {evaluateResult && !loading && (
-                  <div className="mt-2 p-4 rounded-xl bg-stone-100 border border-stone-200 text-sm max-w-2xl">
-                    <p className="font-bold text-slate-800 mb-1">AI 评语</p>
-                    <p className="text-slate-700">{evaluateResult.feedback}</p>
-                    {evaluateResult.suggestedNodes.length > 0 && (
-                      <p className="mt-2 text-slate-600">建议补充的节点已显示在对应父节点下方，点击「应用」可加入导图。</p>
-                    )}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
-
-        <main className="flex-1 min-h-0 relative bg-slate-100">
-          {hasFlowContent ? <MindMapFlowCanvas ref={flowRef} parts={flowParts} /> : <div className="absolute inset-0 flex items-center justify-center text-stone-400 text-sm">生成或构建导图后，将在此显示（ELK + React Flow）</div>}
-        </main>
-      </div>
+      {error && <div className="mm-notice" role="alert">{error}<button className="mm-icon" onClick={() => setError(null)} aria-label="关闭提示"><X size={16} /></button></div>}
+      {loading && <div className="mm-notice" role="status"><Loader2 size={16} className="animate-spin" />正在整理导图，请稍候…</div>}
+      {infoOpen && <section className="mm-info">
+        <div className="mm-details-heading"><h2>文档关联与补充建议</h2><button className="mm-icon" onClick={() => setInfoOpen(false)} aria-label="收起关联与建议"><ChevronDown size={18} /></button></div>
+        {mode === 'ai' && multiResult?.crossDoc.map((link, i) => <div key={i}><h3>{link.docA} · {link.docB}</h3><ul>{link.similarities.map((s, j) => <li key={j}>{s}</li>)}</ul></div>)}
+        {mode === 'build' && evaluateResult && <><p>{evaluateResult.feedback}</p>{evaluateResult.suggestedNodes.length > 0 && <><p>点击对应概念可查看并加入建议分支：</p><ul>{evaluateResult.suggestedNodes.map((s, i) => <li key={i}>{s.node.label}</li>)}</ul></>}</>}
+      </section>}
+      <main className="mm-main">
+        {visiblePart ? <MindMapFlowCanvas key={visiblePart.scope} ref={flowRef} parts={[visiblePart]} /> : <div className="mm-empty">
+          <div className="mm-empty-symbol"><GitBranch size={36} /></div>
+          <span className="mm-eyebrow">MIND MAP</span>
+          <h2>先看全貌，再沿着分支探索</h2>
+          <p>{isMulti ? `把所选 ${fileNames?.length ?? 0} 份资料整理为各自的导图，并保留文档间的关联。` : '把这份资料的主题与概念连起来，点击分支，逐层展开。'}</p>
+          <button className="mm-primary" disabled={!pdfContent?.trim() || loading} onClick={handleGenerate}>{loading ? <Loader2 size={18} className="animate-spin" /> : <GitBranch size={18} />}{loading ? '正在生成…' : '生成思维导图'}</button>
+          <small>生成会使用 AI；浏览已有导图无需重新生成。</small>
+          {!pdfContent?.trim() && <small>尚未取得资料正文，请返回选择资料。</small>}
+        </div>}
+      </main>
 
       {modifyDialogOpen && (
         <div className="fixed inset-0 z-[400] bg-black/40 flex items-center justify-center p-4" role="presentation" onClick={() => !modifyLoading && setModifyDialogOpen(false)}>
           <div
-            className="bg-white rounded-2xl shadow-xl border border-stone-200 w-full max-w-md p-5"
+            className="mm-modify-dialog w-full max-w-md p-5"
             role="dialog"
             aria-modal="true"
             aria-labelledby="mindmap-modify-dialog-title"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="mindmap-modify-dialog-title" className="font-bold text-slate-800 text-lg mb-2 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-amber-500" /> 让 AI 修改思维导图
+              <Sparkles className="w-5 h-5" /> 让 AI 修改思维导图
             </h3>
             <p className="text-slate-600 text-sm mb-3">描述你希望的修改，例如：增加一节关于 XX、删掉某分支、简化、或翻译成英文。</p>
+            {error && <p className="mm-modify-error" role="alert">{error}</p>}
             <textarea
               value={modifyInstruction}
               onChange={(e) => setModifyInstruction(e.target.value)}
@@ -574,7 +452,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ onClose, pdfContent,
                 type="button"
                 onClick={handleModifySubmit}
                 disabled={!modifyInstruction.trim() || modifyLoading}
-                className="flex items-center gap-2 py-2 px-4 rounded-xl bg-amber-500 text-white font-bold hover:bg-amber-600 disabled:opacity-50"
+                className="mm-primary"
                 aria-label="提交 AI 修改请求"
               >
                 {modifyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}

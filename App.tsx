@@ -1,3 +1,6 @@
+import { useReviewCache } from '@/features/review/lib/useReviewCache';
+import { reviewSourceKey, notesToTree } from '@/features/review/lib/reviewNotes';
+import { StudyToolMenu } from '@/features/review/StudyToolMenu';
 import { prepareLectureKnowledge, type PrepareLectureKnowledgeOptions } from '@/features/exam/round/lectureKnowledge';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -800,6 +803,7 @@ const App: React.FC = () => {
   // --- Study Guide 状态 ---
   const [studyGuide, setStudyGuide] = useState<StudyGuide | null>(null);
   const [studyGuidePanel, setStudyGuidePanel] = useState(false);
+  const [quizPracticeKind, setQuizPracticeKind] = useState<'standard' | 'case'>('standard');
 
   // --- Studio 已生成条目（NotebookLM 式右侧持久化）---
   const [savedArtifacts, setSavedArtifacts] = useState<SavedArtifact[]>([]);
@@ -811,6 +815,7 @@ const App: React.FC = () => {
   const [combinedReviewFileName, setCombinedReviewFileName] = useState<string | null>(null);
   const [combinedReviewFileNames, setCombinedReviewFileNames] = useState<string[] | null>(null);
   const [reviewModeChooserOpen, setReviewModeChooserOpen] = useState(false);
+  const [practiceChooserOpen, setPracticeChooserOpen] = useState(false);
   const [isCombinedReviewLoading, setIsCombinedReviewLoading] = useState(false);
   const [examSummaryPanelOpen, setExamSummaryPanelOpen] = useState(false);
   const [reviewPageOpen, setReviewPageOpen] = useState(false);
@@ -822,6 +827,26 @@ const App: React.FC = () => {
     for (let i = 0; i < Math.min(c.length, 30000); i++) h = ((h << 5) - h + c.charCodeAt(i)) | 0;
     return `exam-${h}`;
   }, [combinedReviewContent, pdfDataUrl, fullPdfText]);
+  const notesSourceLabel = buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName);
+  const notesSourceKey = useMemo(() => reviewSourceKey(combinedReviewContent ?? pdfDataUrl ?? fullPdfText ?? '', notesSourceLabel ?? ''), [combinedReviewContent, pdfDataUrl, fullPdfText, notesSourceLabel]);
+  const { warning: reviewCacheWarning, ready: reviewCacheReady } = useReviewCache(user?.uid ?? 'local', (combinedReviewContent || pdfDataUrl || fullPdfText) ? notesSourceKey : '', savedArtifacts, reviewFlashCards, reviewQuizRounds, setSavedArtifacts, setReviewFlashCards, setReviewQuizRounds);
+  const sourceReviewArtifacts = useMemo(() => savedArtifacts.filter(a => a.sourceKey ? a.sourceKey === notesSourceKey : a.sourceLabel === notesSourceLabel), [savedArtifacts, notesSourceKey, notesSourceLabel]);
+  const sourceStudyGuide = useMemo(() => {
+    const saved = [...sourceReviewArtifacts].reverse().find((a): a is Extract<SavedArtifact, { type: 'studyGuide' }> => a.type === 'studyGuide');
+    if (saved) return saved.payload;
+    if (studyGuide?.sourceKey === notesSourceKey) return studyGuide;
+    if (studyGuide && !studyGuide.sourceKey && !combinedReviewFileNames?.length && studyGuide.fileName === (combinedReviewFileName ?? fileName)) return studyGuide;
+    return null;
+  }, [sourceReviewArtifacts, studyGuide, notesSourceKey, combinedReviewFileNames, combinedReviewFileName, fileName]);
+  const reviewingCurrentFile = !combinedReviewContent || (!combinedReviewFileNames?.length && combinedReviewFileName === fileName);
+  const sourceReviewCards = reviewFlashCards.filter(c => c.sourceKey ? c.sourceKey === notesSourceKey : reviewingCurrentFile);
+  const sourceReviewRounds = reviewQuizRounds.filter(r => r.sourceKey ? r.sourceKey === notesSourceKey : reviewingCurrentFile);
+  const sourceMindMap = useMemo(() => {
+    const saved = [...sourceReviewArtifacts].reverse().find((a): a is Extract<SavedArtifact, { type: 'mindMap' }> => a.type === 'mindMap');
+    if (saved) return saved.payload;
+    const tree = notesToTree(sourceStudyGuide);
+    return tree ? { tree } : null;
+  }, [sourceReviewArtifacts, sourceStudyGuide]);
   const [feynmanPanelOpen, setFeynmanPanelOpen] = useState(false);
   const [examTrapsPanelOpen, setExamTrapsPanelOpen] = useState(false);
   const [terminologyPanelOpen, setTerminologyPanelOpen] = useState(false);
@@ -1912,6 +1937,7 @@ const App: React.FC = () => {
       const merged = parts.join('\n\n').slice(0, 60000);
       setCombinedReviewContent(merged);
       setCombinedReviewFileName(sessions.length === 1 ? sessions[0].fileName : `多文档合并 (${sessions.length} 个文件)`);
+      setPracticeChooserOpen(false);
       setReviewModeChooserOpen(true);
     } catch (e) {
       console.error("Combined review load failed:", e);
@@ -1923,8 +1949,10 @@ const App: React.FC = () => {
 
   const handleStartReview = async (sessions: CloudSession[] | null, type: ReviewType) => {
     setReviewPageOpen(false);
+    if (type === 'trapList') { setTrapListPanelOpen(true); return; }
+    if (sessions?.length === 1 && sessions[0].id === currentSessionId && (pdfDataUrl || fullPdfText)) sessions = null;
     if (sessions === null) {
-      const content = fullPdfText || pdfDataUrl;
+      const content = pdfDataUrl || fullPdfText;
       if (!content) {
         alert('当前没有已打开的文档');
         return;
@@ -1965,7 +1993,16 @@ const App: React.FC = () => {
 
   const openReviewPanelByType = (type: ReviewType) => {
     switch (type) {
+      case 'practice':
+        setPracticeChooserOpen(true);
+        setReviewModeChooserOpen(true);
+        break;
+      case 'caseQuiz':
+        setQuizPracticeKind('case');
+        setReviewPanel('quiz');
+        break;
       case 'quiz':
+        setQuizPracticeKind('standard');
         setReviewPanel('quiz');
         break;
       case 'flashcard':
@@ -1975,19 +2012,20 @@ const App: React.FC = () => {
         setStudyGuidePanel(true);
         break;
       case 'examSummary':
-        setExamSummaryPanelOpen(true);
+        setStudyGuidePanel(true);
         break;
       case 'feynman':
         setFeynmanPanelOpen(true);
         break;
       case 'examTraps':
-        setExamTrapsPanelOpen(true);
+        setStudyGuidePanel(true);
         break;
       case 'terminology':
-        setTerminologyPanelOpen(true);
+        setStudyGuidePanel(true);
         break;
       case 'trickyProfessor':
-        setTrickyProfessorPanelOpen(true);
+        setQuizPracticeKind('standard');
+        setReviewPanel('quiz');
         break;
       case 'trapList':
         setTrapListPanelOpen(true);
@@ -2109,13 +2147,13 @@ const App: React.FC = () => {
           setStudyGuidePanel(true);
           break;
         case 'examSummary':
-          setExamSummaryPanelOpen(true);
+          setStudyGuidePanel(true);
           break;
         case 'feynman':
           setFeynmanPanelOpen(true);
           break;
         case 'terminology':
-          setTerminologyPanelOpen(true);
+          setStudyGuidePanel(true);
           break;
         case 'trapList':
           setTrapListPanelOpen(true);
@@ -2135,7 +2173,7 @@ const App: React.FC = () => {
           setExamPredictionPanelOpen(true);
           break;
         case 'trickyProfessor':
-          setTrickyProfessorPanelOpen(true);
+          setQuizPracticeKind('standard'); setReviewPanel('quiz');
           break;
         case 'quiz':
           setReviewPanel('quiz');
@@ -2153,10 +2191,10 @@ const App: React.FC = () => {
         setExamPredictionPanelOpen(true);
         break;
       case 'examSummary':
-        setExamSummaryPanelOpen(true);
+        setStudyGuidePanel(true);
         break;
       case 'examTraps':
-        setExamTrapsPanelOpen(true);
+        setStudyGuidePanel(true);
         break;
       case 'feynman':
         setFeynmanPanelOpen(true);
@@ -3972,7 +4010,6 @@ const App: React.FC = () => {
           quizData={quizData}
           setQuizData={setQuizData}
           docType={docType}
-          onToggleDocType={() => setDocType(prev => prev === 'STEM' ? 'HUMANITIES' : 'STEM')}
           onNotebookAdd={handleAddNote}
           onRegenerateStudyMap={handleRegenerateStudyMap}
           studyMapModuleCount={studyMapModuleCount}
@@ -4376,8 +4413,12 @@ const App: React.FC = () => {
           user={user}
           hasCurrentDoc={!!(fullPdfText || pdfDataUrl)}
           currentDocName={fileName}
+          currentSessionId={currentSessionId}
+          onLogin={() => { setReviewPageOpen(false); handleLogin(); }}
+          onLibrary={() => { setReviewPageOpen(false); setDashboardInitialTab('library'); setShellMode('dashboard'); }}
           onClose={() => setReviewPageOpen(false)}
           onStartReview={handleStartReview}
+          onRemoveSavedArtifact={removeArtifact}
           trapCount={trapList.length}
         />
       )}
@@ -4431,57 +4472,15 @@ const App: React.FC = () => {
         onSend={handleSideQuestSend}
       />
 
+      {reviewCacheWarning && <div role="status" className="fixed bottom-4 left-4 z-[400] max-w-md rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">{reviewCacheWarning}</div>}
       {/* 复习方式选择（多选一起复习后） */}
       {reviewModeChooserOpen && (
         <div className="fixed inset-0 z-[200] bg-black/30 flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-2xl shadow-xl border border-stone-200 max-w-lg w-full p-6 animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-lg font-bold text-slate-800 mb-2">选择喜欢的学习方式</h3>
+          <div className="review-tools-dialog w-full p-6 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-lg font-bold text-slate-800 mb-2">学习工具</h3>
             <p className="text-sm text-slate-500 mb-4">基于 {combinedReviewFileName} 进行复习</p>
 
-            <div className="space-y-4">
-              <section>
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">推荐</h4>
-                <div className="flex flex-wrap gap-2">
-                  <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('quiz'); }} className="py-2.5 px-3 rounded-xl bg-violet-100 text-violet-800 font-bold text-sm hover:bg-violet-200 transition-colors">测验</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('flashcard'); }} className="py-2.5 px-3 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors">闪卡</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setStudyGuidePanel(true); }} className="py-2.5 px-3 rounded-xl bg-indigo-100 text-indigo-800 font-bold text-sm hover:bg-indigo-200 transition-colors">学习指南</button>
-                </div>
-              </section>
-
-              <section>
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">巩固记忆</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('flashcard'); }} className="py-3 px-4 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors">闪卡</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setStudyGuidePanel(true); }} className="py-3 px-4 rounded-xl bg-indigo-100 text-indigo-800 font-bold text-sm hover:bg-indigo-200 transition-colors">学习指南</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setTerminologyPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-cyan-100 text-cyan-800 font-bold text-sm hover:bg-cyan-200 transition-colors">术语精确定义</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setMindMapPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-teal-100 text-teal-800 font-bold text-sm hover:bg-teal-200 transition-colors">思维导图</button>
-                </div>
-              </section>
-
-              <section>
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">自我检测</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => { setReviewModeChooserOpen(false); setReviewPanel('quiz'); }} className="py-3 px-4 rounded-xl bg-violet-100 text-violet-800 font-bold text-sm hover:bg-violet-200 transition-colors">测验</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setFeynmanPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-sky-100 text-sky-800 font-bold text-sm hover:bg-sky-200 transition-colors">费曼检验</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setTrickyProfessorPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-orange-100 text-orange-800 font-bold text-sm hover:bg-orange-200 transition-colors">刁钻教授</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setTrapListPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors w-full col-span-2">我的陷阱清单{trapList.length > 0 ? ` (${trapList.length})` : ''}</button>
-                </div>
-              </section>
-
-              <section>
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">考前冲刺</h4>
-                <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => { setReviewModeChooserOpen(false); setExamSummaryPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-emerald-100 text-emerald-800 font-bold text-sm hover:bg-emerald-200 transition-colors">考前速览</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setExamTrapsPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-rose-100 text-rose-800 font-bold text-sm hover:bg-rose-200 transition-colors">考点与陷阱</button>
-                  <button onClick={() => { setReviewModeChooserOpen(false); setExamPredictionInitialKCId(null); setExamPredictionPanelOpen(true); }} className="py-3 px-4 rounded-xl bg-amber-100 text-amber-800 font-bold text-sm hover:bg-amber-200 transition-colors col-span-2">考前预测</button>
-                </div>
-              </section>
-
-              <section>
-                <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">自由问答</h4>
-                <button onClick={() => { setReviewModeChooserOpen(false); setMultiDocQAConversationKey(getMultiDocQAConversationKey(combinedReviewFileName ?? '当前文档', combinedReviewFileNames)); setMultiDocQAPanelOpen(true); }} className="w-full py-3 px-4 rounded-xl bg-indigo-100 text-indigo-800 font-bold text-sm hover:bg-indigo-200 transition-colors">多文档问答</button>
-              </section>
-            </div>
+            <StudyToolMenu initialPractice={practiceChooserOpen} trapCount={trapList.length} onSelect={(type) => { setReviewModeChooserOpen(false); openReviewPanelByType(type); }} />
 
             <button onClick={clearCombinedReview} className="mt-4 w-full py-2 text-slate-500 text-sm hover:text-slate-700">取消</button>
           </div>
@@ -4493,14 +4492,16 @@ const App: React.FC = () => {
         <QuizReviewPanel
           onClose={() => { setReviewPanel(null); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
-          existingRounds={reviewQuizRounds}
+          practiceKind={quizPracticeKind}
+          existingRounds={sourceReviewRounds}
           onSaveRounds={(rounds) => {
-            setReviewQuizRounds(rounds);
+            setReviewQuizRounds(prev => [...prev.filter(r => r.sourceKey ? r.sourceKey !== notesSourceKey : !reviewingCurrentFile), ...rounds.map(r => ({ ...r, sourceKey: notesSourceKey }))]);
             const sourceName = combinedReviewFileName || fileName || '文档';
             const lastRound = rounds[rounds.length - 1];
             addArtifact({
               id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               type: 'quiz',
+              sourceKey: notesSourceKey,
               title: `测验 · ${sourceName}`,
               createdAt: Date.now(),
               sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
@@ -4528,21 +4529,24 @@ const App: React.FC = () => {
         <FlashCardReviewPanel
           onClose={() => { setReviewPanel(null); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
-          existingCards={reviewFlashCards}
-          savedEstimate={flashCardEstimate}
+          onOpenNotes={() => { setReviewPanel(null); setStudyGuidePanel(true); }}
+          hasNoteConcepts={!!sourceStudyGuide?.content.coreConcepts?.length}
+          existingCards={sourceReviewCards}
+          savedEstimate={reviewingCurrentFile ? flashCardEstimate : undefined}
           onSaveCards={(cards) => {
-            setReviewFlashCards(cards);
+            setReviewFlashCards(prev => [...prev.filter(c => c.sourceKey ? c.sourceKey !== notesSourceKey : !reviewingCurrentFile), ...cards.map(c => ({ ...c, sourceKey: notesSourceKey }))]);
             const sourceName = combinedReviewFileName || fileName || '文档';
             addArtifact({
               id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               type: 'flashcard',
+              sourceKey: notesSourceKey,
               title: `闪卡 · ${sourceName}`,
               createdAt: Date.now(),
               sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
               payload: { count: cards.length }
             });
           }}
-          onSaveEstimate={setFlashCardEstimate}
+          onSaveEstimate={(n) => { if (reviewingCurrentFile) setFlashCardEstimate(n); }}
         />
       )}
 
@@ -4570,6 +4574,13 @@ const App: React.FC = () => {
       {/* 费曼检验面板 */}
       {feynmanPanelOpen && (
         <FeynmanPanel
+          practiceOnly
+          onWrongAnswer={(item) => setTrapList(prev => [...prev, {
+            id: `trap-written-${Date.now()}`, answerKind: 'written', question: item.question,
+            userAnswer: item.userAnswer, referenceAnswer: item.referenceAnswer,
+            options: [], correctIndex: -1, userSelectedIndex: -1, explanation: item.feedback,
+            source: combinedReviewFileName ?? fileName ?? undefined, createdAt: Date.now(),
+          }])}
           onClose={() => { setFeynmanPanelOpen(false); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
           onSaveToStudio={(markdown, title) => {
@@ -4577,6 +4588,7 @@ const App: React.FC = () => {
             addArtifact({
               id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               type: 'feynman',
+              sourceKey: notesSourceKey,
               title: title ? `${title} · ${sourceName}` : `费曼大白话 · ${sourceName}`,
               createdAt: Date.now(),
               sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),
@@ -4698,6 +4710,7 @@ const App: React.FC = () => {
       {/* 思维导图面板 */}
       {mindMapPanelOpen && (
         <MindMapPanel
+          initialPayload={sourceMindMap}
           onClose={() => { setMindMapPanelOpen(false); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
           fileNames={combinedReviewFileNames}
@@ -4708,6 +4721,7 @@ const App: React.FC = () => {
             addArtifact({
               id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               type: 'mindMap',
+              sourceKey: notesSourceKey,
               title,
               createdAt: Date.now(),
               sourceLabel: buildArtifactSourceLabel(
@@ -4763,13 +4777,30 @@ const App: React.FC = () => {
           onClose={() => { setStudyGuidePanel(false); clearCombinedReview(); }}
           pdfContent={combinedReviewContent ?? pdfDataUrl ?? fullPdfText}
           fileName={combinedReviewFileName ?? fileName}
-          existingGuide={studyGuide}
+          cacheReady={reviewCacheReady}
+          existingGuide={sourceStudyGuide}
+          sourceKey={notesSourceKey}
+          legacyArtifacts={sourceReviewArtifacts}
+          onOpenMindMap={() => { setStudyGuidePanel(false); setMindMapPanelOpen(true); }}
+          onCreateCards={(concepts) => {
+            const now = Date.now();
+            setReviewFlashCards(prev => {
+              const keys = new Set(prev.filter(c => c.sourceKey ? c.sourceKey === notesSourceKey : reviewingCurrentFile).map(c => `${c.front.trim()}\n${c.back.trim()}`));
+              const additions = concepts.filter(c => { const key = `${c.term.trim()}\n${c.definition.trim()}`; if (keys.has(key)) return false; keys.add(key); return true; });
+              return [...prev, ...additions.map((c, i) => ({ id: `notes-card-${now}-${i}`, sourceKey: notesSourceKey, front: c.term, back: c.definition, createdAt: now }))];
+            });
+            setStudyGuidePanel(false); setReviewPanel('flashcard');
+          }}
           onSaveGuide={(guide) => {
-            setStudyGuide(guide);
+            if (sourceStudyGuide && !savedArtifacts.some(a => a.type === 'studyGuide' && a.payload.id === sourceStudyGuide.id)) {
+              addArtifact({ id: `legacy-guide-${sourceStudyGuide.id}`, type: 'studyGuide', sourceKey: notesSourceKey, title: `以前的学习指南 · ${sourceStudyGuide.fileName}`, createdAt: sourceStudyGuide.createdAt, sourceLabel: notesSourceLabel, payload: sourceStudyGuide });
+            }
+            if (!combinedReviewContent || (!combinedReviewFileNames?.length && combinedReviewFileName === fileName)) setStudyGuide(guide);
             const title = guide.content?.chapters?.[0]?.title || guide.fileName || '学习指南';
             addArtifact({
               id: `artifact-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               type: 'studyGuide',
+              sourceKey: notesSourceKey,
               title,
               createdAt: guide.createdAt,
               sourceLabel: buildArtifactSourceLabel(combinedReviewFileNames, combinedReviewFileName, fileName),

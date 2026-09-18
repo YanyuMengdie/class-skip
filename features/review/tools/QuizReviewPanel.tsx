@@ -14,6 +14,7 @@ export interface AddToTrapData {
 }
 
 interface QuizReviewPanelProps {
+  practiceKind?: 'standard' | 'case';
   onClose: () => void;
   pdfContent: string | null;
   existingRounds: QuizRound[];
@@ -22,8 +23,15 @@ interface QuizReviewPanelProps {
 }
 
 const COUNT_OPTIONS = [5, 10, 15, 20];
+const PRACTICE_OPTIONS = [
+  { value: 'standard', label: '综合练习', description: '结合概念理解、辨析与情境应用，全面练一轮。' },
+  { value: 'concept', label: '概念辨析', description: '重点区分相近概念、适用条件与常见误解。' },
+  { value: 'case', label: '案例应用', description: '根据具体情境或实验结果，选择合适的解释。' },
+] as const;
+type PracticeKind = typeof PRACTICE_OPTIONS[number]['value'];
 
 export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
+  practiceKind = 'standard',
   onClose,
   pdfContent,
   existingRounds,
@@ -31,7 +39,8 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
   onAddToTrap
 }) => {
   const [step, setStep] = useState<Step>(existingRounds.length === 0 ? 'choose' : 'choose');
-  const [count, setCount] = useState(10);
+  const [count, setCount] = useState(5);
+  const [selectedPractice, setSelectedPractice] = useState<PracticeKind>(practiceKind);
   const [currentRoundItems, setCurrentRoundItems] = useState<QuizData[]>([]);
   const [currentRoundAnswers, setCurrentRoundAnswers] = useState<(number | null)[]>([]);
   const [currentRoundSubmitted, setCurrentRoundSubmitted] = useState<boolean[]>([]);
@@ -51,7 +60,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
     setIsGenerating(true);
     setStep('generating');
     const existingTexts = allItems.map(q => q.question);
-    const items = await generateQuizSet(pdfContent, { count, existingQuestionTexts: existingTexts.length ? existingTexts : undefined });
+    const items = await generateQuizSet(pdfContent, { count, practiceKind: selectedPractice, existingQuestionTexts: existingTexts.length ? existingTexts : undefined });
     setIsGenerating(false);
     if (items.length === 0) {
       setError('生成题目失败，请重试');
@@ -117,7 +126,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
         <div className="flex items-center justify-between p-4 border-b border-stone-100 shrink-0">
           <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2">
             <BookOpen className="w-5 h-5 text-violet-500" />
-            测验 (Quiz)
+            练一练 · 做题
           </h2>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-stone-100 text-stone-400 hover:text-slate-600 transition-colors">
             <X className="w-5 h-5" />
@@ -127,7 +136,21 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
         <div className="flex-1 overflow-y-auto p-6">
           {step === 'choose' && (
             <div className="space-y-6">
-              <p className="text-slate-600">根据当前 PDF 出题，做完后可回顾或继续出更多题（不会重复）。</p>
+              <fieldset>
+                <legend className="block text-sm font-bold text-slate-700 mb-3">这次想练什么？</legend>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {PRACTICE_OPTIONS.map(option => (
+                    <label key={option.value} className={`cursor-pointer rounded-md border p-3 transition-colors ${selectedPractice === option.value ? 'border-[#54745d] bg-[#eaf0e3] text-[#294c3e]' : 'border-[#d9dbd1] bg-[#fcfbf7] text-[#6d776e]'}`}>
+                      <span className="flex items-center gap-2 text-sm font-semibold">
+                        <input type="radio" name="quiz-practice" value={option.value} checked={selectedPractice === option.value} onChange={() => setSelectedPractice(option.value)} className="accent-[#294c3e]" />
+                        {option.label}
+                      </span>
+                      <span className="block mt-2 text-xs leading-relaxed">{option.description}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <p className="text-slate-600">三种练习均为选择题，区别在出题侧重点。点击出题后才会生成；已有题目仍可直接回顾。</p>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">出题数量</label>
                 <div className="flex flex-wrap gap-2">
@@ -225,11 +248,11 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                       }}
                       className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-100 text-amber-800 text-sm font-bold hover:bg-amber-200"
                     >
-                      <ListPlus className="w-4 h-4" /> 记入陷阱清单
+                      <ListPlus className="w-4 h-4" /> 记入错题本
                     </button>
                   )}
                   {!isCorrect && addedToTrapIds.has(currentQ.question) && (
-                    <p className="mt-3 text-amber-600 text-xs">已加入陷阱清单</p>
+                    <p className="mt-3 text-amber-600 text-xs">已加入错题本</p>
                   )}
                 </div>
               )}
@@ -271,7 +294,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                   onClick={() => { finishRoundAndSave(); setStep('choose'); }}
                   className="flex items-center gap-2 px-5 py-3 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl font-bold hover:bg-amber-100"
                 >
-                  <PlusCircle className="w-4 h-4" /> 继续出题（不重复）
+                  <PlusCircle className="w-4 h-4" /> 继续练习
                 </button>
               </div>
             </div>

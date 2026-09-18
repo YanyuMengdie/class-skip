@@ -1,205 +1,85 @@
-import React, { useState } from 'react';
-import ReactMarkdown, { Components } from 'react-markdown';
+import React, { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
-import { X, FileText, Loader2, RefreshCw, Layers, List } from 'lucide-react';
-import { StudyGuide, StudyGuideFormat, StudyGuideContent } from '@/types';
+import { X, Loader2 } from 'lucide-react';
+import type { StudyGuide, SavedArtifact } from '@/types';
 import { generateStudyGuide } from '@/services/geminiService';
+import { legacyNoteMarkdown } from '../lib/reviewNotes';
 
+type Concept = StudyGuide['content']['coreConcepts'][number];
 interface StudyGuidePanelProps {
   onClose: () => void;
   pdfContent: string | null;
   fileName: string | null;
   existingGuide: StudyGuide | null;
+  cacheReady?: boolean;
+  sourceKey?: string;
+  legacyArtifacts?: SavedArtifact[];
   onSaveGuide: (guide: StudyGuide) => void;
+  onCreateCards?: (concepts: Concept[]) => void;
+  onOpenMindMap?: () => void;
 }
+const Markdown = ({ text }: { text: string }) => <div className="prose prose-stone max-w-none break-words"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{text}</ReactMarkdown></div>;
 
-const MarkdownComponents: Components = {
-  h1: ({node, ...props}) => <h1 className="text-2xl font-bold text-slate-900 mt-6 mb-4 border-b border-slate-200 pb-2" {...props} />,
-  h2: ({node, ...props}) => <h2 className="text-xl font-bold text-slate-800 mt-5 mb-3 border-b border-slate-100 pb-2" {...props} />,
-  h3: ({node, ...props}) => <h3 className="text-lg font-bold text-indigo-700 mt-4 mb-2" {...props} />,
-  h4: ({node, ...props}) => <h4 className="text-base font-bold text-slate-700 mt-3 mb-2" {...props} />,
-  ul: ({node, ...props}) => <ul className="list-disc list-outside ml-6 space-y-2 my-3 text-slate-700" {...props} />,
-  ol: ({node, ...props}) => <ol className="list-decimal list-outside ml-6 space-y-2 my-3 text-slate-700" {...props} />,
-  li: ({node, ...props}) => <li className="pl-2 leading-relaxed" {...props} />,
-  p: ({node, ...props}) => <p className="mb-4 leading-7 text-slate-700" {...props} />,
-  strong: ({node, ...props}) => <strong className="font-bold text-indigo-900" {...props} />,
-  em: ({node, ...props}) => <em className="italic text-slate-600" {...props} />,
-  code: ({node, ...props}) => <code className="bg-slate-100 text-pink-600 px-1.5 py-0.5 rounded text-sm font-mono" {...props} />,
-  blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-indigo-300 pl-4 py-2 my-4 bg-indigo-50 italic text-slate-600 rounded-r-lg" {...props} />,
-  table: ({node, ...props}) => (
-    <div className="my-6 w-full overflow-x-auto rounded-xl border border-stone-200 shadow-sm bg-white">
-      <table className="w-full text-left text-sm text-stone-600" {...props} />
-    </div>
-  ),
-  thead: ({node, ...props}) => (
-    <thead className="bg-stone-100 text-stone-700 font-bold uppercase tracking-wider text-xs" {...props} />
-  ),
-  th: ({node, ...props}) => (
-    <th className="px-4 py-3 border-b border-stone-200 whitespace-nowrap" {...props} />
-  ),
-  td: ({node, ...props}) => (
-    <td className="px-4 py-3 border-b border-stone-100 last:border-0" {...props} />
-  ),
-  tr: ({node, ...props}) => (
-    <tr className="hover:bg-stone-50/50 transition-colors" {...props} />
-  ),
-};
-
-export const StudyGuidePanel: React.FC<StudyGuidePanelProps> = ({
-  onClose,
-  pdfContent,
-  fileName,
-  existingGuide,
-  onSaveGuide
-}) => {
-  const [format, setFormat] = useState<StudyGuideFormat>(existingGuide?.format || 'outline');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [guide, setGuide] = useState<StudyGuide | null>(existingGuide);
-
-  const handleGenerate = async () => {
-    if (!pdfContent || !fileName) return;
-    setError(null);
-    setIsGenerating(true);
-    
-    try {
-      const content = await generateStudyGuide(pdfContent, { format });
-      if (!content) {
-        setError('生成失败，请重试');
-        setIsGenerating(false);
-        return;
-      }
-      
-      const newGuide: StudyGuide = {
-        id: `guide-${Date.now()}`,
-        fileName,
-        format,
-        content,
-        createdAt: Date.now()
-      };
-      
-      setGuide(newGuide);
-      onSaveGuide(newGuide);
-    } catch (e) {
-      console.error(e);
-      setError('生成失败，请重试');
-    } finally {
-      setIsGenerating(false);
+export const StudyGuidePanel: React.FC<StudyGuidePanelProps> = ({ onClose, pdfContent, fileName, existingGuide, cacheReady = true, sourceKey, legacyArtifacts = [], onSaveGuide, onCreateCards, onOpenMindMap }) => {
+  const [guide, setGuide] = useState(existingGuide);
+  const [view, setView] = useState<'brief' | 'detail'>('brief');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (existingGuide && (!guide || existingGuide.createdAt > guide.createdAt)) {
+      setGuide(existingGuide); setSelected(new Set());
     }
+  }, [existingGuide, guide]);
+  const content = guide?.content;
+  const oldNotes = legacyArtifacts.filter(a => a.id !== guide?.id && !(a.type === 'studyGuide' && a.payload.id === guide?.id) && legacyNoteMarkdown(a));
+  const generate = async () => {
+    if (busy || !cacheReady || !pdfContent || !fileName) return;
+    setBusy(true); setError('');
+    try {
+      const result = await generateStudyGuide(pdfContent, { format: 'detailed' });
+      if (!result || (!result.coreConcepts.length && !result.markdownContent.trim())) throw new Error('empty');
+      const next: StudyGuide = { id: `guide-${Date.now()}`, sourceKey, fileName, format: 'detailed', content: result, createdAt: Date.now() };
+      onSaveGuide(next); setGuide(next); setSelected(new Set());
+    } catch { setError('本次笔记未能生成，已有内容已保留。可以稍后手动重试。'); }
+    finally { setBusy(false); }
   };
-
-  const handleRegenerate = async () => {
-    if (!window.confirm('确定要重新生成吗？这将覆盖当前内容。')) return;
-    await handleGenerate();
-  };
-
-  return (
-    <div className="fixed inset-0 z-[300] bg-black/40 flex items-center justify-center p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl shadow-2xl border border-stone-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
-        <div className="flex items-center justify-between p-4 border-b border-stone-100 shrink-0">
-          <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-            <FileText className="w-5 h-5 text-indigo-500" />
-            Study Guide / Outline
-          </h2>
-          <button onClick={onClose} className="p-2 rounded-xl hover:bg-stone-100 text-stone-400 hover:text-slate-600 transition-colors">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6">
-          {/* 格式选择 */}
-          <div className="mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-slate-600">格式：</span>
-              <button
-                onClick={() => setFormat('outline')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                  format === 'outline'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
-                }`}
-              >
-                <List className="w-4 h-4" />
-                大纲模式
-              </button>
-              <button
-                onClick={() => setFormat('detailed')}
-                className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold transition-all ${
-                  format === 'detailed'
-                    ? 'bg-indigo-600 text-white shadow-md'
-                    : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
-                }`}
-              >
-                <Layers className="w-4 h-4" />
-                详细模式
-              </button>
-            </div>
-            {guide && (
-              <button
-                onClick={handleRegenerate}
-                disabled={isGenerating}
-                className="flex items-center gap-2 px-3 py-1.5 bg-stone-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-stone-200 disabled:opacity-50 transition-all"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
-                重新生成
-              </button>
-            )}
-          </div>
-
-          {/* 生成按钮或内容展示 */}
-          {!guide ? (
-            <div className="flex flex-col items-center justify-center py-16 space-y-6">
-              <div className="bg-indigo-50 p-6 rounded-full">
-                <FileText className="w-12 h-12 text-indigo-500" />
-              </div>
-              <div className="text-center space-y-2">
-                <h3 className="text-lg font-bold text-slate-800">生成学习指南</h3>
-                <p className="text-sm text-slate-500 max-w-md">
-                  {format === 'outline' 
-                    ? '将生成简洁的章节大纲和核心概念，便于快速浏览。'
-                    : '将生成详细的学习指南，包含章节大纲、核心概念、学习路径、知识点树和复习建议。'}
-                </p>
-              </div>
-              {error && <p className="text-rose-600 text-sm">{error}</p>}
-              <button
-                onClick={handleGenerate}
-                disabled={!pdfContent || isGenerating}
-                className="flex items-center gap-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-lg"
-              >
-                {isGenerating ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>正在生成...</span>
-                  </>
-                ) : (
-                  <>
-                    <FileText className="w-5 h-5" />
-                    <span>生成 Study Guide</span>
-                  </>
-                )}
-              </button>
-            </div>
-          ) : isGenerating ? (
-            <div className="flex flex-col items-center justify-center py-16 text-indigo-600">
-              <Loader2 className="w-12 h-12 animate-spin mb-4" />
-              <p className="font-bold">正在生成学习指南...</p>
-              <p className="text-sm text-slate-400 mt-2">这可能需要一些时间，请稍候</p>
-            </div>
-          ) : (
-            <div className="prose prose-sm max-w-none">
-              <ReactMarkdown
-                components={MarkdownComponents}
-                remarkPlugins={[remarkMath, remarkGfm]}
-                rehypePlugins={[rehypeKatex]}
-              >
-                {guide.content.markdownContent || '内容为空'}
-              </ReactMarkdown>
-            </div>
-          )}
-        </div>
+  return <div className="fixed inset-0 z-[300] bg-black/40 flex items-center justify-center p-4">
+    <div className="bg-white rounded-2xl border border-stone-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+      <header className="p-4 border-b flex justify-between gap-4"><div><h2 className="text-lg font-bold text-emerald-900">复习笔记</h2><p className="text-sm text-slate-500">{fileName}</p></div><button aria-label="关闭复习笔记" onClick={onClose} disabled={busy}><X /></button></header>
+      <div className="flex flex-wrap items-center gap-2 p-4 border-b">
+        {(['brief', 'detail'] as const).map(v => <button key={v} type="button" aria-pressed={view === v} onClick={() => setView(v)} className={`rounded-lg px-4 py-2 text-sm ${view === v ? 'bg-emerald-900 text-white' : 'bg-stone-100'}`}>{v === 'brief' ? '要点版' : '详细版'}</button>)}
+        <span className="text-xs text-slate-500">切换只查看已有内容</span>
+        {content?.knowledgeTree?.branches?.length ? <button type="button" className="text-sm text-emerald-800 ml-auto" onClick={onOpenMindMap}>查看这份笔记的导图 →</button> : null}
       </div>
+      <main className="flex-1 overflow-y-auto p-6 space-y-6">
+        {error && <p role="alert" className="text-rose-700">{error}</p>}
+        {content ? <>
+          <p className="text-sm text-slate-500">{content.coverageNote || '这是已保存的整理结果，覆盖范围未经完整核对；未列出不代表不需要学习。'}</p>
+          {!!content.chapters?.length && <details><summary className="cursor-pointer font-semibold">章节与来源范围</summary><ul className="mt-3 space-y-2">{content.chapters.map((c, i) => <li key={i}>{c.title} {c.pageRange && <span className="text-slate-500">· {c.pageRange}</span>}</li>)}</ul></details>}
+          {view === 'brief' ? <>
+            {!!content.reviewSuggestions?.keyPoints?.length && <section><h3 className="font-bold mb-3">核心要点</h3><ul className="list-disc pl-5 space-y-2">{content.reviewSuggestions.keyPoints.map((point, i) => <li key={i}>{point}</li>)}</ul></section>}
+            {!content.coreConcepts?.length && content.markdownContent && <Markdown text={content.markdownContent} />}
+          </> : <>
+            {content.markdownContent ? <Markdown text={content.markdownContent} /> : <p className="text-slate-500">旧笔记没有保存详细讲解，下方仍可查看已保存的概念。</p>}
+            {guide?.format === 'outline' && <p className="text-sm text-amber-700">这是一份旧大纲，切换视图不会自动补写详细内容。</p>}
+          </>}
+          {!!content.coreConcepts?.length && <section>
+            <div className="flex flex-wrap justify-between gap-3 mb-3"><h3 className="font-bold">知识点与术语</h3>{onCreateCards && <button type="button" disabled={!selected.size} className="text-sm text-emerald-800 disabled:opacity-40" onClick={() => onCreateCards(content.coreConcepts.filter((_, i) => selected.has(i)))}>将选中的 {selected.size} 项加入闪卡</button>}</div>
+            <p className="text-xs text-slate-500 mb-3">勾选后直接制作闪卡，无需重新生成。展开查看定义与相关易混点。</p>
+            <div className="space-y-3">{content.coreConcepts.map((c, i) => <div key={i} className="border rounded-xl p-4 flex gap-3">
+              <input type="checkbox" aria-label={`选择 ${c.term}`} checked={selected.has(i)} onChange={() => setSelected(prev => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; })} />
+              <details className="flex-1 min-w-0"><summary className="cursor-pointer font-medium">{c.term}</summary><div className="mt-3 space-y-3"><Markdown text={c.definition} />{view === 'detail' && c.explanation && <Markdown text={c.explanation} />}{c.commonMistakes?.map((m, j) => <p key={j} className="text-sm text-amber-800">易混淆：{m}</p>)}</div></details>
+            </div>)}</div>
+          </section>}
+          {!!content.reviewSuggestions?.commonMistakes?.length && <details><summary className="cursor-pointer font-semibold">其他易混淆的地方</summary><ul className="list-disc pl-5 mt-3 space-y-2">{content.reviewSuggestions.commonMistakes.map((m, i) => <li key={i}>{m}</li>)}</ul></details>}
+        </> : <p className="text-slate-600">尚未生成统一笔记。已有的学习指南、速览、易错点和术语会保留在下方。</p>}
+        {!!oldNotes.length && <section><h3 className="font-bold mb-3">以前保存的笔记</h3>{oldNotes.map(a => <details className="border rounded-xl p-4 mb-3" key={a.id}><summary className="cursor-pointer">{a.title}</summary><div className="mt-4"><Markdown text={legacyNoteMarkdown(a) || ''} /></div></details>)}</section>}
+        <div className="border-t pt-4"><button type="button" disabled={busy || !cacheReady || !pdfContent} onClick={generate} className="rounded-xl px-4 py-2 bg-emerald-900 text-white disabled:opacity-50 inline-flex gap-2 items-center">{busy && <Loader2 className="w-4 h-4 animate-spin" />}{!cacheReady ? '正在读取已有笔记…' : busy ? '正在整理…' : guide ? '生成新版笔记' : '生成复习笔记'}</button><p className="text-xs text-slate-500 mt-2">点击才会调用 AI。已有版本保留；笔记中的重点不等于老师确认的必考内容。</p></div>
+      </main>
     </div>
-  );
+  </div>;
 };

@@ -30,9 +30,11 @@ export async function runElkLayoutOnFlow(
     layoutOptions: {
       'elk.algorithm': 'layered',
       'elk.direction': 'RIGHT',
-      'elk.spacing.nodeNode': '28',
-      'elk.layered.spacing.nodeNodeBetweenLayers': '64',
-      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX'
+      'elk.spacing.nodeNode': '30',
+      'elk.layered.spacing.nodeNodeBetweenLayers': '88',
+      'elk.layered.nodePlacement.strategy': 'NETWORK_SIMPLEX',
+      'elk.layered.crossingMinimization.forceNodeModelOrder': 'true',
+      'elk.layered.considerModelOrder.strategy': 'NODES_AND_EDGES'
     },
     children: nodes.map((n) => ({
       id: n.id,

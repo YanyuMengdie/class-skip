@@ -125,7 +125,7 @@ export function ArtifactContent({ artifact }: { artifact: SavedArtifact }) {
     case 'trapList':
       return (
         <p className="text-sm text-slate-600">
-          共 {artifact.payload.itemIds.length} 条陷阱。
+          共 {artifact.payload.itemIds.length} 道已保存的错题。
         </p>
       );
     default:

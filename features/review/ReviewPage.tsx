@@ -1,5 +1,6 @@
+import { allReviewCaches, loadReviewCache, saveReviewCache } from './lib/reviewCache';
 import React, { useState, useEffect, useCallback } from 'react';
-import { X, BookOpen, FileText, Loader2, Cloud, Library, Trash2, ChevronRight, RefreshCw } from 'lucide-react';
+import { X, BookOpen, Loader2, Library, Trash2, ChevronRight, RefreshCw } from 'lucide-react';
 import { User } from 'firebase/auth';
 import { getUserSessions, fetchSessionDetails, updateCloudSessionState } from '@/services/firebase';
 import { CloudSession } from '@/types';
@@ -10,7 +11,13 @@ import { mergeLocalAndCloudArtifacts, type MergedLibraryEntry } from '@/features
 import { SAVED_ARTIFACT_TYPE_META as TYPE_META, formatSavedArtifactTime as formatTime } from '@/shared/lib/savedArtifactMeta';
 import { ArtifactFullView } from '@/shared/studio/SavedArtifactPreview';
 
+import { StudyToolMenu, REVIEW_TOOL_LABELS } from './StudyToolMenu';
+import { ReviewMaterialPicker } from './ReviewMaterialPicker';
+import './review.css';
+
 export type ReviewType =
+  | 'practice'
+  | 'caseQuiz'
   | 'quiz'
   | 'flashcard'
   | 'studyGuide'
@@ -29,8 +36,12 @@ interface ReviewPageProps {
   user: User | null;
   hasCurrentDoc: boolean;
   currentDocName: string | null;
+  currentSessionId?: string | null;
+  onLogin?: () => void;
+  onLibrary?: () => void;
   onClose: () => void;
   onStartReview: (sessions: CloudSession[] | null, type: ReviewType) => void;
+  onRemoveSavedArtifact?: (id: string) => void;
   trapCount?: number;
 }
 
@@ -38,11 +49,18 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
   user,
   hasCurrentDoc,
   currentDocName,
+  currentSessionId,
+  onLogin,
+  onLibrary,
   onClose,
   onStartReview,
+  onRemoveSavedArtifact,
   trapCount = 0
 }) => {
   const [mainTab, setMainTab] = useState<ReviewMainTab>('generate');
+  const [selectedTool, setSelectedTool] = useState<ReviewType | null>(null);
+  const [sessionError, setSessionError] = useState('');
+  const [reloadSessions, setReloadSessions] = useState(0);
   const [sessions, setSessions] = useState<CloudSession[]>([]);
   const [loadingSessions, setLoadingSessions] = useState(false);
   const [useCurrentDoc, setUseCurrentDoc] = useState(false);
@@ -53,13 +71,20 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
   const [previewEntry, setPreviewEntry] = useState<MergedLibraryEntry | null>(null);
 
   const fileSessions = sessions.filter((s) => s.type === 'file');
-  const hasSelection = useCurrentDoc || selectedIds.size >= 1;
+  const hasSelection = (useCurrentDoc && hasCurrentDoc) || fileSessions.some(s => selectedIds.has(s.id));
 
   const refreshLibrary = useCallback(async () => {
     setLibraryLoading(true);
     try {
       const items = await storageService.getAllHistory();
       const local = collectSavedArtifactsFromLocalHistory(items);
+      const cached = await allReviewCaches(user?.uid ?? 'local').catch(() => []);
+      const knownIds = new Set(local.map(entry => entry.artifact.id));
+      for (const record of cached) for (const artifact of record.artifacts) {
+        if (knownIds.has(artifact.id)) continue;
+        knownIds.add(artifact.id);
+        local.push({ provenance: 'local', artifact, sourceHash: `review-cache:${record.key}`, sourceFileName: artifact.sourceLabel || '联合复习' });
+      }
       if (!user) {
         setLibraryEntries(mergeLocalAndCloudArtifacts(local, []));
         return;
@@ -73,15 +98,16 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
   }, [user]);
 
   useEffect(() => {
-    if (!user) {
-      setSessions([]);
-      return;
-    }
+    let active = true;
+    setSessions([]); setSessionError(''); setSelectedIds(new Set()); setUseCurrentDoc(false);
+    if (!user) { setLoadingSessions(false); return; }
     setLoadingSessions(true);
     getUserSessions(user)
-      .then(setSessions)
-      .finally(() => setLoadingSessions(false));
-  }, [user]);
+      .then(value => { if (active) setSessions(value); })
+      .catch(() => { if (active) setSessionError('文件夹暂时没有读取成功，请重试。'); })
+      .finally(() => { if (active) setLoadingSessions(false); });
+    return () => { active = false; };
+  }, [user, reloadSessions]);
 
   useEffect(() => {
     if (mainTab === 'library') {
@@ -124,7 +150,10 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
   const handleDeleteLibraryEntry = async (e: React.MouseEvent, entry: MergedLibraryEntry) => {
     e.stopPropagation();
     try {
-      if (entry.provenance === 'local') {
+      if (entry.provenance === 'local' && entry.sourceHash.startsWith('review-cache:')) {
+        const record = await loadReviewCache(entry.sourceHash.slice('review-cache:'.length));
+        if (record) await saveReviewCache({ ...record, artifacts: record.artifacts.filter(a => a.id !== entry.artifact.id) });
+      } else if (entry.provenance === 'local') {
         const item = await storageService.getFileState(entry.sourceHash);
         if (!item?.state) return;
         item.state.savedArtifacts = (item.state.savedArtifacts ?? []).filter((a) => a.id !== entry.artifact.id);
@@ -134,6 +163,11 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
         const next = (detail.savedArtifacts ?? []).filter((a) => a.id !== entry.artifact.id);
         await updateCloudSessionState(entry.cloudSessionId, { savedArtifacts: next });
       }
+      // Remove the local cache copy too, so opening the source cannot resurrect it.
+      for (const cache of await allReviewCaches(user?.uid ?? 'local')) {
+        if (cache.artifacts.some(a => a.id === entry.artifact.id)) await saveReviewCache({ ...cache, artifacts: cache.artifacts.filter(a => a.id !== entry.artifact.id) });
+      }
+      onRemoveSavedArtifact?.(entry.artifact.id);
       setLibraryEntries((prev) => prev.filter((x) => x.artifact.id !== entry.artifact.id));
       if (previewEntry?.artifact.id === entry.artifact.id) setPreviewEntry(null);
     } catch {
@@ -145,139 +179,40 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
     entry.provenance === 'local' ? `l-${entry.sourceHash}-${entry.artifact.id}` : `c-${entry.cloudSessionId}-${entry.artifact.id}`;
 
   return (
-    <div className="fixed inset-0 z-[200] bg-[#FFFBF7] flex flex-col">
-      <div className="flex items-center justify-between px-6 py-4 border-b border-stone-200 bg-white/95 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="p-2 rounded-xl bg-indigo-100 text-indigo-500">
-            <BookOpen className="w-5 h-5" />
-          </div>
-          <h2 className="text-lg font-bold text-slate-800">复习</h2>
-        </div>
-        <button
-          onClick={onClose}
-          className="p-2 rounded-xl hover:bg-stone-100 text-slate-500 hover:text-slate-800 transition-colors"
-          aria-label="关闭"
-        >
-          <X className="w-5 h-5" />
-        </button>
-      </div>
-
-      <div className="shrink-0 px-6 pt-4 pb-2 border-b border-stone-100 bg-white/80">
-        <div className="max-w-2xl mx-auto w-full flex gap-2">
-          <button
-            type="button"
-            onClick={() => setMainTab('generate')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-sm font-bold transition-colors ${
-              mainTab === 'generate' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
-            }`}
-          >
-            生成 / 学习方式
-          </button>
-          <button
-            type="button"
-            onClick={() => setMainTab('library')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-sm font-bold transition-colors flex items-center justify-center gap-2 ${
-              mainTab === 'library' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-stone-100 text-slate-600 hover:bg-stone-200'
-            }`}
-          >
-            <Library className="w-4 h-4" />
-            已生成库
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full min-h-0">
+    <div className="review-page">
+      <header className="review-page-header">
+        <div className="review-page-heading"><BookOpen size={25} strokeWidth={1.5} /><div><h1>学习工具</h1><p>先选一种方式，再挑这次要用的资料。</p></div></div>
+        <button type="button" onClick={onClose} className="review-close"><X size={17} />返回学习</button>
+      </header>
+      <nav className="review-tabs" role="tablist" aria-label="学习工具与已有内容">
+        <button type="button" role="tab" aria-selected={mainTab === 'generate'} onClick={() => setMainTab('generate')}>学习工具</button>
+        <button type="button" role="tab" aria-selected={mainTab === 'library'} onClick={() => setMainTab('library')}><Library size={17} />已保存的内容</button>
+      </nav>
+      <div className="review-page-body"><div className="review-page-inner">
         {mainTab === 'generate' ? (
-          <>
-            <section className="mb-8">
-              <h3 className="text-sm font-bold text-slate-600 mb-3">选择文档（至少一个）</h3>
-              <div className="space-y-2">
-                {hasCurrentDoc && (
-                  <label className="flex items-center gap-3 p-3 rounded-xl border border-stone-200 hover:bg-stone-50 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useCurrentDoc}
-                      onChange={toggleCurrentDoc}
-                      className="rounded border-stone-300 text-indigo-600 w-4 h-4"
-                    />
-                    <FileText className="w-4 h-4 text-slate-400 shrink-0" />
-                    <span className="text-sm font-medium text-slate-700 truncate">
-                      当前已打开：{currentDocName || '未命名'}
-                    </span>
-                  </label>
-                )}
-                {!user ? (
-                  <div className="p-4 rounded-xl bg-stone-50 border border-stone-100 text-center text-slate-500 text-sm">
-                    登录后可选择云端文档
-                  </div>
-                ) : loadingSessions ? (
-                  <div className="flex items-center justify-center py-8 text-indigo-500">
-                    <Loader2 className="w-6 h-6 animate-spin" />
-                  </div>
-                ) : (
-                  fileSessions.map((s) => (
-                    <label
-                      key={s.id}
-                      className="flex items-center gap-3 p-3 rounded-xl border border-stone-200 hover:bg-stone-50 cursor-pointer"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(s.id)}
-                        onChange={() => toggleCloud(s.id)}
-                        className="rounded border-stone-300 text-indigo-600 w-4 h-4"
-                      />
-                      <Cloud className="w-4 h-4 text-slate-400 shrink-0" />
-                      <span className="text-sm font-medium text-slate-700 truncate">
-                        {s.customTitle || s.fileName}
-                      </span>
-                    </label>
-                  ))
-                )}
-              </div>
-            </section>
-
-            <section>
-              <h3 className="text-sm font-bold text-slate-600 mb-3">选择喜欢的学习方式</h3>
-              <div className="space-y-4">
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">巩固记忆</h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => handleStart('flashcard')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-amber-100 text-amber-800 hover:bg-amber-200">闪卡</button>
-                    <button onClick={() => handleStart('studyGuide')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-indigo-100 text-indigo-800 hover:bg-indigo-200">学习指南</button>
-                    <button onClick={() => handleStart('terminology')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-cyan-100 text-cyan-800 hover:bg-cyan-200">术语精确定义</button>
-                    <button onClick={() => handleStart('mindMap')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-teal-100 text-teal-800 hover:bg-teal-200">思维导图</button>
-                  </div>
-                </div>
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">自我检测</h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => handleStart('quiz')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-violet-100 text-violet-800 hover:bg-violet-200">测验</button>
-                    <button onClick={() => handleStart('feynman')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-sky-100 text-sky-800 hover:bg-sky-200">费曼检验</button>
-                    <button onClick={() => handleStart('trickyProfessor')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-orange-100 text-orange-800 hover:bg-orange-200">刁钻教授</button>
-                    <button onClick={() => handleStart('trapList')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-amber-100 text-amber-800 hover:bg-amber-200 col-span-2">我的陷阱清单{trapCount > 0 ? ` (${trapCount})` : ''}</button>
-                  </div>
-                </div>
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">考前冲刺</h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button onClick={() => handleStart('examSummary')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-emerald-100 text-emerald-800 hover:bg-emerald-200">考前速览</button>
-                    <button onClick={() => handleStart('examTraps')} disabled={!hasSelection} className="py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-rose-100 text-rose-800 hover:bg-rose-200">考点与陷阱</button>
-                  </div>
-                </div>
-                <div>
-                  <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">自由问答</h4>
-                  <button onClick={() => handleStart('multiDocQA')} disabled={!hasSelection} className="w-full py-3 px-4 rounded-xl font-bold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed bg-indigo-100 text-indigo-800 hover:bg-indigo-200">多文档问答</button>
-                </div>
-              </div>
-            </section>
+          selectedTool ? <ReviewMaterialPicker
+            key={selectedTool}
+            toolLabel={REVIEW_TOOL_LABELS[selectedTool] || '学习工具'}
+            sessions={sessions} loading={loadingSessions} error={sessionError} signedIn={!!user}
+            hasCurrentDoc={hasCurrentDoc} currentDocName={currentDocName} currentSessionId={currentSessionId}
+            selectedIds={selectedIds} useCurrentDoc={useCurrentDoc}
+            onToggleFile={toggleCloud} onToggleCurrent={toggleCurrentDoc}
+            onBack={() => setSelectedTool(null)} onStart={() => handleStart(selectedTool)}
+            onRetry={() => setReloadSessions(n => n + 1)} onLogin={onLogin} onLibrary={onLibrary}
+          /> : <>
+            <section className="review-intro"><span className="review-eyebrow">STUDY TOOLS · 学习工具</span><h2>把知识整理好，再练一练。</h2><p>选一种适合现在的方式。资料等会儿再挑，已有内容也可以接着用。</p></section>
+            <StudyToolMenu trapCount={trapCount} allowMultiDocQA selectMaterialsFirst onSelect={(type) => {
+              if (type === 'trapList') { onStartReview(null, type); return; }
+              setSelectedIds(new Set()); setUseCurrentDoc(false); setSelectedTool(type);
+            }} />
           </>
         ) : (
-          <section>
+          <section className="review-library">
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
               <div>
                 <h3 className="text-sm font-bold text-slate-600">本机 + 云端已保存的生成内容</h3>
                 <p className="text-xs text-slate-500 mt-1">
-                  本地来自 IndexedDB；登录后汇总各云端 PDF 会话中已同步的条目。
+                  以前保存的笔记、练习和导图都在这里；登录后也会显示云端内容。
                 </p>
               </div>
               <button
@@ -314,10 +249,6 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                     entry.provenance === 'local'
                       ? `来自本机：${entry.sourceFileName}`
                       : `来自云端：${entry.sourceDisplayName}`;
-                  const debugId =
-                    entry.provenance === 'cloud'
-                      ? `${entry.cloudSessionId.slice(0, 8)}…`
-                      : null;
                   return (
                     <li
                       key={libraryRowKey(entry)}
@@ -335,9 +266,6 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                           </div>
                           <div className="text-sm font-medium text-slate-800 truncate">{entry.artifact.title}</div>
                           <div className="text-xs text-slate-500 truncate">{subtitle}</div>
-                          {debugId && (
-                            <div className="text-[10px] font-mono text-stone-400 truncate">会话 {debugId}</div>
-                          )}
                           {entry.artifact.sourceLabel?.trim() ? (
                             <div className="text-[11px] text-slate-400 mt-0.5 line-clamp-2">{entry.artifact.sourceLabel}</div>
                           ) : null}
@@ -360,7 +288,7 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
             )}
           </section>
         )}
-      </div>
+      </div></div>
 
       {previewEntry && (
         <div className="fixed inset-0 z-[220] flex justify-end bg-black/40" role="presentation">
@@ -378,7 +306,7 @@ export const ReviewPage: React.FC<ReviewPageProps> = ({
                   <span className="font-semibold text-sky-800">云端</span>
                   <span className="mx-2">·</span>
                   <span className="truncate">{previewEntry.sourceDisplayName}</span>
-                  <span className="font-mono text-stone-400 ml-2 text-[10px]">{previewEntry.cloudSessionId.slice(0, 10)}…</span>
+
                 </>
               )}
             </div>

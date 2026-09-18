@@ -14,7 +14,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType, SkimContentType, SkimAuxiliaryMaterial, SkimAuxiliaryMaterialRole, SkimAuxiliaryUseMode, SkimReadingRoute, SkimReadingRouteNode, SkimReadingMessageAnchor, SkimReadingAnchorKind, CloudSession, SkimStudyStyle, SkimExplanationDepth, SkimExplanationStyle, SkimExplanationVariantKey, SkimModuleTakeaway, SkimRecordDeck, SkimRecordCardState, LectureCaseLearningState } from '@/types';
-import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, FlaskConical, Feather, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X, Maximize2, Minimize2, Folder, LayoutGrid, Link2, Plus, RefreshCw, Library, RotateCcw, Check } from 'lucide-react';
+import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X, Maximize2, Minimize2, Folder, LayoutGrid, Link2, Plus, RefreshCw, Library, RotateCcw, Check } from 'lucide-react';
 import { chatWithSkimAdaptiveTutor, generateContinuousLectureTurn, generateContinuousLectureVariant, generateLegacyRecordExplanationVariant, generateGatekeeperQuiz, generateModuleKnowledgeExtraction, generateModuleTakeaways, generateSkimReadingRoute } from '@/services/geminiService';
 import { readingFailureMessage } from '@/services/readingAstraClient';
 import { fetchFileFromUrl, readFileAsDataURL, extractPdfPageRange } from '@/lib/pdf/pdfUtils';
@@ -62,7 +62,6 @@ interface SkimPanelProps {
   
   // Doc Type
   docType: DocType;
-  onToggleDocType: () => void;
 
   // Note Taking
   onNotebookAdd?: (text: string, category: 'skim') => void;
@@ -869,7 +868,6 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   quizData,
   setQuizData,
   docType,
-  onToggleDocType,
   onNotebookAdd,
   onRegenerateStudyMap,
   studyMapModuleCount = null,
@@ -2938,10 +2936,6 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             </div>
             {stage === 'reading' && (
               <div className="reader-context-actions">
-                <button type="button" onClick={onToggleDocType} className="reader-context-mode" title="切换导读模式">
-                  {docType === 'STEM' ? <FlaskConical className="w-3.5 h-3.5" /> : <Feather className="w-3.5 h-3.5" />}
-                  <span>{docType === 'STEM' ? '理科模式' : '社科模式'}</span>
-                </button>
                 {(studyStyle === 'continuous' || (studyStyle === 'records' && activeRecordCard)) && skimContentType === 'lecture' && (
                   <div className="flex items-center gap-1 rounded-xl border border-indigo-100 bg-indigo-50/60 p-1" aria-label="讲解深度">
                     <span className="hidden px-1 text-[10px] font-bold text-indigo-500 xl:inline">讲解深度</span>

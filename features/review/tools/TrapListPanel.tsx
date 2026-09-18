@@ -16,7 +16,7 @@ export const TrapListPanel: React.FC<TrapListPanelProps> = ({ onClose, items, on
         <div className="flex items-center justify-between p-4 border-b border-stone-100 shrink-0">
           <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-amber-500" />
-            我的陷阱清单
+            错题本
             {items.length > 0 && <span className="text-slate-400 font-normal text-sm">({items.length})</span>}
           </h2>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-stone-100 text-stone-400 hover:text-slate-600 transition-colors">
@@ -25,7 +25,7 @@ export const TrapListPanel: React.FC<TrapListPanelProps> = ({ onClose, items, on
         </div>
         <div className="flex-1 overflow-y-auto p-6">
           {items.length === 0 ? (
-            <p className="text-slate-500 text-center py-12">暂无记录。在测验中答错题目时可点击「记入陷阱清单」添加到这里。</p>
+            <p className="text-slate-500 text-center py-12">暂无记录。在测验中答错题目时可点击「记入错题本」添加到这里。</p>
           ) : (
             <div className="space-y-4">
               {items.map((item) => (
@@ -40,6 +40,7 @@ export const TrapListPanel: React.FC<TrapListPanelProps> = ({ onClose, items, on
                       <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
+                  {item.answerKind === 'written' && <div className="mt-3 text-sm space-y-2"><p><strong>你的回答：</strong>{item.userAnswer}</p><p><strong>参考回答：</strong>{item.referenceAnswer}</p></div>}
                   <ul className="mt-2 text-sm text-slate-600 list-disc list-inside">
                     {item.options.map((opt, j) => (
                       <li

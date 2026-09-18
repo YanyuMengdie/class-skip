@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { X, ChevronLeft, ChevronRight, Loader2, Layers, RotateCcw, PlusCircle } from 'lucide-react';
 import { FlashCard } from '@/types';
-import { estimateFlashCardCount, generateFlashCards } from '@/services/geminiService';
+import { generateFlashCards } from '@/services/geminiService';
 
-type Step = 'estimate' | 'estimating' | 'ready' | 'generating' | 'flipping' | 'empty';
+type Step = 'ready' | 'generating' | 'flipping' | 'empty';
 
 interface FlashCardReviewPanelProps {
+  onOpenNotes?: () => void;
+  hasNoteConcepts?: boolean;
   onClose: () => void;
   pdfContent: string | null;
   existingCards: FlashCard[];
@@ -15,40 +17,26 @@ interface FlashCardReviewPanelProps {
 }
 
 export const FlashCardReviewPanel: React.FC<FlashCardReviewPanelProps> = ({
+  onOpenNotes,
+  hasNoteConcepts,
   onClose,
   pdfContent,
   existingCards,
   savedEstimate,
-  onSaveCards,
-  onSaveEstimate
+  onSaveCards
 }) => {
-  const [step, setStep] = useState<Step>(existingCards.length > 0 ? 'ready' : (savedEstimate != null ? 'ready' : 'estimate'));
-  const [estimate, setEstimate] = useState<number | null>(savedEstimate ?? null);
-  const [isEstimating, setIsEstimating] = useState(false);
+  const [step, setStep] = useState<Step>('ready');
+  const estimate = savedEstimate ?? null;
   const [generateCount, setGenerateCount] = useState(10);
   const [isGenerating, setIsGenerating] = useState(false);
   const [cards, setCards] = useState<FlashCard[]>(existingCards);
+  useEffect(() => {
+    setCards(prev => Array.from(new Map([...existingCards, ...prev].map(c => [c.id, c])).values()));
+  }, [existingCards]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (step === 'estimate' && pdfContent && estimate === null && !isEstimating) {
-      setIsEstimating(true);
-      setStep('estimating');
-      estimateFlashCardCount(pdfContent)
-        .then(n => {
-          setEstimate(n);
-          onSaveEstimate(n);
-          setStep('ready');
-        })
-        .catch(() => {
-          setEstimate(20);
-          setStep('ready');
-        })
-        .finally(() => setIsEstimating(false));
-    }
-  }, [pdfContent, step, estimate, isEstimating, onSaveEstimate]);
 
   const handleGenerate = async () => {
     if (!pdfContent || generateCount < 1) return;
@@ -110,19 +98,14 @@ export const FlashCardReviewPanel: React.FC<FlashCardReviewPanelProps> = ({
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
-          {(step === 'estimating' || step === 'estimate') && (
-            <div className="flex flex-col items-center justify-center py-16 text-amber-600">
-              <Loader2 className="w-12 h-12 animate-spin mb-4" />
-              <p className="font-bold">正在估算可整理闪卡数量...</p>
-            </div>
-          )}
+          {onOpenNotes && <button type="button" onClick={onOpenNotes} className="text-sm text-emerald-800 mb-4">{hasNoteConcepts ? '从已有复习笔记选择知识点制作闪卡 →' : '打开复习笔记 →'}</button>}
 
           {step === 'ready' && (
             <div className="space-y-6">
               {estimate != null && (
                 <div className="bg-amber-50 border border-amber-100 rounded-2xl p-4">
                   <p className="font-bold text-amber-800">根据当前 PDF，大约可整理出 <span className="text-xl">{estimate}</span> 张闪卡。</p>
-                  <p className="text-sm text-amber-700 mt-1">您可以先生成一批，之后随时「再生成更多」补充（不会重复）。</p>
+                  <p className="text-sm text-amber-700 mt-1">您可以先生成一批，之后随时「再生成更多」补充（会参考已有内容避免重复）。</p>
                 </div>
               )}
               <div>

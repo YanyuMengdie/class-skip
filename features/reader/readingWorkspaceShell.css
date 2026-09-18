@@ -247,11 +247,11 @@
 }
 
 .reading-workspace-main.is-reading-layout > .craft-reader-canvas {
-  flex: 46 1 0;
+  flex: 1 1 0;
 }
 
 .reading-workspace-main.is-reading-layout > .craft-reader-panel {
-  flex: 54 1 0;
+  flex: 1 1 0;
   width: auto;
   min-width: 0;
   box-shadow: none;

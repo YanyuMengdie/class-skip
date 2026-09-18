@@ -43,12 +43,14 @@ interface WrongItem {
 }
 
 interface FeynmanPanelProps {
+  practiceOnly?: boolean;
+  onWrongAnswer?: (item: WrongItem) => void;
   onClose: () => void;
   pdfContent: string | null;
   onSaveToStudio?: (markdown: string, title?: string) => void;
 }
-export const FeynmanPanel: React.FC<FeynmanPanelProps> = ({ onClose, pdfContent, onSaveToStudio }) => {
-  const [mode, setMode] = useState<FeynmanMode>('explain');
+export const FeynmanPanel: React.FC<FeynmanPanelProps> = ({ practiceOnly = false, onWrongAnswer, onClose, pdfContent, onSaveToStudio }) => {
+  const [mode, setMode] = useState<FeynmanMode>(practiceOnly ? 'quiz' : 'explain');
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -119,7 +121,19 @@ export const FeynmanPanel: React.FC<FeynmanPanelProps> = ({ onClose, pdfContent,
     evaluateFeynmanAnswer(currentQuestion.question, currentQuestion.referenceAnswer, userAnswer)
       .then((res) => {
         setFeedback(res);
+        onSaveToStudio?.(`## 题目
+${currentQuestion.question}
+
+## 我的回答
+${userAnswer.trim()}
+
+## 反馈
+${res.feedback}
+
+## 参考回答
+${currentQuestion.referenceAnswer}`, '自己讲清楚');
         if (!res.correct) {
+          onWrongAnswer?.({ question: currentQuestion.question, referenceAnswer: currentQuestion.referenceAnswer, userAnswer: userAnswer.trim(), feedback: res.feedback });
           setWrongList((prev) => [
             ...prev,
             {
@@ -148,7 +162,7 @@ export const FeynmanPanel: React.FC<FeynmanPanelProps> = ({ onClose, pdfContent,
         <div className="flex items-center justify-between p-4 border-b border-stone-100 shrink-0">
           <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2">
             <MessageCircle className="w-5 h-5 text-sky-500" />
-            费曼检验 · 用大白话讲
+            {practiceOnly ? '练一练 · 自己讲清楚' : '费曼检验 · 用大白话讲'}
           </h2>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-stone-100 text-stone-400 hover:text-slate-600 transition-colors">
             <X className="w-5 h-5" />
@@ -156,7 +170,7 @@ export const FeynmanPanel: React.FC<FeynmanPanelProps> = ({ onClose, pdfContent,
         </div>
 
         {/* 模式切换 */}
-        <div className="flex border-b border-stone-100 shrink-0">
+        {!practiceOnly && <div className="flex border-b border-stone-100 shrink-0">
           <button
             onClick={() => { setMode('explain'); setError(null); setFeedback(null); }}
             className={`flex-1 flex items-center justify-center gap-2 py-3 text-sm font-bold transition-colors ${mode === 'explain' ? 'bg-sky-100 text-sky-800 border-b-2 border-sky-500' : 'text-slate-500 hover:bg-stone-50'}`}
@@ -171,7 +185,7 @@ export const FeynmanPanel: React.FC<FeynmanPanelProps> = ({ onClose, pdfContent,
             <HelpCircle className="w-4 h-4" />
             出题考我
           </button>
-        </div>
+        </div>}
 
         <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4 min-h-0">
           {mode === 'explain' && (
@@ -329,7 +343,7 @@ export const FeynmanPanel: React.FC<FeynmanPanelProps> = ({ onClose, pdfContent,
                             <p className="text-slate-700 text-sm">{feedback.feedback}</p>
                           </div>
                           <div className="p-4 rounded-xl bg-stone-50 border border-stone-200 text-sm">
-                            <p className="font-bold text-slate-700 mb-1">参考答案要点</p>
+                            <p className="font-bold text-slate-700 mb-1">参考回答</p>
                             <p className="text-slate-600">{currentQuestion.referenceAnswer}</p>
                           </div>
                           <div className="flex gap-2">

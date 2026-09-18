@@ -217,6 +217,7 @@ export interface QuizData {
 
 /** 一轮测验（多题），用于「复习」里的 Quiz */
 export interface QuizRound {
+  sourceKey?: string;
   id: string;
   items: QuizData[];
   createdAt: number;
@@ -224,6 +225,7 @@ export interface QuizRound {
 
 /** 单张闪卡 */
 export interface FlashCard {
+  sourceKey?: string;
   id: string;
   front: string;
   back: string;
@@ -233,6 +235,9 @@ export interface FlashCard {
 
 /** 陷阱清单条目（错题/易错点） */
 export interface TrapItem {
+  answerKind?: 'choice' | 'written';
+  userAnswer?: string;
+  referenceAnswer?: string;
   id: string;
   question: string;
   options: string[];
@@ -391,6 +396,7 @@ export type SavedArtifactType =
   | 'trapList';
 
 export interface SavedArtifactBase {
+  sourceKey?: string;
   id: string;
   type: SavedArtifactType;
   title: string;
@@ -440,6 +446,8 @@ export interface PageMarks {
 export type StudyGuideFormat = 'outline' | 'detailed';
 
 export interface StudyGuideContent {
+  /** Extraction limitations, not a claim that every exam topic is covered. */
+  coverageNote?: string;
   // 章节大纲
   chapters: Array<{
     title: string;
@@ -452,6 +460,8 @@ export interface StudyGuideContent {
     term: string;
     definition: string;
     importance: 'high' | 'medium' | 'low';
+    explanation?: string;
+    commonMistakes?: string[];
   }>;
   
   // 学习路径
@@ -486,6 +496,7 @@ export interface StudyGuideContent {
 }
 
 export interface StudyGuide {
+  sourceKey?: string;
   id: string;
   fileName: string;
   format: StudyGuideFormat;
