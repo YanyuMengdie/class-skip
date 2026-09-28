@@ -1,5 +1,6 @@
+import { PAPER_COMPANION_PROMPT, ARTICLE_COMPANION_PROMPT } from '@/lib/prompts/systemPrompts';
 import {beforeEach,describe,it,expect,vi} from 'vitest';
-import {generateContinuousLectureTurn,generateContinuousLectureVariant,chatWithSkimAdaptiveTutor} from './geminiService';
+import {generateContinuousLectureTurn,generateContinuousLectureVariant,generateLegacyRecordExplanationVariant,chatWithSkimAdaptiveTutor} from './geminiService';
 import {createSkimExplanationState} from '@/features/reader/skim/skimExplanation';
 import {parseReadingResponse} from '@/features/reader/skim/readingAids';
 const {generate}=vi.hoisted(()=>({generate:vi.fn()}));
@@ -28,6 +29,21 @@ describe('reading media generation',()=>{
   const raw=await chatWithSkimAdaptiveTutor(input.docContent,[],'继续','reading','STEM',{visualAids:true,readingScope:{pageStart:7,pageEnd:9,cropped:true}},undefined,undefined,contentType);
   expect(parseReadingResponse(raw,7,9,true).media.aids?.[0].page).toBe(7);expect(generate).toHaveBeenCalledTimes(1);
   const config=generate.mock.calls[0][0].config;expect(JSON.stringify(config.systemInstruction)).toContain('不改成 Lecture 模板');expect(JSON.stringify(config.systemInstruction)).toContain('附件页码 + 6');expect(config.responseMimeType).toBe('application/json');
+ });
+ it.each(['paper','article'] as const)('rewrites an existing %s explanation within its record without switching teaching templates',async(contentType)=>{
+  const draft=await generateLegacyRecordExplanationVariant({docContent:input.docContent,contentType,legacyMessageMarkdown:'旧讲解原文及其实验限定条件。',targetDepth:'normal',targetStyle:'interesting',pageStart:7,pageEnd:9,recordTitle:'当前分段'});
+  let req=generate.mock.calls[0][0];
+  expect(JSON.stringify(req.config.systemInstruction)).toContain('不改成 Lecture 模板');
+  expect(String(req.config.systemInstruction)).toContain(contentType === 'paper' ? PAPER_COMPANION_PROMPT : ARTICLE_COMPANION_PROMPT);
+  expect(JSON.stringify(req.config.systemInstruction)).toContain('译文引用块须原样保留');
+  expect(JSON.stringify(req.contents)).toContain('旧讲解原文及其实验限定条件。');
+  expect(JSON.stringify(req.contents)).toContain('第 7-9 页');
+  generate.mockClear();
+  await generateContinuousLectureVariant({docContent:input.docContent,contentType,explanation:createSkimExplanationState(draft,'normal'),targetDepth:'normal',targetStyle:'interesting',pageStart:7,pageEnd:9});
+  req=generate.mock.calls[0][0];
+  expect(JSON.stringify(req.config.systemInstruction)).toContain('保留原讲解的论证顺序、证据和限定条件');
+  expect(JSON.stringify(req.contents)).toContain('对应回原文的术语');
+  expect(generate).toHaveBeenCalledTimes(1);
  });
  it('leaves tutoring and non-opted-in callers on their existing response protocol',async()=>{
   generate.mockResolvedValue({text:'原有回复'});await chatWithSkimAdaptiveTutor('text',[],'问题','tutoring','STEM',{visualAids:true});

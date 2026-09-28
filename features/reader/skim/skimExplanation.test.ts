@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@/types';
 import {
+  canRewriteSkimExplanation,
   createSkimExplanationState,
   createSkimExplanationStateFromLegacyMessage,
   getDisplayedSkimMessageText,
+  getDisplayedSkimReadingMedia,
   getSkimExplanationVariantKey,
   isLegacyRecordExplanationCandidate,
   resolveSkimExplanationPageBounds,
@@ -35,6 +37,16 @@ describe('skim explanation variants', () => {
     expect(shouldUseConnectedLectureExplanation('tutoring', 'records', 'lecture', true)).toBe(false);
   });
 
+  it('allows rewriting opened records without enabling the Lecture reading route for papers', () => {
+    expect(canRewriteSkimExplanation('reading', 'records', true)).toBe(true);
+    expect(canRewriteSkimExplanation('reading', 'records', false)).toBe(false);
+    expect(canRewriteSkimExplanation('reading', 'continuous', false)).toBe(true);
+    expect(canRewriteSkimExplanation('reading', 'case', true)).toBe(false);
+    expect(canRewriteSkimExplanation('diagnosis', 'records', true)).toBe(false);
+    expect(shouldUseConnectedLectureExplanation('reading', 'records', 'paper', true)).toBe(false);
+    expect(shouldUseConnectedLectureExplanation('reading', 'records', 'article', true)).toBe(false);
+  });
+
   it('uses the current record pages instead of the whole configured range', () => {
     expect(resolveSkimExplanationPageBounds(1, 72, { pageStart: 18, pageEnd: 24 })).toEqual({
       pageStart: 18,
@@ -64,6 +76,22 @@ describe('skim explanation variants', () => {
     expect(state.variants['normal-standard']?.messageMarkdown).toBe('原来的正常讲解');
     expect(state.variants['simple-standard']?.messageMarkdown).toBe('简单解释');
     expect(state.sourcePageRefs).toEqual([2, 3]);
+  });
+
+  it('preserves original visual metadata and recovers old saved records without leaking it into rewrites', () => {
+    const media = { terms: [] };
+    const state = createSkimExplanationStateFromLegacyMessage('原文', draft, 'normal', 'interesting', 1, media);
+    const message: ChatMessage = { role: 'model', text: '原文', timestamp: 1, readingMedia: media, skimExplanation: state };
+    const original = withActiveSkimExplanationVariant(message, 'normal-standard');
+    expect(getDisplayedSkimReadingMedia(original)).toBe(media);
+    delete state.variants['normal-standard']!.readingMedia;
+    expect(getDisplayedSkimReadingMedia(original)).toBe(media);
+    expect(getDisplayedSkimReadingMedia(message)).toBeUndefined();
+    state.variants['normal-standard']!.readingMedia = {};
+    expect(getDisplayedSkimReadingMedia(original)).toEqual({});
+    delete state.variants['normal-standard']!.readingMedia;
+    state.variants['normal-standard']!.messageMarkdown = '另一份正文';
+    expect(getDisplayedSkimReadingMedia(original)).toBeUndefined();
   });
 
   it('builds the two-axis variant key', () => {

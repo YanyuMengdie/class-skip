@@ -14,6 +14,7 @@ import { exportStudyHandoutPdf } from '@/features/reader/export/studyHandoutPdf'
 import { SlidePageComments } from '@/features/reader/page-notes/SlidePageComments';
 import { ExplanationPanel } from '@/features/reader/deep-read/ExplanationPanel';
 import { SkimPanel } from '@/features/reader/skim/SkimPanel';
+import { updateReadingMessages } from '@/features/reader/skim/readingSessionUpdates';
 import { SkimRecordShelf } from '@/features/reader/skim/SkimRecordShelf';
 import { SessionTabInk, type SessionTabInkPosition } from '@/features/reader/motion/SessionTabInk';
 import '@/features/reader/readingWorkspaceShell.css';
@@ -444,8 +445,6 @@ const App: React.FC = () => {
     if (activeSkim?.studyStyle !== 'records' || deck?.view !== 'reader' || !deck.activeCardId) return null;
     return deck.cards[deck.activeCardId] ?? null;
   }, [activeSkim?.recordDeck, activeSkim?.studyStyle]);
-  const activeRecordCardIdRef = useRef<string | null>(null);
-  activeRecordCardIdRef.current = activeRecordCard?.id ?? null;
   const skimMessages = activeRecordCard?.messages ?? activeSkim.messages;
   const skimTopHeight = activeSkim.topHeight;
   const skimFocusMode = activeSkim.focusMode;
@@ -459,39 +458,13 @@ const App: React.FC = () => {
     if (id == null) return;
     setSkimSessions(prev => prev.map(s => (s.id === id ? updater(s) : s)));
   }, []);
-  // ↓↓↓ 与原单值 setter 同名同形（含函数式更新），故所有既有调用点无需改动，只是改为写进激活会话。
+  // Capture the originating session/card so delayed updates cannot follow a later selection.
   const setSkimMessages = useCallback<React.Dispatch<React.SetStateAction<ChatMessage[]>>>(
-    value => updateActiveSkimSession(s => {
-      const cardId = activeRecordCardIdRef.current;
-      const deck = s.recordDeck;
-      if (s.studyStyle === 'records' && cardId && deck?.cards[cardId]) {
-        const previous = deck.cards[cardId].messages ?? [];
-        const messages = typeof value === 'function'
-          ? (value as (p: ChatMessage[]) => ChatMessage[])(previous)
-          : value;
-        return {
-          ...s,
-          recordDeck: {
-            ...deck,
-            cards: {
-              ...deck.cards,
-              [cardId]: {
-                ...deck.cards[cardId],
-                messages,
-                digest: buildSkimRecordDigest(messages),
-              },
-            },
-          },
-        };
-      }
-      return {
-        ...s,
-        messages: typeof value === 'function'
-          ? (value as (p: ChatMessage[]) => ChatMessage[])(s.messages)
-          : value,
-      };
-    }),
-    [updateActiveSkimSession]
+    value => {
+      const origin = { sessionId: activeSkim.id, recordId: activeRecordCard?.id ?? null };
+      setSkimSessions(previous => updateReadingMessages(previous, origin, value, buildSkimRecordDigest));
+    },
+    [activeSkim.id, activeRecordCard?.id]
   );
   const setSkimTopHeight = useCallback<React.Dispatch<React.SetStateAction<number>>>(
     value => updateActiveSkimSession(s => ({ ...s, topHeight: typeof value === 'function' ? (value as (p: number) => number)(s.topHeight) : value })),

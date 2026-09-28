@@ -3866,6 +3866,7 @@ export interface GenerateContinuousLectureTurnInput {
 
 export interface GenerateContinuousLectureVariantInput {
   docContent: string;
+  contentType?: SkimContentType;
   explanation: SkimExplanationState;
   targetDepth: SkimExplanationDepth;
   targetStyle: SkimExplanationStyle;
@@ -3877,6 +3878,7 @@ export interface GenerateContinuousLectureVariantInput {
 
 export interface GenerateLegacyRecordExplanationVariantInput {
   docContent: string;
+  contentType?: SkimContentType;
   legacyMessageMarkdown: string;
   targetDepth: SkimExplanationDepth;
   targetStyle: SkimExplanationStyle;
@@ -4120,6 +4122,18 @@ export const generateContinuousLectureTurn = async (
   return draft;
 };
 
+/** Rewriting inherits the document's teaching contract without changing its core prompt. */
+const buildSkimRewriteInstruction = (contentType: SkimContentType | undefined, lectureInstruction: string): string => {
+  const companionPrompt = contentType === 'paper' ? PAPER_COMPANION_PROMPT
+    : contentType === 'article' ? ARTICLE_COMPANION_PROMPT : null;
+  return (companionPrompt ? companionPrompt + `
+【本轮任务：只改写已有讲解，不重新开场或推进阅读】
+沿用上面的论文/文章解读方法，不改成 Lecture 模板。保留原讲解的论证顺序、证据和限定条件，只改变解释部分的表达方式。
+已有作者原话的译文引用块须原样保留，不能改成比喻或 AI 转述；引用块之外再补解释或类比，明确区分作者的话和你的解释。
+以本轮提供的已有讲解、内容骨架和页码为边界，不增加范围外事实，不删减重要论证，不重新输出全文梗概。
+` : lectureInstruction) + READING_MEDIA_INSTRUCTION;
+};
+
 /**
  * 为旧分段讲解按需补建内容骨架。原消息保留为 normal-standard，
  * 本服务只生成用户首次点击的目标版本，不在加载时自动消耗模型。
@@ -4160,7 +4174,7 @@ ${validationFeedback}
         parts: [getContentPart(input.docContent), { text: prompt }],
       }],
       config: {
-        systemInstruction: '你负责为普通 Lecture 的旧分段讲解补建连接式版本。必须保留原结论，严格遵守当前分段范围。' + READING_MEDIA_INSTRUCTION,
+        systemInstruction: buildSkimRewriteInstruction(input.contentType, '你负责为普通 Lecture 的旧分段讲解补建连接式版本。必须保留原结论，严格遵守当前分段范围。'),
         responseMimeType: 'application/json',
         responseSchema: SKIM_EXPLANATION_RESPONSE_SCHEMA,
         ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
@@ -4219,7 +4233,7 @@ ${JSON.stringify(variants)}
 2. 必须参考原 PDF 核对事实与页码，不能只根据简单版自行扩写。
 ${input.recordScope ? `3. 这条讲解属于分段“${input.recordScope.title}”，范围为第 ${input.recordScope.pageStart}-${input.recordScope.pageEnd} 页。任何版本都不得引入下一分段的内容。` : '3. 当前为整段式领读，继续沿用该消息已有的内容骨架和页码范围。'}
 4. ${input.targetDepth === 'normal' ? '正常版必须覆盖每个骨架项，coveredSpineItemIds 写全部骨架 ID，deferredSpineItemIds 为空。若已有同表达方式的简单版，要明确用“刚才简单版里的……，正式来说对应……”建立连接。' : '简单版只展开核心关系和一个直觉例子，其余骨架项全部放进 deferredSpineItemIds，不能丢失。'}
-5. ${input.targetStyle === 'interesting' ? '从原材料内部寻找反直觉结果、冲突、具体场景或贴切类比；不要编造新闻、研究或外部事实。结尾明确把场景/类比逐项对应回 Lecture 的术语、证据和页码。若已有另一深度的有意思版，沿用同一个入口。' : '保持清楚、直接、中文为主；必要英文术语放在括号中。'}
+5. ${input.targetStyle === 'interesting' ? '从原材料内部寻找反直觉结果、冲突、具体场景或贴切类比；不要编造新闻、研究或外部事实。结尾明确把场景/类比逐项对应回' + (input.contentType && input.contentType !== 'lecture' ? '原文' : ' Lecture ') + '的术语、证据和页码。若已有另一深度的有意思版，沿用同一个入口。' : '保持清楚、直接、中文为主；必要英文术语放在括号中。'}
 6. messageMarkdown 只用 Markdown，不用 HTML。pageRefs 只能使用合法范围内的原文页码。
 ${validationFeedback ? `
 【上一次输出未通过校验，必须修复】
@@ -4238,7 +4252,7 @@ export const generateContinuousLectureVariant = async (
         parts: [getContentPart(input.docContent), { text: buildVariantDirective(input, validationFeedback) }],
       }],
       config: {
-        systemInstruction: '你是普通 Lecture 领读的讲解改写器。忠实性、当前范围和同一内容骨架优先于文风变化。' + READING_MEDIA_INSTRUCTION,
+        systemInstruction: buildSkimRewriteInstruction(input.contentType, '你是普通 Lecture 领读的讲解改写器。忠实性、当前范围和同一内容骨架优先于文风变化。'),
         responseMimeType: 'application/json',
         responseSchema: SKIM_EXPLANATION_VARIANT_SCHEMA,
         ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),

@@ -28,10 +28,12 @@ import { getMessageImages } from '@/lib/chat/messageUtils';
 import { buildSkimRecordDeck, getNextSkimRecordCard, validateSkimReadingRoute } from './recordDeck';
 import { LectureCaseArchive } from './LectureCaseArchive';
 import {
+  canRewriteSkimExplanation,
   createSkimExplanationState,
   createSkimExplanationStateFromLegacyMessage,
   getActiveSkimExplanationVariant,
   getDisplayedSkimMessageText,
+  getDisplayedSkimReadingMedia,
   getSkimExplanationVariantKey,
   isLegacyRecordExplanationCandidate,
   resolveSkimExplanationPageBounds,
@@ -1382,7 +1384,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         let validation = route
           ? validateSkimReadingRoute(route, recordRangeStart, recordRangeEnd)
           : { valid: false, errors: ['模型没有返回路线。'] };
-        if (!validation.valid && skimContentType === 'lecture') {
+        if (!validation.valid) {
           route = await generateSkimReadingRoute(content, {
             ...routeOptions,
             validationFeedback: validation.errors.join('\n'),
@@ -1484,6 +1486,19 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     || variantLoadingMessageId !== null
     || takeawaysLoading
     || knowledgeExtractionLoading;
+
+  useEffect(() => {
+    setIsChatLoading(false);
+    setVariantLoadingMessageId(null);
+    setVariantErrors({});
+    setExplanationGenerationError(null);
+    return () => {
+      recordOpeningStartedRef.current = null;
+      skimGenerationCancelledRef.current = true;
+      skimAbortControllerRef.current?.abort();
+      variantAbortControllerRef.current?.abort();
+    };
+  }, [understandingScope]);
 
   // Text Selection State
   const [selectionRect, setSelectionRect] = useState<{top: number, left: number} | null>(null);
@@ -1910,6 +1925,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       /** 页码范围裁剪后的小 PDF；提供时替代整本（pdfDataUrl||fullText）喂给 AI */
       contentOverride?: string
   ) => {
+      const requestScope = understandingScope;
       const raw = textOverride ?? input;
       const trimmed = raw.trim();
       // CRITICAL: Prioritize PDF Vision Data over Text to avoid hallucination on scanned docs
@@ -1990,9 +2006,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             if (abortController.signal.aborted) return;
             skimReadingOpts = { ...skimReadingOpts, readingScope: { pageStart, pageEnd, cropped: content.startsWith('data:application/pdf') } };
           }
-          const displayedHistory = usesConnectedLectureExplanation
-            ? messages.map((message) => ({ ...message, text: getDisplayedSkimMessageText(message) }))
-            : messages;
+          const displayedHistory = messages.map((message) => ({ ...message, text: getDisplayedSkimMessageText(message) }));
           let response: string;
           let readingMedia: ReadingMedia | undefined;
           let explanationDraft: Awaited<ReturnType<typeof generateContinuousLectureTurn>> | null = null;
@@ -2032,7 +2046,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
               response = parsed.text; readingMedia = parsed.media;
             }
           }
-          if (abortController.signal.aborted || skimGenerationCancelledRef.current) return;
+          if (abortController.signal.aborted || skimGenerationCancelledRef.current || requestScope !== understandingScopeRef.current) return;
           const normalizedResponse = normalizeGeneratedLineBreaks(response);
           const messageId = createSkimMessageId();
           const latestParentNumber = routeOutlineItems
@@ -2071,7 +2085,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           markReplyArrival(aiMsg);
           setMessages(prev => [...prev, aiMsg]);
       } catch (e) {
-          if (abortController.signal.aborted || skimGenerationCancelledRef.current) return;
+          if (abortController.signal.aborted || skimGenerationCancelledRef.current || requestScope !== understandingScopeRef.current) return;
           const isAbort =
               e instanceof DOMException && e.name === 'AbortError'
               || (typeof e === 'object' && e !== null && 'name' in e && (e as { name: string }).name === 'AbortError');
@@ -2081,7 +2095,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             ? '这次连接式讲解没有通过内容或页码校验。原对话没有被覆盖，可以重试。'
             : '这次领读没有完成，原对话已保留，可以重试。'));
       } finally {
-          setIsChatLoading(false);
+          if (requestScope === understandingScopeRef.current) setIsChatLoading(false);
           if (skimAbortControllerRef.current === abortController) {
               skimAbortControllerRef.current = null;
           }
@@ -2108,8 +2122,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     if (
       isExplanationBusy
       || studyStyle !== 'records'
-      || skimContentType !== 'lecture'
-      || stage !== 'reading'
+      || !canRewriteSkimExplanation(stage, studyStyle, Boolean(activeRecordCard))
       || !activeRecordCard
     ) return;
     const messageIndex = messages.findIndex((message, index) => getStableMessageId(message, index) === messageId);
@@ -2121,6 +2134,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       return;
     }
 
+    const requestScope = understandingScope;
     const abortController = new AbortController();
     variantAbortControllerRef.current = abortController;
     setVariantLoadingMessageId(messageId);
@@ -2132,6 +2146,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     try {
       const draft = await generateLegacyRecordExplanationVariant({
         docContent: content,
+        contentType: skimContentType,
         legacyMessageMarkdown: sourceMessage.text,
         targetDepth,
         targetStyle,
@@ -2140,7 +2155,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         recordTitle: activeRecordCard.title,
         abortSignal: abortController.signal,
       });
-      if (abortController.signal.aborted) return;
+      if (abortController.signal.aborted || requestScope !== understandingScopeRef.current) return;
       const normalizedDraft = {
         ...draft,
         messageMarkdown: normalizeGeneratedLineBreaks(draft.messageMarkdown),
@@ -2157,10 +2172,13 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             normalizedDraft,
             targetDepth,
             targetStyle,
+            Date.now(),
+            message.readingMedia,
           ),
         };
       }));
     } catch (error) {
+      if (abortController.signal.aborted || requestScope !== understandingScopeRef.current) return;
       const isAbort = error instanceof DOMException && error.name === 'AbortError'
         || (typeof error === 'object' && error !== null && 'name' in error && (error as { name: string }).name === 'AbortError');
       if (!isAbort) {
@@ -2174,7 +2192,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       if (variantAbortControllerRef.current === abortController) {
         variantAbortControllerRef.current = null;
       }
-      setVariantLoadingMessageId((current) => current === messageId ? null : current);
+      if (requestScope === understandingScopeRef.current) setVariantLoadingMessageId((current) => current === messageId ? null : current);
     }
   };
 
@@ -2185,8 +2203,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   ) => {
     if (
       isExplanationBusy
-      || !shouldUseConnectedLectureExplanation('reading', studyStyle, skimContentType, Boolean(activeRecordCard))
-      || stage !== 'reading'
+      || !canRewriteSkimExplanation(stage, studyStyle, Boolean(activeRecordCard))
     ) return;
     const targetKey = getSkimExplanationVariantKey(targetDepth, targetStyle);
     const messageIndex = messages.findIndex((message, index) => getStableMessageId(message, index) === messageId);
@@ -2203,6 +2220,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       return;
     }
 
+    const requestScope = understandingScope;
     const abortController = new AbortController();
     variantAbortControllerRef.current = abortController;
     setVariantLoadingMessageId(messageId);
@@ -2219,6 +2237,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       );
       const draft = await generateContinuousLectureVariant({
         docContent: content,
+        contentType: skimContentType,
         explanation,
         targetDepth,
         targetStyle,
@@ -2233,7 +2252,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         } : {}),
         abortSignal: abortController.signal,
       });
-      if (abortController.signal.aborted) return;
+      if (abortController.signal.aborted || requestScope !== understandingScopeRef.current) return;
       setMessages((previous) => previous.map((message, index) => {
         if (getStableMessageId(message, index) !== messageId || !message.skimExplanation) return message;
         const current = message.skimExplanation;
@@ -2263,6 +2282,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         };
       }));
     } catch (error) {
+      if (abortController.signal.aborted || requestScope !== understandingScopeRef.current) return;
       const isAbort = error instanceof DOMException && error.name === 'AbortError'
         || (typeof error === 'object' && error !== null && 'name' in error && (error as { name: string }).name === 'AbortError');
       if (!isAbort) {
@@ -2276,7 +2296,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       if (variantAbortControllerRef.current === abortController) {
         variantAbortControllerRef.current = null;
       }
-      setVariantLoadingMessageId((current) => current === messageId ? null : current);
+      if (requestScope === understandingScopeRef.current) setVariantLoadingMessageId((current) => current === messageId ? null : current);
     }
   };
 
@@ -2289,7 +2309,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           recordOpeningStartedRef.current = activeRecordCard.id;
           return;
       }
-      if (isChatLoading || recordOpeningStartedRef.current === activeRecordCard.id) return;
+      if (isChatLoading || !(pdfDataUrl || fullText) || recordOpeningStartedRef.current === activeRecordCard.id) return;
 
       recordOpeningStartedRef.current = activeRecordCard.id;
       const levelLabel = activeRecordCard.partIndex == null
@@ -2303,7 +2323,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         buildLectureReadingOptions(),
         { appendUserWhenOverride: false }
       );
-  }, [activeRecordCard?.id, messages.length, recordDeck?.view, studyStyle]);
+  }, [activeRecordCard?.id, messages.length, recordDeck?.view, studyStyle, isChatLoading, pdfDataUrl, fullText]);
 
   const handleShowTakeaways = async () => {
       if (messages.length === 0 || isExplanationBusy) return;
@@ -2964,7 +2984,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 {activeRecordCard && (
                   <button
                     type="button"
-                    onClick={onOpenRecordShelf}
+                    disabled={isExplanationBusy} onClick={onOpenRecordShelf}
                     className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 hover:bg-indigo-100 transition-colors"
                   >
                     <Library className="h-3.5 w-3.5" />
@@ -3201,6 +3221,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     const activeExplanationVariant = getActiveSkimExplanationVariant(msg);
                     const explanationState = msg.skimExplanation;
                     const displayedText = getDisplayedSkimMessageText(msg);
+                    const displayedMedia = getDisplayedSkimReadingMedia(msg);
                     const deferredItems = activeExplanationVariant && explanationState
                       ? activeExplanationVariant.deferredSpineItemIds
                           .map((id) => explanationState.spineItems.find((item) => item.id === id))
@@ -3214,7 +3235,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     const isLegacyRecordExplanation = Boolean(
                       studyStyle === 'records'
                       && activeRecordCard
-                      && stage === 'reading'
+                      && canRewriteSkimExplanation(stage, studyStyle, Boolean(activeRecordCard))
                       && isLegacyRecordExplanationCandidate(msg)
                     );
                     return (
@@ -3275,8 +3296,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                               </div>
                             )}
                             <div className="reader-message-body" data-preserve-language="true">
-                              {msg.role === 'model' && (activeExplanationVariant?.readingMedia || (!activeExplanationVariant && msg.readingMedia)) ? <ReadingMessage
-                                text={normalizeGeneratedLineBreaks(displayedText)} media={activeExplanationVariant ? activeExplanationVariant.readingMedia : msg.readingMedia}
+                              {msg.role === 'model' && displayedMedia ? <ReadingMessage
+                                text={normalizeGeneratedLineBreaks(displayedText)} media={displayedMedia}
                                 components={MarkdownComponents} pdfDataUrl={pdfDataUrl} onPage={onJumpToPage} language={language}
                               /> : <ReactMarkdown
                                   components={MarkdownComponents}
@@ -3672,21 +3693,21 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 <div className="flex flex-wrap items-center gap-1.5">
                   {activeRecordCard.status === 'completed' ? (
                     <>
-                      <button type="button" onClick={onUndoRecordComplete} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                      <button type="button" disabled={isExplanationBusy} onClick={onUndoRecordComplete} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">
                         <RotateCcw className="h-3.5 w-3.5" />撤销
                       </button>
                       <button type="button" className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600">留在这里</button>
-                      <button type="button" onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">返回分段目录</button>
+                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">返回分段目录</button>
                       {nextRecordCard && (
-                        <button type="button" onClick={onOpenNextRecord} className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-indigo-700">
+                        <button type="button" disabled={isExplanationBusy} onClick={onOpenNextRecord} className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-indigo-700">
                           下一段<ArrowRight className="h-3.5 w-3.5" />
                         </button>
                       )}
                     </>
                   ) : (
                     <>
-                      <button type="button" onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">返回分段目录</button>
-                      <button type="button" onClick={onCompleteRecord} className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-emerald-700">
+                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">返回分段目录</button>
+                      <button type="button" disabled={isExplanationBusy} onClick={onCompleteRecord} className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-emerald-700">
                         <Check className="h-3.5 w-3.5" />我学完了
                       </button>
                     </>

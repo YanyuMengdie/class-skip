@@ -45,6 +45,17 @@ export const shouldUseConnectedLectureExplanation = (
   && (studyStyle === 'continuous' || (studyStyle === 'records' && hasActiveRecord))
 );
 
+/** Rephrasing an existing explanation is available for every document type.
+ * Keep this separate from the Lecture-only main reading generation route. */
+export const canRewriteSkimExplanation = (
+  stage: string,
+  studyStyle: SkimStudyStyle,
+  hasActiveRecord: boolean,
+): boolean => (
+  stage === 'reading'
+  && (studyStyle === 'continuous' || (studyStyle === 'records' && hasActiveRecord))
+);
+
 export const resolveSkimExplanationPageBounds = (
   configuredStart: number,
   configuredEnd: number,
@@ -198,6 +209,7 @@ export const createSkimExplanationStateFromLegacyMessage = (
   targetDepth: SkimExplanationDepth,
   targetStyle: SkimExplanationStyle,
   createdAt = Date.now(),
+  originalMedia?: ReadingMedia,
 ): SkimExplanationState => {
   const targetKey = getSkimExplanationVariantKey(targetDepth, targetStyle);
   const allSpineItemIds = draft.spineItems.map((item) => item.id);
@@ -210,6 +222,7 @@ export const createSkimExplanationStateFromLegacyMessage = (
     depth: 'normal',
     style: 'standard',
     messageMarkdown: legacyMessageMarkdown,
+    ...(originalMedia ? { readingMedia: originalMedia } : {}),
     coveredSpineItemIds: allSpineItemIds,
     deferredSpineItemIds: [],
     pageRefs: sourcePageRefs,
@@ -248,6 +261,15 @@ export const getActiveSkimExplanationVariant = (
 export const getDisplayedSkimMessageText = (message: ChatMessage): string => (
   getActiveSkimExplanationVariant(message)?.messageMarkdown ?? message.text
 );
+
+/** Old saved variants may predate copying the original message's visual metadata. */
+export const getDisplayedSkimReadingMedia = (message: ChatMessage): ReadingMedia | undefined => {
+  const variant = getActiveSkimExplanationVariant(message);
+  if (!variant) return message.readingMedia;
+  if (variant.readingMedia !== undefined) return variant.readingMedia;
+  return variant.key === 'normal-standard' && variant.messageMarkdown === message.text
+    ? message.readingMedia : undefined;
+};
 
 export const withActiveSkimExplanationVariant = (
   message: ChatMessage,
