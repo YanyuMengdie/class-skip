@@ -1,3 +1,5 @@
+import { useAppLanguage } from '@/shared/i18n/appLanguage';
+import { useRecordLabels } from './useRecordLabels';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, ArrowRight, BookOpen, CheckCircle2, Clock3, Layers3 } from 'lucide-react';
 import type { SkimRecordDeck, SkimRecordStatus } from '@/types';
@@ -27,6 +29,8 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
   onOpenRecord,
   onFocusRecord,
 }) => {
+  const { language, text } = useAppLanguage();
+  const { label, failed, retry } = useRecordLabels(deck, language);
   const cards = useMemo(
     () => deck.orderedCardIds.map((id) => deck.cards[id]).filter(Boolean),
     [deck.cards, deck.orderedCardIds]
@@ -103,24 +107,24 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
   if (cards.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-[#f4f6f8] p-8 text-center">
-        <p className="text-sm font-bold text-slate-500">这次没有生成可用分段，请回到配置区重新规划。</p>
+        <p className="text-sm font-bold text-slate-500">{text('这次没有生成可用分段，请回到配置区重新规划。', 'No sections were generated. Return to setup to replan.')}</p>
       </div>
     );
   }
 
   return (
-    <section className="flex h-full min-h-0 flex-col overflow-hidden bg-[#f2f4f7]">
+    <section data-preserve-language="true" className="flex h-full min-h-0 flex-col overflow-hidden bg-[#f2f4f7]">
       <header className="border-b border-slate-200 bg-white px-5 py-4">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-base font-black text-slate-900">
               <Layers3 className="h-5 w-5 text-indigo-600" />
-              分段式学习
+              {text('分段式学习', 'Segmented reading')}
             </p>
-            <p className="mt-1 text-xs font-medium text-slate-500">选一个分段开始；顺序是建议，不是限制。</p>
+            <p className="mt-1 text-xs font-medium text-slate-500">{text('选一个分段开始；顺序是建议，不是限制。', 'Choose a section to begin. The order is a recommendation, not a restriction.')}</p>
           </div>
           <div className="shrink-0 text-xs font-bold text-slate-500">
-            {cards.filter((card) => card.status === 'completed').length} / {cards.length} 已学完
+            {cards.filter((card) => card.status === 'completed').length} / {cards.length} {text('已学完', 'completed')}
           </div>
         </div>
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
@@ -141,6 +145,10 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
             );
           })}
         </div>
+        {failed && <p role="status" className="mt-2 text-xs text-amber-700">
+          {text('分段翻译暂时不可用，当前显示原文。', 'Section translation is unavailable. Showing original text.')}
+          <button type="button" onClick={retry} className="ml-2 underline">{text('重试翻译', 'Retry translation')}</button>
+        </p>}
       </header>
 
       <div
@@ -186,7 +194,7 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => move(-1)}
           disabled={focusedIndex === 0}
-          aria-label="上一分段"
+          aria-label={text("上一分段", "Previous section")}
           className="absolute left-3 z-30 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-md transition-colors hover:border-indigo-400 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-30"
         >
           <ArrowLeft className="h-5 w-5" />
@@ -237,19 +245,19 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
                 <span className={`absolute right-3 top-3 rounded-full border px-2.5 py-1 text-[11px] font-black ${statusClass(card.status)}`}>
                   {card.status === 'completed' && <CheckCircle2 className="mr-1 inline h-3 w-3" />}
                   {card.status === 'in_progress' && <Clock3 className="mr-1 inline h-3 w-3" />}
-                  {STATUS_LABELS[card.status]}
+                  {text(STATUS_LABELS[card.status], { not_started: 'Not started', in_progress: 'In progress', completed: 'Completed' }[card.status])}
                 </span>
               </div>
               <div className="p-5">
                 <p className="text-xs font-black uppercase text-indigo-600">
                   Module {card.moduleIndex}{card.partIndex ? ` · Part ${card.partIndex}` : ''}
                 </p>
-                <h2 className="mt-2 line-clamp-2 text-xl font-black text-slate-900">{card.title}</h2>
-                <p className="mt-1 text-xs font-bold text-slate-400">第 {card.pageStart}-{card.pageEnd} 页</p>
-                <p className="mt-4 line-clamp-3 min-h-[4.5rem] text-sm leading-6 text-slate-600">{card.summary}</p>
+                <h2 className="mt-2 line-clamp-2 text-xl font-black text-slate-900">{label(card, 'title')}</h2>
+                <p className="mt-1 text-xs font-bold text-slate-400">{language === 'en' ? `Pages ${card.pageStart}–${card.pageEnd}` : `第 ${card.pageStart}-${card.pageEnd} 页`}</p>
+                <p className="mt-4 line-clamp-3 min-h-[4.5rem] text-sm leading-6 text-slate-600">{label(card, 'summary')}</p>
                 {hasEarlierUnfinished && (
                   <p className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-                    前面还有未学完的分段，但你仍然可以自由打开这一段。
+                    {text('前面还有未学完的分段，但你仍然可以自由打开这一段。', 'Earlier sections are unfinished, but you can still open this one freely.')}
                   </p>
                 )}
                 <button
@@ -257,7 +265,7 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
                   onClick={() => onOpenRecord(card.id)}
                   className="mt-5 flex w-full items-center justify-center gap-2 rounded-md bg-slate-900 px-4 py-3 text-sm font-black text-white hover:bg-indigo-600"
                 >
-                  {card.status === 'not_started' ? '开始这一段' : '继续这一段'}
+                  {card.status === 'not_started' ? text('开始这一段', 'Start this section') : text('继续这一段', 'Continue this section')}
                   <ArrowRight className="h-4 w-4" />
                 </button>
               </div>
@@ -271,7 +279,7 @@ export const SkimRecordShelf: React.FC<SkimRecordShelfProps> = ({
           onPointerDown={(event) => event.stopPropagation()}
           onClick={() => move(1)}
           disabled={focusedIndex === cards.length - 1}
-          aria-label="下一分段"
+          aria-label={text("下一分段", "Next section")}
           className="absolute right-3 z-30 grid h-11 w-11 place-items-center rounded-full border border-slate-200 bg-white text-slate-700 shadow-md transition-colors hover:border-indigo-400 hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-30"
         >
           <ArrowRight className="h-5 w-5" />

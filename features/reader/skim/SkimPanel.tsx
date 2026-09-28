@@ -1,3 +1,4 @@
+import { useRecordLabels } from './useRecordLabels';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { ReadingMessage } from './ReadingMessage';
 import { parseReadingResponse, type ReadingMedia } from './readingAids';
@@ -924,6 +925,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   understandingGenerateTurn,
 }) => {
   const { language } = useAppLanguage();
+  const recordLabels = useRecordLabels(studyStyle === 'records' ? recordDeck : null, language);
   const [input, setInput, saveInputDraft] = useStudyDraft(`skim:${readingSessionKey}:${studyStyle}:${activeRecordCard?.id ?? ''}`);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [variantLoadingMessageId, setVariantLoadingMessageId] = useState<string | null>(null);
@@ -2507,19 +2509,19 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         <div className="flex flex-1 flex-col justify-center px-6 py-8">
           <div className="rounded-lg border border-indigo-100 bg-indigo-50/55 p-5">
             <p className="text-xs font-black uppercase text-indigo-600">这次的分段</p>
-            <p className="mt-2 text-2xl font-black text-slate-900">{cards.length} 个分段</p>
+            <p className="mt-2 text-2xl font-black text-slate-900">{language === 'en' ? `${cards.length} ${cards.length === 1 ? 'section' : 'sections'}` : `${cards.length} 个分段`}</p>
             <div className="mt-4 grid grid-cols-3 gap-2 text-center">
               <div className="rounded-md bg-white px-2 py-3">
                 <p className="text-lg font-black text-slate-800">{cards.length - completedCount - inProgressCount}</p>
-                <p className="text-[10px] font-bold text-slate-400">未开始</p>
+                <p className="text-[10px] font-bold text-slate-400">{localizeText('未开始', 'Not started', language)}</p>
               </div>
               <div className="rounded-md bg-white px-2 py-3">
                 <p className="text-lg font-black text-amber-600">{inProgressCount}</p>
-                <p className="text-[10px] font-bold text-slate-400">学习中</p>
+                <p className="text-[10px] font-bold text-slate-400">{localizeText('学习中', 'In progress', language)}</p>
               </div>
               <div className="rounded-md bg-white px-2 py-3">
                 <p className="text-lg font-black text-emerald-600">{completedCount}</p>
-                <p className="text-[10px] font-bold text-slate-400">已学完</p>
+                <p className="text-[10px] font-bold text-slate-400">{localizeText('已学完', 'Completed', language)}</p>
               </div>
             </div>
             <p className="mt-4 text-sm leading-6 text-slate-600">
@@ -3051,14 +3053,15 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 <p className="text-[10px] font-black uppercase text-indigo-600">
                   Module {activeRecordCard.moduleIndex}{activeRecordCard.partIndex == null ? '' : ` · Part ${activeRecordCard.partIndex}`}
                 </p>
-                <p className="mt-1 truncate text-sm font-black text-slate-800">{activeRecordCard.title}</p>
-                <p className="mt-0.5 text-[11px] font-semibold text-slate-400">第 {activeRecordCard.pageStart}-{activeRecordCard.pageEnd} 页 · 当前停在第 {currentPage} 页</p>
+                <p className="mt-1 truncate text-sm font-black text-slate-800">{recordLabels.label(activeRecordCard, 'title')}</p>
+                {recordLabels.failed && <button type="button" onClick={recordLabels.retry} className="text-xs text-amber-700 underline">{localizeText('分段翻译失败，点击重试', 'Section translation failed. Retry', language)}</button>}
+                <p className="mt-0.5 text-[11px] font-semibold text-slate-400">{language === 'en' ? `Pages ${activeRecordCard.pageStart}–${activeRecordCard.pageEnd} · Currently on page ${currentPage}` : `第 ${activeRecordCard.pageStart}-${activeRecordCard.pageEnd} 页 · 当前停在第 ${currentPage} 页`}</p>
               </div>
               <span className={`shrink-0 rounded-full border px-2 py-1 text-[10px] font-black ${activeRecordCard.status === 'completed'
                 ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
                 : 'border-amber-200 bg-amber-50 text-amber-700'
               }`}>
-                {activeRecordCard.status === 'completed' ? '已学完' : '学习中'}
+                {activeRecordCard.status === 'completed' ? localizeText('已学完', 'Completed', language) : localizeText('学习中', 'In progress', language)}
               </span>
             </div>
           </div>
