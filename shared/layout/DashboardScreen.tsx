@@ -2700,7 +2700,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <div role="status" className="min-h-[300px] flex flex-col items-center justify-center text-center">
                   <StudyBookLoader />
                   <p className="mt-4 font-black text-slate-800">{localizeUiText("正在翻一遍资料，找有意思的入口...")}</p>
-                  <p className="mt-2 text-sm text-slate-500">{localizeUiText("只保留能在原文里找到依据的内容，不强行凑数。")}</p>
+                  <p className="mt-2 text-sm text-slate-500">{localizeUiText("每个入口都对应资料中的知识；先听故事，再看它和资料的联系。")}</p>
                 </div>
               ) : tinyEntrySession?.entries.length ? (
                 <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">

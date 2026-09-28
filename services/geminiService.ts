@@ -1,3 +1,4 @@
+import { buildInterestEntryPrompt, INTEREST_ENTRY_STORY_RULES, type InterestEntryContext } from '@/features/reluctant/interestEntryPrompts';
 import { assertLectureCaseGenerationEnabled } from '@/features/reader/skim/lectureCaseRetirement';
 import { READING_MEDIA_INSTRUCTION, readingMediaSchema, parseReadingMedia } from '@/features/reader/skim/readingAids';
 import { STUDY_TERMS_INSTRUCTION, studyTermsSchema } from '@/features/reluctant/studyTerms';
@@ -5,7 +6,7 @@ import { prepareUnderstandingSource } from '@/features/reader/understanding/unde
 
 import { Type, type GenerateContentParameters } from "@google/genai";
 import { generateReadingContent } from "@/services/readingAstraClient";
-import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, ExamReviewScope, SkimContentType, SkimAuxiliaryMaterialRole, SkimAuxiliaryUseMode, SkimReadingRoute, SkimReadingRouteNode, SkimExplanationDepth, SkimExplanationStyle, SkimExplanationState, SkimExplanationSpineItem, SkimModuleTakeaway, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessSession, JointReviewMaterialRole, LectureStructuredNotes, LectureTranscriptSegment, LectureNoteEvidence, LectureTeacherSignalKind, TinyStudyEntry, TinyStudyEntryAction, TinyStudyEntryTurn, TinyStudyEntryType, LectureCaseManifest, LectureCaseSuitabilityReport, LectureCasePlan, LectureCaseEpisode, LectureCaseProgress, LectureCaseTurnResult, LectureCasePageDisposition, LectureCaseContentUnit } from "@/types";
+import { ChatMessage, StudyMap, Prerequisite, QuizData, DocType, PersonaSettings, StudyGuideContent, StudyGuideFormat, TurtleSoupPuzzle, MindMapNode, MindMapMultiResult, MindMapEvaluateResult, LSAPContentMap, LSAPKnowledgeComponent, LogicAtom, DisciplineBand, LearnerMood, UrgencyBand, LearnerTurnQuality, TutorScaffoldingContext, KCScopedTutorContext, MultiKCScopedTutorContext, ExamMaterialLink, RetrievedChunk, ExamReviewScope, SkimContentType, SkimAuxiliaryMaterialRole, SkimAuxiliaryUseMode, SkimReadingRoute, SkimReadingRouteNode, SkimExplanationDepth, SkimExplanationStyle, SkimExplanationState, SkimExplanationSpineItem, SkimModuleTakeaway, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessSession, JointReviewMaterialRole, LectureStructuredNotes, LectureTranscriptSegment, LectureNoteEvidence, LectureTeacherSignalKind, TinyStudyEntry, TinyStudyEntryType, LectureCaseManifest, LectureCaseSuitabilityReport, LectureCasePlan, LectureCaseEpisode, LectureCaseProgress, LectureCaseTurnResult, LectureCasePageDisposition, LectureCaseContentUnit } from "@/types";
 import { buildDialogueTeachingSystemPrompt } from "@/data/disciplineTeachingProfiles";
 import { buildScaffoldingTurnDirective, getScaffoldingSystemAddendum } from "@/data/scaffoldingPrompt";
 import { heuristicQuality } from "@/lib/exam/scaffoldingClassifier";
@@ -2465,7 +2466,8 @@ export const generateTinyStudyEntries = async (
 
 资料名：${options.fileName}
 
-请从下面逐页标记的原文里，挑出 3～6 个真正有意思、彼此不同、能够准确定位的入口。不要为了凑数量虚构内容。
+先理解整份资料在讨论什么，再从逐页原文里挑出 3～6 个能连接到现实、彼此不同且能准确定位知识依据的入口。不要为了凑数量虚构内容。
+优先寻找能讲成一件完整事情的现实后果、真实案例、实验经过、历史冲突或日常困惑。每个入口要能说明“这跟现实中的人和事有什么关系”，不要只给抽象术语换一个夸张标题。
 
 入口类型只能是：
 - question：资料真正想回答的有意思问题
@@ -2476,7 +2478,9 @@ export const generateTinyStudyEntries = async (
 
 严格要求：
 - 标题要像优质科普视频的“可信标题党”，目标是让一个本来不想学习的人也产生“等等，怎么回事？”的冲动，而不是像教材目录或论文小标题。
-- 标题必须制造一个真实的好奇缺口：优先使用具体画面、反常识结果、冲突、悬念或直接提问；可以有一点营销号感，但所有暗示都必须被对应原文支持。
+- 标题必须制造一个真实的好奇缺口：优先使用具体画面、反常识结果、冲突、悬念或直接提问；可以有冲击力和自然惊叹，但事实、风险和因果不能夸大。
+- 可以把原文知识联系到有把握的、已确立的现实背景，但不能编造新闻、人物、数据或具体经历。没把握就用原文的实验或案例，不硬凑疾病和灾难。
+- 标题优先落在实际后果或冲突上，让人想知道事情的经过和结局。梗概接住同一件事的悬念，不直接写成知识点解释，也不承诺原文和可靠背景无法支持的结论。
 - 标题不要直接把完整答案说完，也不要使用“X 的机制 / X 的效应 / X 的研究 / 浅析 / 探究”这类教科书式名词短语。
 - 禁止虚假夸张和廉价话术，例如“震惊”“99%的人不知道”“看完颠覆认知”“科学家都惊呆了”。
 - 标题尽量控制在 12～26 个汉字。梗概 1～2 句再准确说明“发生了什么、为什么值得看”，标题负责让人想点，梗概负责兑现承诺。
@@ -2490,7 +2494,8 @@ export const generateTinyStudyEntries = async (
 - pageStart/pageEnd 必须使用下方 [PAGE n] 的应用内页码，不能猜页码。
 - evidence 必须逐字抄录对应页中一小段连续原文，用于程序核验；不能改写。
 - 同一内容不要换标题重复推荐。
-- documentSummary 用 2～3 句说明整份资料的背景，只用于后续理解位置。
+- documentSummary 用 2～3 句说明整份资料真正想回答的主要问题、核心知识之间的关系，以及这些入口在主线中的位置。依据全文概括，不要只复述某个入口或堆关键词。
+- 页码和 evidence 标记的是相关课程知识的依据，不代表外部故事也写在这些页中。不得混淆两者。
 - 只输出 JSON，不要代码块或解释。
 
 JSON 格式：
@@ -2541,59 +2546,15 @@ ${pageIndex}`;
   };
 };
 
-const getTinyStudyEntryActionInstruction = (action: TinyStudyEntryAction): string => {
-  if (action === 'simpler') return '把刚才这个入口再讲白一点，只解释同一件事，不引入新的主题。';
-  if (action === 'interesting') return '只解释这个入口为什么有意思、反直觉或值得继续看，不扩展成整份资料总结。';
-  if (action === 'deeper') return '沿着同一个入口深入一层，可以补充机制或证据，但不能跳到其他入口。';
-  return '第一次介绍这个入口：先讲清发生了什么，以及为什么有意思。';
-};
-
 export const generateTinyStudyEntryStep = async (
   _docContent: string,
-  options: {
-    fileName: string;
-    documentSummary: string;
-    entry: TinyStudyEntry;
-    action: TinyStudyEntryAction;
-    pageTexts: string[];
-    previousTurns?: TinyStudyEntryTurn[];
-  }
+  options: InterestEntryContext
 ): Promise<string> => {
-  const pageScope = options.pageTexts
-    .slice(options.entry.pageStart - 1, options.entry.pageEnd)
-    .map((text, index) => `[PAGE ${options.entry.pageStart + index}]\n${text.slice(0, 5000)}`)
-    .join('\n\n');
-  const history = (options.previousTurns ?? [])
-    .slice(-6)
-    .map((turn) => `${turn.action}: ${turn.text}`)
-    .join('\n\n');
-  const prompt = `你是一个很会降低学习阻力的陪读助手。用户选择了一个自己可能感兴趣的入口，你只能围绕这个入口讲。
-
-资料名：${options.fileName}
-整份资料背景：${options.documentSummary || '无额外背景'}
-当前入口：${options.entry.title}
-入口梗概：${options.entry.teaser}
-准确范围：第 ${options.entry.pageStart}-${options.entry.pageEnd} 页
-本次动作：${getTinyStudyEntryActionInstruction(options.action)}
-
-当前入口的历史：
-${history || '这是第一次讲。'}
-
-对应页面原文：
-${pageScope}
-
-要求：
-- 必须用中文和大白话，像朋友在旁边解释。
-- 第一次控制在 180～320 个中文字；后续只补充当前入口，不重复整段。
-- 用空行分成几个短段落，每段围绕一个意思，通常 1～2 句话；不要把整段内容挤在一起。
-- 若有确实值得强调的一小句，可用 Markdown 加粗一次；不必强行提炼金句，不添加原文没有的引语、例子或图解。
-- 先让人理解“发生了什么”和“为什么有意思”，不要自动生成术语表、Quiz、作业或掌握要求。
-- 除非用户明确要求比较，否则不能转去讲其他页或总结整份 PDF。
-- 不要声称原文没有提供的事实。
-- 直接输出正文，不要 JSON。`;
+  const prompt = buildInterestEntryPrompt(options);
 
   const response = await readingAI.models.generateContent({
     model: 'gemini-3.8-flash',
+    config: { systemInstruction: INTEREST_ENTRY_STORY_RULES },
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
   });
   const text = response.text?.trim();

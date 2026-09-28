@@ -746,7 +746,7 @@ const ENGLISH_UI: Record<string, string> = {
   '保留原来的方式，从资料开头一小段一小段往后听。': 'Keep the original approach and move through the material in short sections from the beginning.',
   '已经选中': 'Selected',
   '我还没有开始扫描。确认后才会通读这份 PDF，并寻找几个真正有原文依据的兴趣入口。': 'Scanning starts only after confirmation and will find curiosity entries grounded in the PDF.',
-  '只保留能在原文里找到依据的内容，不强行凑数。': 'Only entries supported by the source are kept.',
+  '每个入口都对应资料中的知识；先听故事，再看它和资料的联系。': 'Each entry connects to ideas in your material. Hear the story first, then see the connection.',
   '这次可以正常使用，但入口记录暂时没有同步到云端。': 'This session works normally, but the entry record has not synced to the cloud.',
   '上次看到的资料': 'Last viewed material',
   '选一份 PDF。你可以从有意思的地方开始，也可以从头听一小段。': 'Choose a PDF. Start with something interesting or hear a short section from the beginning.',

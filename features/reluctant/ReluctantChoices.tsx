@@ -18,7 +18,7 @@ export function ReluctantHome({ language, onChoose }: { language: AppLanguage; o
   const en = language === 'en';
   const choices = [
     { mode: 'overview' as const, icon: FileText, number: '01', tag: en ? 'GET THE BIG PICTURE' : '先知道个大概', description: en ? 'Get the main ideas of the whole PDF, in plain language or as a story.' : '先把整份资料的主要内容讲给你。可以直接讲明白，也可以像故事一样串起来。', mood: en ? 'I am tired. Just give me the gist.' : '脑子很累，只想先知道个大概。', action: en ? 'Choose an explanation' : '选一种讲法' },
-    { mode: 'interest' as const, icon: Sparkles, number: '02', tag: en ? 'FOLLOW YOUR CURIOSITY' : '先来一点兴趣', description: en ? 'Find a question, experiment, or surprising idea in your material. Start with what catches your eye.' : '从资料里挑一个有意思的问题、实验或现象，先看让你好奇的那一点。', mood: en ? 'I feel bored. Give me something interesting.' : '觉得无聊，想先来点兴趣。', action: en ? 'Find a way in' : '找个有意思的地方' },
+    { mode: 'interest' as const, icon: Sparkles, number: '02', tag: en ? 'FOLLOW YOUR CURIOSITY' : '先来一点兴趣', description: en ? 'Start with a surprising real-world story, hear how it unfolds, then see how it connects to your material.' : '先听一件跟资料有关的现实故事，把来龙去脉讲完，再看看它和这份资料有什么关系。', mood: en ? 'I feel bored. Give me something interesting.' : '觉得无聊，想先来点兴趣。', action: en ? 'Find a way in' : '找个有意思的地方' },
     { mode: 'linear' as const, icon: BookOpen, number: '03', tag: en ? 'TAKE IT A LITTLE AT A TIME' : '有人陪着慢慢看', description: en ? 'Follow the material from the beginning, with a simple explanation of one small part at a time.' : '按资料顺序，用简单的话一点点展开。每次只讲一小段，愿意再看就继续。', mood: en ? 'I do not want to read alone. Walk me through it.' : '不想自己啃，但愿意跟着慢慢看。', action: en ? 'Start at the beginning' : '从开头慢慢来' },
   ];
   return <div className="reluctant-flow">
