@@ -1,5 +1,5 @@
 import { isLocalUser, type WorkspaceUser as User } from './workspaceUser';
-import { isLocalId, localGet, localPut, localList, localCreate, localPatch, localDelete, saveLocalFile, createLocalSession, deleteLocalFolder } from './localWorkspace';
+import { isLocalId, localGet, localPut, localList, localCreate, localPatch, localDelete, saveLocalFile, createLocalSession, deleteLocalFolder, deleteLocalSession } from './localWorkspace';
 
 import { initializeApp } from 'firebase/app';
 import {
@@ -484,13 +484,16 @@ export const moveSession = async (sessionId: string, newParentId: string | null)
 };
 
 export const deleteCloudSession = async (sessionId: string) => {
-  if (isLocalId(sessionId)) { const row = await localGet<CloudSession>('sessions', sessionId); await localDelete('sessions', sessionId); if (row?.fileUrl?.startsWith('classskip-local:')) await localDelete('files', row.fileUrl.slice('classskip-local:'.length)); return; }
+  if (isLocalId(sessionId)) return deleteLocalSession(sessionId);
 
   try {
     const heavyRef = doc(db, "sessions", sessionId, "data", "main");
-    await deleteDoc(heavyRef);
     const rootRef = doc(db, "sessions", sessionId);
-    await deleteDoc(rootRef);
+    // Keep the library entry and its main study record intact if deletion fails.
+    const batch = writeBatch(db);
+    batch.delete(heavyRef);
+    batch.delete(rootRef);
+    await batch.commit();
   } catch (error) {
     console.error("[Firestore] Delete Failed:", error);
     throw error;

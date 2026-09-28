@@ -134,7 +134,7 @@ describe('reading Astra adapter', () => {
     const fetcher = vi.fn().mockResolvedValue(new Response('server-secret private lecture text', { status }));
     const error = await requestReadingAstra('server-secret', request(), { fetch: fetcher }).catch(error => error);
     expect(error.message).not.toMatch(/secret|private|lecture/);
-    expect(error.code).toBe({ 401: 'unauthorized', 429: 'rate_limit', 500: 'unavailable' }[status]);
+    expect(error.code).toBe({ 401: 'unauthorized', 429: 'rate_limit', 500: 'provider_internal' }[status]);
   });
 });
 

@@ -68,7 +68,7 @@ describe('Astra server transport', () => {
   it.each([{ model: 'other-model' }, { url: 'https://example.com' }, { maxOutputTokens: 8193 }, { language: 'invalid' }])('rejects endpoint/model/budget overrides: %j', extra => {
     expect(() => parseExamAstraRequest({ ...request(), ...extra })).toThrow();
   });
-  it.each([[401, 'unauthorized'], [403, 'unauthorized'], [429, 'rate_limit'], [504, 'timeout'], [400, 'invalid_request'], [404, 'invalid_request'], [500, 'unavailable']])('sanitizes upstream %i', async (status, code) => {
+  it.each([[401, 'unauthorized'], [403, 'unauthorized'], [429, 'rate_limit'], [504, 'timeout'], [400, 'invalid_request'], [404, 'invalid_request'], [500, 'provider_internal']])('sanitizes upstream %i', async (status, code) => {
     const fetcher = vi.fn().mockResolvedValue(new Response('private key, prompts and private rubric must not escape', { status: Number(status) }));
     const error = await requestExamAstra('secret', request(), { fetch: fetcher }).catch(cause => cause);
     expect(error.code).toBe(code);

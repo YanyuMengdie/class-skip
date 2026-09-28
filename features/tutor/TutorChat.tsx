@@ -1,3 +1,6 @@
+import { useStudyDraft } from '@/features/studySupport/useStudyDraft';
+import { localizeText } from '@/shared/i18n/appLanguage';
+import { useSupportSurface } from '@/features/studySupport/StudySupportContext';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
@@ -49,6 +52,7 @@ const MarkdownComponents: Components = {
 };
 
 export interface TutorChatProps {
+  draftKey?: string;
   /** 受控：当前激活问答会话的消息（含 messages[0] 开场白） */
   messages: ChatMessage[];
   /** 受控：写回 App 的 tutorSessions（App 按 id 定位会话更新） */
@@ -69,6 +73,7 @@ export interface TutorChatProps {
 
 export const TutorChat: React.FC<TutorChatProps> = ({
   messages,
+  draftKey = 'standalone',
   setMessages,
   docType = 'STEM',
   onLoadingChange,
@@ -76,7 +81,7 @@ export const TutorChat: React.FC<TutorChatProps> = ({
   currentPage,
   totalPages,
 }) => {
-  const [input, setInput] = useState('');
+  const [input, setInput, saveInputDraft] = useStudyDraft(`tutor:${draftKey}`);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const { markReplyArrival, replyArrivalRef } = useReplyArrival();
@@ -233,6 +238,13 @@ export const TutorChat: React.FC<TutorChatProps> = ({
       }
     }
   };
+
+  useSupportSurface({
+    scope: `tutor:${draftKey}`, priority: 10, busy: isChatLoading,
+    boundary: String(messages.filter(message => message.role === 'model').length),
+    actions: [{ id: 'question', label: localizeText('告诉我哪里没懂', 'Ask about the tricky part'), run: () => { requestAnimationFrame(() => chatInputRef.current?.focus()); } }],
+    pause: () => { if (isChatLoading) handleStop(); saveInputDraft(); },
+  });
 
   return (
     <div className="reading-conversation flex flex-col h-full bg-white">

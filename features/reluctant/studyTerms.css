@@ -1,0 +1,19 @@
+.sprint-guided .study-term, .overview-prose .study-term, button.study-term {
+  display: inline; padding: 0; margin: 0; border: 0; border-bottom: 1px dashed #6e8c76;
+  border-radius: 0; background: transparent; color: inherit; font: inherit; line-height: inherit;
+  text-align: inherit; cursor: pointer; white-space: normal; overflow-wrap: anywhere; box-shadow: none;
+}
+.study-term .study-term-english { font-size: .8em; font-weight: 400; color: #627969; }
+.sprint-guided .study-term:hover, .overview-prose .study-term:hover { background: #e9eedf; }
+.study-term:focus-visible { outline: 2px solid #3c6953; outline-offset: 3px; }
+dialog.study-term-dialog {
+  color: #294637; background: #fffdf7; border: 1px solid #d8ddcf; border-radius: 18px;
+  padding: 24px; width: min(440px, calc(100vw - 32px)); max-height: calc(100dvh - 48px);
+  overflow-y: auto; box-sizing: border-box; box-shadow: 0 18px 70px #18332430;
+}
+.study-term-dialog::backdrop { background: #172b2440; }
+.study-term-dialog-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; color: #6c7b70; font-size: 13px; }
+.study-term-dialog-top button { border: none; background: transparent; color: #345944; font: inherit; font-size: 25px; cursor: pointer; width: 36px; height: 36px; }
+.study-term-dialog h3 { margin: 12px 0 4px; font-size: 24px; line-height: 1.4; overflow-wrap: anywhere; }
+.study-term-dialog .study-term-name { color: #70816f; font-size: 15px; margin: 0; overflow-wrap: anywhere; }
+.study-term-dialog .study-term-meaning { font-size: 17px; line-height: 1.85; margin: 20px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -1,3 +1,4 @@
+import { useAppLanguage, localizeUiText, localizeText } from '@/shared/i18n/appLanguage';
 import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { X, Loader2, GitBranch, ZoomIn, ZoomOut, RotateCcw, Sparkles, Maximize2, MoreHorizontal, ChevronDown } from 'lucide-react';
 import { MindMapNode, MindMapMultiResult } from '@/types';
@@ -51,6 +52,7 @@ function deleteNodeInTree(root: MindMapNode, targetId: string): MindMapNode {
 }
 
 export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onClose, pdfContent, fileNames, displayName, onSaveToStudio }) => {
+  useAppLanguage();
   const [mode, setMode] = useState<'ai' | 'build'>('ai');
   const [optionsOpen, setOptionsOpen] = useState(false);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -81,7 +83,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
     onSaveToStudio?.(payload);
   }, [singleTree, multiResult, loading, mode, onSaveToStudio]);
 
-  const [userTree, setUserTree] = useState<MindMapNode>(() => ({ id: 'root', label: '中心主题', children: [] }));
+  const [userTree, setUserTree] = useState<MindMapNode>(() => ({ id: 'root', label: localizeUiText('中心主题'), children: [] }));
   const [evaluateResult, setEvaluateResult] = useState<{
     feedback: string;
     suggestedNodes: Array<{ parentId: string; node: MindMapNode }>;
@@ -122,7 +124,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
   }, []);
 
   const handleAddChild = useCallback((parentId: string) => {
-    const child: MindMapNode = { id: newId(), label: '新节点', children: [] };
+    const child: MindMapNode = { id: newId(), label: localizeUiText('新节点'), children: [] };
     setUserTree((prev) => updateNodeInTree(prev, parentId, (n) => ({ ...n, children: [...(n.children || []), child] })));
   }, []);
 
@@ -130,11 +132,11 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
     (nodeId: string) => {
       const parentId = findParentId(userTree, nodeId, null);
       if (parentId === null && nodeId === 'root') {
-        setUserTree((prev) => ({ ...prev, children: [...(prev.children || []), { id: newId(), label: '新节点', children: [] }] }));
+        setUserTree((prev) => ({ ...prev, children: [...(prev.children || []), { id: newId(), label: localizeUiText('新节点'), children: [] }] }));
         return;
       }
       if (parentId != null) {
-        const sibling: MindMapNode = { id: newId(), label: '新节点', children: [] };
+        const sibling: MindMapNode = { id: newId(), label: localizeUiText('新节点'), children: [] };
         setUserTree((prev) => updateNodeInTree(prev, parentId, (n) => ({ ...n, children: [...(n.children || []), sibling] })));
       }
     },
@@ -211,7 +213,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
       const handlers: MindMapFlowNodeHandlers = {
         onUpdate: (id, updater) => setSingleTree((prev) => (prev ? updateNodeInTree(prev, id, updater) : null)),
         onAddChild: (parentId) => {
-          const child: MindMapNode = { id: newId(), label: '新节点', children: [] };
+          const child: MindMapNode = { id: newId(), label: localizeUiText('新节点'), children: [] };
           setSingleTree((prev) => (prev ? updateNodeInTree(prev, parentId, (n) => ({ ...n, children: [...(n.children || []), child] })) : null));
         },
         onAddSibling: (nodeId) => {
@@ -219,10 +221,10 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
             if (!prev) return null;
             const parentId = findParentId(prev, nodeId, null);
             if (parentId === null && nodeId === 'root') {
-              return { ...prev, children: [...(prev.children || []), { id: newId(), label: '新节点', children: [] }] };
+              return { ...prev, children: [...(prev.children || []), { id: newId(), label: localizeUiText('新节点'), children: [] }] };
             }
             if (parentId != null) {
-              const sibling: MindMapNode = { id: newId(), label: '新节点', children: [] };
+              const sibling: MindMapNode = { id: newId(), label: localizeUiText('新节点'), children: [] };
               return updateNodeInTree(prev, parentId, (n) => ({ ...n, children: [...(n.children || []), sibling] }));
             }
             return prev;
@@ -241,7 +243,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
         const handlers: MindMapFlowNodeHandlers = {
           onUpdate: handleUpdateNodeForDoc(d.fileName),
           onAddChild: (parentId) => {
-            const child: MindMapNode = { id: newId(), label: '新节点', children: [] };
+            const child: MindMapNode = { id: newId(), label: localizeUiText('新节点'), children: [] };
             setMultiResult((prev) =>
               prev
                 ? {
@@ -261,7 +263,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
                   ? {
                       ...prev,
                       perDoc: prev.perDoc.map((x) =>
-                        x.fileName === d.fileName ? { ...x, tree: { ...x.tree, children: [...(x.tree.children || []), { id: newId(), label: '新节点', children: [] }] } } : x
+                        x.fileName === d.fileName ? { ...x, tree: { ...x.tree, children: [...(x.tree.children || []), { id: newId(), label: localizeUiText('新节点'), children: [] }] } } : x
                       )
                     }
                   : null
@@ -269,7 +271,7 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
               return;
             }
             if (parentId != null) {
-              const sibling: MindMapNode = { id: newId(), label: '新节点', children: [] };
+              const sibling: MindMapNode = { id: newId(), label: localizeUiText('新节点'), children: [] };
               setMultiResult((prev) =>
                 prev
                   ? {
@@ -363,58 +365,58 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
     <div className="mm-panel">
       <header className="mm-header">
         <div className="mm-heading">
-          <button type="button" className="mm-icon" onClick={onClose} aria-label="关闭思维导图"><X size={20} /></button>
+          <button type="button" className="mm-icon" onClick={onClose} aria-label={localizeUiText("关闭思维导图")}><X size={20} /></button>
           <GitBranch size={22} />
-          <div><h1>思维导图</h1><p title={displayName ?? undefined}>{mode === 'build' ? '自己构建' : displayName || '从主题开始，逐层探索'}</p></div>
+          <div><h1>{localizeUiText("思维导图")}</h1><p title={displayName ?? undefined} data-preserve-language="true">{mode === 'build' ? localizeUiText("自己构建") : displayName || localizeUiText("从主题开始，逐层探索")}</p></div>
         </div>
         <div className="mm-header-actions">
           {hasFlowContent && <div className="mm-zoom-controls">
-            <button className="mm-icon" onClick={() => flowRef.current?.zoomOut()} aria-label="缩小画布" title="缩小"><ZoomOut size={18} /></button>
-            <button className="mm-icon" onClick={() => flowRef.current?.zoomIn()} aria-label="放大画布" title="放大"><ZoomIn size={18} /></button>
-            <button className="mm-icon" onClick={() => flowRef.current?.resetViewport()} aria-label="收起到第一层并恢复阅读大小" title="回到第一层"><RotateCcw size={18} /></button>
-            <button className="mm-icon" onClick={() => flowRef.current?.fitView()} aria-label="查看当前展开的全图" title="查看全图"><Maximize2 size={18} /></button>
+            <button className="mm-icon" onClick={() => flowRef.current?.zoomOut()} aria-label={localizeUiText("缩小画布")} title={localizeUiText("缩小")}><ZoomOut size={18} /></button>
+            <button className="mm-icon" onClick={() => flowRef.current?.zoomIn()} aria-label={localizeUiText("放大画布")} title={localizeUiText("放大")}><ZoomIn size={18} /></button>
+            <button className="mm-icon" onClick={() => flowRef.current?.resetViewport()} aria-label={localizeUiText("收起到第一层并恢复阅读大小")} title={localizeUiText("回到第一层")}><RotateCcw size={18} /></button>
+            <button className="mm-icon" onClick={() => flowRef.current?.fitView()} aria-label={localizeUiText("查看当前展开的全图")} title={localizeUiText("查看全图")}><Maximize2 size={18} /></button>
           </div>}
-          {mode === 'ai' && flowParts.length > 1 && <label className="mm-doc-picker"><span className="sr-only">选择文档导图</span><select value={Math.min(activeDocument, flowParts.length - 1)} onChange={e => setActiveDocument(Number(e.target.value))}>
+          {mode === 'ai' && flowParts.length > 1 && <label className="mm-doc-picker"><span className="sr-only">{localizeUiText("选择文档导图")}</span><select value={Math.min(activeDocument, flowParts.length - 1)} onChange={e => setActiveDocument(Number(e.target.value))}>
             {flowParts.map((part, i) => <option key={part.scope} value={i}>{multiResult?.perDoc[i]?.fileName ?? part.tree.label}</option>)}
           </select></label>}
           <div className="mm-more">
-            <button type="button" className="mm-button" aria-expanded={optionsOpen} aria-controls="mm-options" onClick={() => setOptionsOpen(v => !v)}><MoreHorizontal size={18} /><span>更多</span></button>
-            {optionsOpen && <><button className="mm-menu-dismiss" aria-label="关闭更多选项" onClick={() => setOptionsOpen(false)} /><div className="mm-menu" id="mm-options" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setOptionsOpen(false); } }}>
-              <button disabled={loading || modifyLoading} onClick={() => { setMode(mode === 'ai' ? 'build' : 'ai'); setActiveDocument(0); setError(null); setOptionsOpen(false); }}>{mode === 'ai' ? '自己构建导图' : '返回资料导图'}</button>
+            <button type="button" className="mm-button" aria-expanded={optionsOpen} aria-controls="mm-options" onClick={() => setOptionsOpen(v => !v)}><MoreHorizontal size={18} /><span>{localizeUiText("更多")}</span></button>
+            {optionsOpen && <><button className="mm-menu-dismiss" aria-label={localizeUiText("关闭更多选项")} onClick={() => setOptionsOpen(false)} /><div className="mm-menu" id="mm-options" onKeyDown={e => { if (e.key === 'Escape') { e.stopPropagation(); setOptionsOpen(false); } }}>
+              <button disabled={loading || modifyLoading} onClick={() => { setMode(mode === 'ai' ? 'build' : 'ai'); setActiveDocument(0); setError(null); setOptionsOpen(false); }}>{mode === 'ai' ? localizeUiText("自己构建导图") : localizeUiText("返回资料导图")}</button>
               {hasFlowContent && onSaveToStudio && <button onClick={() => {
                 if (mode === 'build') onSaveToStudio({ tree: userTree });
                 else if (multiResult) onSaveToStudio({ multiResult });
                 else if (singleTree) onSaveToStudio({ tree: singleTree });
                 setOptionsOpen(false);
-              }}>保存到已保存的内容</button>}
-              {hasFlowContent && mode === 'ai' && <button disabled={!pdfContent?.trim() || loading} onClick={() => { setOptionsOpen(false); handleGenerate(); }}>重新生成导图（使用 AI）</button>}
+              }}>{localizeUiText("保存到已保存的内容")}</button>}
+              {hasFlowContent && mode === 'ai' && <button disabled={!pdfContent?.trim() || loading} onClick={() => { setOptionsOpen(false); handleGenerate(); }}>{localizeUiText("重新生成导图（使用 AI）")}</button>}
               {visiblePart && <button disabled={loading || modifyLoading} onClick={() => {
                 const part = visiblePart;
                 openModifyDialog(part.tree, tree => part.handlers.onUpdate(part.tree.id, () => tree));
                 setOptionsOpen(false);
-              }}>修改当前导图（使用 AI）</button>}
-              {mode === 'build' && <button disabled={!pdfContent?.trim() || loading} onClick={() => { setOptionsOpen(false); setInfoOpen(true); handleEvaluate(); }}>评判与补充（使用 AI）</button>}
-              {(multiResult || evaluateResult) && <button onClick={() => { setInfoOpen(v => !v); setOptionsOpen(false); }}>文档关联与补充建议</button>}
+              }}>{localizeUiText("修改当前导图（使用 AI）")}</button>}
+              {mode === 'build' && <button disabled={!pdfContent?.trim() || loading} onClick={() => { setOptionsOpen(false); setInfoOpen(true); handleEvaluate(); }}>{localizeUiText("评判与补充（使用 AI）")}</button>}
+              {(multiResult || evaluateResult) && <button onClick={() => { setInfoOpen(v => !v); setOptionsOpen(false); }}>{localizeUiText("文档关联与补充建议")}</button>}
             </div></>}
           </div>
         </div>
       </header>
-      {error && <div className="mm-notice" role="alert">{error}<button className="mm-icon" onClick={() => setError(null)} aria-label="关闭提示"><X size={16} /></button></div>}
-      {loading && <div className="mm-notice" role="status"><Loader2 size={16} className="animate-spin" />正在整理导图，请稍候…</div>}
+      {error && <div className="mm-notice" role="alert">{localizeUiText(error)}<button className="mm-icon" onClick={() => setError(null)} aria-label={localizeUiText("关闭提示")}><X size={16} /></button></div>}
+      {loading && <div className="mm-notice" role="status"><Loader2 size={16} className="animate-spin" />{localizeUiText("正在整理导图，请稍候…")}</div>}
       {infoOpen && <section className="mm-info">
-        <div className="mm-details-heading"><h2>文档关联与补充建议</h2><button className="mm-icon" onClick={() => setInfoOpen(false)} aria-label="收起关联与建议"><ChevronDown size={18} /></button></div>
+        <div className="mm-details-heading"><h2>{localizeUiText("文档关联与补充建议")}</h2><button className="mm-icon" onClick={() => setInfoOpen(false)} aria-label={localizeUiText("收起关联与建议")}><ChevronDown size={18} /></button></div>
         {mode === 'ai' && multiResult?.crossDoc.map((link, i) => <div key={i}><h3>{link.docA} · {link.docB}</h3><ul>{link.similarities.map((s, j) => <li key={j}>{s}</li>)}</ul></div>)}
-        {mode === 'build' && evaluateResult && <><p>{evaluateResult.feedback}</p>{evaluateResult.suggestedNodes.length > 0 && <><p>点击对应概念可查看并加入建议分支：</p><ul>{evaluateResult.suggestedNodes.map((s, i) => <li key={i}>{s.node.label}</li>)}</ul></>}</>}
+        {mode === 'build' && evaluateResult && <><p>{evaluateResult.feedback}</p>{evaluateResult.suggestedNodes.length > 0 && <><p>{localizeUiText("点击对应概念可查看并加入建议分支：")}</p><ul>{evaluateResult.suggestedNodes.map((s, i) => <li key={i}>{s.node.label}</li>)}</ul></>}</>}
       </section>}
       <main className="mm-main">
         {visiblePart ? <MindMapFlowCanvas key={visiblePart.scope} ref={flowRef} parts={[visiblePart]} /> : <div className="mm-empty">
           <div className="mm-empty-symbol"><GitBranch size={36} /></div>
           <span className="mm-eyebrow">MIND MAP</span>
-          <h2>先看全貌，再沿着分支探索</h2>
-          <p>{isMulti ? `把所选 ${fileNames?.length ?? 0} 份资料整理为各自的导图，并保留文档间的关联。` : '把这份资料的主题与概念连起来，点击分支，逐层展开。'}</p>
-          <button className="mm-primary" disabled={!pdfContent?.trim() || loading} onClick={handleGenerate}>{loading ? <Loader2 size={18} className="animate-spin" /> : <GitBranch size={18} />}{loading ? '正在生成…' : '生成思维导图'}</button>
-          <small>生成会使用 AI；浏览已有导图无需重新生成。</small>
-          {!pdfContent?.trim() && <small>尚未取得资料正文，请返回选择资料。</small>}
+          <h2>{localizeUiText("先看全貌，再沿着分支探索")}</h2>
+          <p>{isMulti ? localizeText(`把所选 ${fileNames?.length ?? 0} 份资料整理为各自的导图，并保留文档间的关联。`, `Create a map for each of the ${fileNames?.length ?? 0} selected documents, with connections between them.`) : localizeUiText("把这份资料的主题与概念连起来，点击分支，逐层展开。")}</p>
+          <button className="mm-primary" disabled={!pdfContent?.trim() || loading} onClick={handleGenerate}>{loading ? <Loader2 size={18} className="animate-spin" /> : <GitBranch size={18} />}{loading ? localizeUiText("正在生成…") : localizeUiText("生成思维导图")}</button>
+          <small>{localizeUiText("生成会使用 AI；浏览已有导图无需重新生成。")}</small>
+          {!pdfContent?.trim() && <small>{localizeUiText("尚未取得资料正文，请返回选择资料。")}</small>}
         </div>}
       </main>
 
@@ -428,14 +430,13 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
             onClick={(e) => e.stopPropagation()}
           >
             <h3 id="mindmap-modify-dialog-title" className="font-bold text-slate-800 text-lg mb-2 flex items-center gap-2">
-              <Sparkles className="w-5 h-5" /> 让 AI 修改思维导图
-            </h3>
-            <p className="text-slate-600 text-sm mb-3">描述你希望的修改，例如：增加一节关于 XX、删掉某分支、简化、或翻译成英文。</p>
+              <Sparkles className="w-5 h-5" />{localizeUiText(" 让 AI 修改思维导图 ")}</h3>
+            <p className="text-slate-600 text-sm mb-3">{localizeUiText("描述你希望的修改，例如：增加一节关于 XX、删掉某分支、简化、或翻译成英文。")}</p>
             {error && <p className="mm-modify-error" role="alert">{error}</p>}
             <textarea
               value={modifyInstruction}
               onChange={(e) => setModifyInstruction(e.target.value)}
-              placeholder="例如：在「膜结构」下增加「磷脂运动类型」并补充横向扩散与翻转"
+              placeholder={localizeUiText("例如：在「膜结构」下增加「磷脂运动类型」并补充横向扩散与翻转")}
               className="w-full min-h-[100px] px-3 py-2 text-sm border border-stone-200 rounded-xl resize-y mb-4"
               disabled={modifyLoading}
             />
@@ -444,19 +445,17 @@ export const MindMapPanel: React.FC<MindMapPanelProps> = ({ initialPayload, onCl
                 type="button"
                 onClick={() => !modifyLoading && setModifyDialogOpen(false)}
                 className="py-2 px-4 rounded-xl border border-stone-200 text-stone-600 hover:bg-stone-50"
-                aria-label="取消修改"
-              >
-                取消
-              </button>
+                aria-label={localizeUiText("取消修改")}
+              >{localizeUiText(" 取消 ")}</button>
               <button
                 type="button"
                 onClick={handleModifySubmit}
                 disabled={!modifyInstruction.trim() || modifyLoading}
                 className="mm-primary"
-                aria-label="提交 AI 修改请求"
+                aria-label={localizeUiText("提交 AI 修改请求")}
               >
                 {modifyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {modifyLoading ? '修改中...' : '提交'}
+                {modifyLoading ? localizeUiText("修改中...") : localizeUiText("提交")}
               </button>
             </div>
           </div>

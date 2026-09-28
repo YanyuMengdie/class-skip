@@ -1,115 +1,138 @@
-import React, { useState } from 'react';
-import { Music, Play, Pause, Volume2, X } from 'lucide-react';
+import React, { useEffect, useId, useRef, useState } from 'react';
+import { Music, Play, Pause, Volume2, VolumeX, X, Check, Loader2 } from 'lucide-react';
+import { useAppLanguage } from '@/shared/i18n/appLanguage';
+import { BACKGROUND_TRACKS } from '@/features/background-audio/useBackgroundAudio';
+import type { BackgroundAudioStatus, BackgroundAudioError } from '@/features/background-audio/useBackgroundAudio';
+import './MusicPlayer.css';
 
 interface MusicPlayerProps {
   isPlaying: boolean;
   currentTrack: string | null;
+  status?: BackgroundAudioStatus;
+  error?: BackgroundAudioError | null;
   volume: number;
   onPlayPause: () => void;
+  onRetry?: () => void;
   onTrackChange: (url: string, name: string) => void;
   onVolumeChange: (val: number) => void;
-  onVideoSelect?: (type: 'bilibili' | 'youtube', id: string) => void;
-  /** 受控：外部可打开/关闭白噪音面板（如小憩区「打开白噪音」） */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
 
-// 使用 Google Actions Sound Library 官方直链，与雨声/咖啡馆同源
-const PRESETS = [
-  { name: '雨声 (Rain)', url: 'https://actions.google.com/sounds/v1/weather/rain_heavy_loud.ogg' },
-  { name: '咖啡馆 (Cafe)', url: 'https://actions.google.com/sounds/v1/ambiences/coffee_shop.ogg' },
-  { name: '轻雨 (Light Rain)', url: 'https://actions.google.com/sounds/v1/weather/light_rain.ogg' },
-  { name: '炉火 (Fire)', url: 'https://actions.google.com/sounds/v1/ambiences/fire.ogg' },
-  { name: '夏夜虫鸣 (Crickets)', url: 'https://actions.google.com/sounds/v1/ambiences/crickets_with_distant_traffic.ogg' },
-  { name: '微风 (Breeze)', url: 'https://actions.google.com/sounds/v1/weather/light_breeze.ogg' },
-  { name: '室内雨声 (Rain Interior)', url: 'https://actions.google.com/sounds/v1/weather/rain_heavy_quiet_interior.ogg' },
-  { name: '夏日森林 (Summer Forest)', url: 'https://actions.google.com/sounds/v1/ambiences/summer_forest.ogg' },
-];
-
 export const MusicPlayer: React.FC<MusicPlayerProps> = ({
-  isPlaying,
-  currentTrack,
-  volume,
-  onPlayPause,
-  onTrackChange,
-  onVolumeChange,
-  onVideoSelect,
-  open: controlledOpen,
-  onOpenChange
+  isPlaying, currentTrack, status, error, volume, onPlayPause, onRetry,
+  onTrackChange, onVolumeChange, open: controlledOpen, onOpenChange,
 }) => {
+  const { language } = useAppLanguage();
+  const text = (zh: string, en: string) => language === 'en' ? en : zh;
   const [internalOpen, setInternalOpen] = useState(false);
-  const isControlled = controlledOpen !== undefined;
-  const isOpen = isControlled ? controlledOpen : internalOpen;
-  const setOpen = (v: boolean) => {
-    if (isControlled && onOpenChange) onOpenChange(v);
-    else setInternalOpen(v);
+  const isOpen = controlledOpen ?? internalOpen;
+  const setOpen = (value: boolean) => {
+    if (controlledOpen === undefined) setInternalOpen(value);
+    onOpenChange?.(value);
   };
-  const [trackName, setTrackName] = useState<string>('选择背景音');
+  const setOpenRef = useRef(setOpen);
+  setOpenRef.current = setOpen;
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const selected = BACKGROUND_TRACKS.find(track => track.name === currentTrack) ?? null;
+  const playbackStatus = status ?? (isPlaying ? 'playing' : selected ? 'paused' : 'idle');
+  const active = playbackStatus === 'playing' || playbackStatus === 'loading';
+  const selectedName = selected ? text(selected.name, selected.english) : text('未选择声音', 'No sound selected');
+  const statusLabel = {
+    idle: selected ? text('待播放', 'Ready to play') : text('先选一种声音', 'Choose a sound to start'),
+    loading: text('正在加载…', 'Loading…'),
+    playing: volume === 0 ? text('正在播放 · 已静音', 'Playing · Muted') : text('正在播放', 'Playing'),
+    paused: text('已暂停', 'Paused'),
+    error: text('播放失败', 'Playback failed'),
+  }[playbackStatus];
+  const errorMessage = {
+    network: text('音源暂时无法连接，请重试或换一种声音。', 'Cannot connect to this sound. Retry or choose another.'),
+    unsupported: text('浏览器无法播放这个音源，可能是音源不可用或格式不受支持。可以换一种声音。', 'This sound is unavailable or its format is unsupported. Try another sound.'),
+    blocked: text('浏览器阻止了播放，请点击重试。', 'Your browser blocked playback. Click Retry to start.'),
+    timeout: text('等待音源超过 20 秒，已停止加载。可以重试或换一种声音。', 'Loading stopped after 20 seconds. Retry or choose another sound.'),
+    unknown: text('这次未能播放，请重试或换一种声音。', 'Playback could not start. Retry or choose another sound.'),
+  }[error ?? 'unknown'];
+  const playLabel = playbackStatus === 'loading' ? text('取消加载', 'Cancel loading')
+    : active ? text('暂停背景音', 'Pause ambient sound') : text('播放背景音', 'Play ambient sound');
+
+  useEffect(() => {
+    if (!isOpen) return;
+    closeRef.current?.focus({ preventScroll: true });
+    const outside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpenRef.current(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpenRef.current(false);
+      triggerRef.current?.focus();
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape, true);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape, true);
+    };
+  }, [isOpen]);
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen(!isOpen)}
-        className={`p-2 rounded-lg flex items-center space-x-2 transition-colors ${
-          isPlaying ? 'bg-indigo-100 text-indigo-700' : 'hover:bg-gray-100 text-gray-600'
-        }`}
-        title="背景音乐"
-      >
-        <Music className={`w-5 h-5 ${isPlaying ? 'animate-pulse' : ''}`} />
-        <span className="text-sm font-medium hidden md:inline">{isPlaying ? trackName : '背景音'}</span>
+    <div className="background-audio" ref={rootRef} data-preserve-language="true">
+      <button type="button" ref={triggerRef} onClick={() => setOpen(!isOpen)}
+        className={`background-audio-trigger ${active ? 'is-active' : ''}`}
+        aria-expanded={isOpen} aria-controls={isOpen ? panelId : undefined}
+        aria-label={text('背景音', 'Ambient sound')} title={text('背景音', 'Ambient sound')}>
+        <Music size={18} aria-hidden="true" />
+        <span>{active ? selectedName : text('背景音', 'Ambient sound')}</span>
       </button>
-
       {isOpen && (
-        <div className="absolute top-12 right-0 w-80 bg-white rounded-xl shadow-xl border border-gray-200 p-4 z-50 animate-in fade-in slide-in-from-top-2">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-semibold text-gray-800 flex items-center">
-              <Volume2 className="w-4 h-4 mr-2" />
-              白噪音播放器
-            </h3>
-            <button onClick={() => setOpen(false)} className="text-gray-400 hover:text-gray-600">
-              <X className="w-4 h-4" />
+        <div id={panelId} className="background-audio-panel" role="region" aria-label={text('背景音播放器', 'Ambient sound player')}>
+          <div className="background-audio-heading">
+            <h3><Volume2 size={18} aria-hidden="true" />{text('背景音', 'Ambient sound')}</h3>
+            <button type="button" ref={closeRef} className="background-audio-close"
+              onClick={() => { setOpen(false); triggerRef.current?.focus(); }} aria-label={text('关闭背景音面板', 'Close ambient sound panel')}>
+              <X size={18} aria-hidden="true" />
             </button>
           </div>
-
-          <div className="space-y-2 mb-4">
-            {PRESETS.map((preset) => (
-              <button
-                key={preset.name}
-                onClick={() => {
-                  onTrackChange(preset.url, preset.name);
-                  setTrackName(preset.name);
-                }}
-                className={`w-full text-left px-3 py-2 rounded-md text-sm flex justify-between items-center transition-colors ${
-                  trackName === preset.name && isPlaying
-                    ? 'bg-indigo-50 text-indigo-700 border border-indigo-200'
-                    : 'hover:bg-gray-50 text-gray-700'
-                }`}
-              >
-                <span>{preset.name}</span>
-                {trackName === preset.name && isPlaying && <div className="w-2 h-2 rounded-full bg-indigo-500 animate-ping" />}
+          <p className="background-audio-intro">{text('选一种声音，陪你读一会儿。', 'Choose a sound to read along with.')}</p>
+          <div className="background-audio-tracks" aria-label={text('选择声音', 'Choose a sound')}>
+            {BACKGROUND_TRACKS.map(track => (
+              <button type="button" key={track.id} aria-pressed={selected?.id === track.id}
+                className={`background-audio-track ${selected?.id === track.id ? 'is-selected' : ''}`}
+                onClick={() => onTrackChange(track.url, track.name)}>
+                <span>{text(track.name, track.english)}</span>
+                {selected?.id === track.id && <Check size={15} aria-hidden="true" />}
               </button>
             ))}
           </div>
-
-          <div className="flex items-center space-x-3 pt-2 border-t border-gray-100">
-             <button 
-              onClick={onPlayPause}
-              className="w-10 h-10 rounded-full bg-indigo-600 hover:bg-indigo-700 text-white flex items-center justify-center shadow-sm transition-transform active:scale-95"
-            >
-              {isPlaying ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5 ml-1" />}
-            </button>
-            <div className="flex-1">
-              <input
-                type="range"
-                min="0"
-                max="1"
-                step="0.1"
-                value={volume}
-                onChange={(e) => onVolumeChange(parseFloat(e.target.value))}
-                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-              />
-            </div>
+          <div className="background-audio-status" role="status" aria-live="polite" aria-atomic="true">
+            <strong>{selectedName}</strong>
+            <span>{playbackStatus === 'loading' && <Loader2 size={14} className="background-audio-spinner" aria-hidden="true" />}{statusLabel}</span>
           </div>
+          {playbackStatus === 'error' && (
+            <div className="background-audio-error" role="alert">
+              <p>{errorMessage}</p>
+              <button type="button" onClick={onRetry ?? onPlayPause}>{text('重试', 'Retry')}</button>
+            </div>
+          )}
+          <div className="background-audio-controls">
+            <button type="button" className="background-audio-play" onClick={onPlayPause} disabled={!selected}
+              aria-label={playLabel} title={!selected ? text('请先选择一种声音', 'Choose a sound first') : playLabel}>
+              {active ? <Pause size={20} aria-hidden="true" /> : <Play size={20} aria-hidden="true" />}
+            </button>
+            <label className="background-audio-volume">
+              <span>{volume === 0 ? <VolumeX size={15} aria-hidden="true" /> : <Volume2 size={15} aria-hidden="true" />}
+                {text('音量', 'Volume')}<output>{Math.round(volume * 100)}%</output>
+              </span>
+              <input type="range" min="0" max="1" step="0.01" value={volume}
+                aria-label={text('背景音音量', 'Ambient sound volume')} aria-valuetext={`${Math.round(volume * 100)}%`}
+                onChange={event => onVolumeChange(Number(event.target.value))} />
+            </label>
+          </div>
+          <p className="background-audio-note">{text('记住声音和音量，下次由你点击播放。关闭面板不会停止播放。', 'Your sound and volume are saved. Playback starts when you choose; closing this panel keeps it playing.')}</p>
         </div>
       )}
     </div>

@@ -1,3 +1,4 @@
+import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
 import React, { useState } from 'react';
 import { ArrowRight, BookOpen, Layers, GitBranch, PencilLine, ChevronLeft, MessageCircle, ClipboardList, History } from 'lucide-react';
 import type { ReviewType } from './ReviewPage';
@@ -12,6 +13,7 @@ export const REVIEW_TOOL_LABELS: Partial<Record<ReviewType, string>> = {
 export function StudyToolMenu({ onSelect, disabled = false, trapCount = 0, allowMultiDocQA = false, selectMaterialsFirst = false, initialPractice = false }: {
   onSelect: (type: ReviewType) => void; disabled?: boolean; trapCount?: number; allowMultiDocQA?: boolean; selectMaterialsFirst?: boolean; initialPractice?: boolean;
 }) {
+  useAppLanguage();
   const [practice, setPractice] = useState(initialPractice);
   const choices = practice ? [
     { type: 'quiz' as const, title: '做题', description: '用选择题检查理解，可选综合练习、概念辨析或案例应用。', icon: ClipboardList },
@@ -24,17 +26,17 @@ export function StudyToolMenu({ onSelect, disabled = false, trapCount = 0, allow
     { type: 'mindMap' as const, title: '思维导图', description: '看清这一份资料的结构，以及知识点之间的联系。', icon: GitBranch },
   ];
   return <div className="study-tools-menu">
-    {disabled && <p role="status" className="review-notice">尚未选中资料，因此无法打开需要资料的学习工具。请先选择资料；错题本仍可查看。</p>}
-    {practice && <button type="button" onClick={() => setPractice(false)} className="review-back"><ChevronLeft size={16} />返回学习工具</button>}
-    <div className="review-section-label"><span>{practice ? '想怎么检查自己的理解？' : '这次想怎么学？'}</span><span>{practice ? '选一种练法，再挑资料' : '先选工具，再挑资料'}</span></div>
+    {disabled && <p role="status" className="review-notice">{localizeUiText("尚未选中资料，因此无法打开需要资料的学习工具。请先选择资料；错题本仍可查看。")}</p>}
+    {practice && <button type="button" onClick={() => setPractice(false)} className="review-back"><ChevronLeft size={16} />{localizeUiText("返回学习工具")}</button>}
+    <div className="review-section-label"><span>{practice ? localizeUiText("想怎么检查自己的理解？") : localizeUiText("这次想怎么学？")}</span><span>{practice ? localizeUiText("选一种练法，再挑资料") : localizeUiText("先选工具，再挑资料")}</span></div>
     <div className={`review-tool-grid${practice ? ' is-practice' : ''}`}>
       {choices.map(({ type, title, description, icon: Icon }, i) => <button type="button" key={type} disabled={disabled && type !== 'practice' && type !== 'trapList'} onClick={() => type === 'practice' && !selectMaterialsFirst ? setPractice(true) : onSelect(type)} className="review-tool-card">
         <div className="review-tool-card-top"><Icon size={25} strokeWidth={1.5} /><span>0{i + 1}</span></div>
-        <h3>{title}</h3><p>{description}</p>
-        <div className="review-tool-action">{type === 'practice' && !selectMaterialsFirst ? '选择练习方式' : type === 'trapList' ? '查看错题' : '选择资料'}<ArrowRight size={17} /></div>
+        <h3>{localizeUiText(title)}</h3><p>{localizeUiText(description)}</p>
+        <div className="review-tool-action">{type === 'practice' && !selectMaterialsFirst ? localizeUiText("选择练习方式") : type === 'trapList' ? localizeUiText("查看错题") : localizeUiText("选择资料")}<ArrowRight size={17} /></div>
       </button>)}
     </div>
-    {selectMaterialsFirst && <button type="button" className="review-back" onClick={() => onSelect('trapList')}><History size={16} />直接查看错题本（{trapCount}）</button>}
-    {allowMultiDocQA && <div className="review-question-entry"><div><h3>想联系几份资料一起问？</h3><p>选择多份资料，保留原来的问答记录。</p></div><button type="button" disabled={disabled} onClick={() => onSelect('multiDocQA')}>多文档问答 <ArrowRight size={17} /></button></div>}
+    {selectMaterialsFirst && <button type="button" className="review-back" onClick={() => onSelect('trapList')}><History size={16} />{localizeUiText("直接查看错题本（")}{trapCount}）</button>}
+    {allowMultiDocQA && <div className="review-question-entry"><div><h3>{localizeUiText("想联系几份资料一起问？")}</h3><p>{localizeUiText("选择多份资料，保留原来的问答记录。")}</p></div><button type="button" disabled={disabled} onClick={() => onSelect('multiDocQA')}>{localizeUiText("多文档问答 ")}<ArrowRight size={17} /></button></div>}
   </div>;
 }

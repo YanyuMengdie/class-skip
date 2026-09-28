@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from '@/App';
+import { StudySupportProvider } from '@/features/studySupport/StudySupportContext';
 import { AppLanguageProvider } from '@/shared/i18n/appLanguage';
 
 // 版本标记：若控制台看到此行，说明当前运行的是 9.13（含：只学5分钟、多文档问答、本页注释默认收起）
@@ -15,7 +16,7 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <AppLanguageProvider>
-      <App />
+      <StudySupportProvider><App /></StudySupportProvider>
     </AppLanguageProvider>
   </React.StrictMode>
 );

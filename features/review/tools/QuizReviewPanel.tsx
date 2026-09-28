@@ -1,3 +1,4 @@
+import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
 import React, { useState, useMemo } from 'react';
 import { X, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Lightbulb, RotateCcw, PlusCircle, Loader2, BookOpen, ListPlus } from 'lucide-react';
 import { QuizData, QuizRound } from '@/types';
@@ -38,6 +39,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
   onSaveRounds,
   onAddToTrap
 }) => {
+  useAppLanguage();
   const [step, setStep] = useState<Step>(existingRounds.length === 0 ? 'choose' : 'choose');
   const [count, setCount] = useState(5);
   const [selectedPractice, setSelectedPractice] = useState<PracticeKind>(practiceKind);
@@ -125,9 +127,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
       <div className="bg-white rounded-3xl shadow-2xl border border-stone-200 w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="flex items-center justify-between p-4 border-b border-stone-100 shrink-0">
           <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-            <BookOpen className="w-5 h-5 text-violet-500" />
-            练一练 · 做题
-          </h2>
+            <BookOpen className="w-5 h-5 text-violet-500" />{localizeUiText(" 练一练 · 做题 ")}</h2>
           <button onClick={onClose} className="p-2 rounded-xl hover:bg-stone-100 text-stone-400 hover:text-slate-600 transition-colors">
             <X className="w-5 h-5" />
           </button>
@@ -137,22 +137,22 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
           {step === 'choose' && (
             <div className="space-y-6">
               <fieldset>
-                <legend className="block text-sm font-bold text-slate-700 mb-3">这次想练什么？</legend>
+                <legend className="block text-sm font-bold text-slate-700 mb-3">{localizeUiText("这次想练什么？")}</legend>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {PRACTICE_OPTIONS.map(option => (
                     <label key={option.value} className={`cursor-pointer rounded-md border p-3 transition-colors ${selectedPractice === option.value ? 'border-[#54745d] bg-[#eaf0e3] text-[#294c3e]' : 'border-[#d9dbd1] bg-[#fcfbf7] text-[#6d776e]'}`}>
                       <span className="flex items-center gap-2 text-sm font-semibold">
                         <input type="radio" name="quiz-practice" value={option.value} checked={selectedPractice === option.value} onChange={() => setSelectedPractice(option.value)} className="accent-[#294c3e]" />
-                        {option.label}
+                        {localizeUiText(option.label)}
                       </span>
-                      <span className="block mt-2 text-xs leading-relaxed">{option.description}</span>
+                      <span className="block mt-2 text-xs leading-relaxed">{localizeUiText(option.description)}</span>
                     </label>
                   ))}
                 </div>
               </fieldset>
-              <p className="text-slate-600">三种练习均为选择题，区别在出题侧重点。点击出题后才会生成；已有题目仍可直接回顾。</p>
+              <p className="text-slate-600">{localizeUiText("三种练习均为选择题，区别在出题侧重点。点击出题后才会生成；已有题目仍可直接回顾。")}</p>
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">出题数量</label>
+                <label className="block text-sm font-bold text-slate-700 mb-2">{localizeUiText("出题数量")}</label>
                 <div className="flex flex-wrap gap-2">
                   {COUNT_OPTIONS.map(n => (
                     <button
@@ -160,27 +160,24 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                       onClick={() => setCount(n)}
                       className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${count === n ? 'bg-violet-600 text-white' : 'bg-stone-100 text-slate-600 hover:bg-stone-200'}`}
                     >
-                      {n} 道
-                    </button>
+                      {n}{localizeUiText(" 道 ")}</button>
                   ))}
                 </div>
               </div>
-              {error && <p className="text-rose-600 text-sm">{error}</p>}
+              {error && <p className="text-rose-600 text-sm">{localizeUiText(error)}</p>}
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={startNewRound}
                   disabled={!pdfContent}
                   className="flex items-center gap-2 px-5 py-3 bg-violet-600 text-white rounded-xl font-bold hover:bg-violet-700 disabled:opacity-50 transition-all"
                 >
-                  <PlusCircle className="w-4 h-4" /> 出 {count} 道题
-                </button>
+                  <PlusCircle className="w-4 h-4" />{localizeUiText(" 出 ")}{count}{localizeUiText(" 道题 ")}</button>
                 {allItems.length > 0 && (
                   <button
                     onClick={enterReview}
                     className="flex items-center gap-2 px-5 py-3 bg-stone-100 text-slate-700 rounded-xl font-bold hover:bg-stone-200 transition-all"
                   >
-                    <RotateCcw className="w-4 h-4" /> 回顾全部 ({allItems.length} 题)
-                  </button>
+                    <RotateCcw className="w-4 h-4" />{localizeUiText(" 回顾全部 (")}{allItems.length}{localizeUiText(" 题) ")}</button>
                 )}
               </div>
             </div>
@@ -189,14 +186,14 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
           {step === 'generating' && (
             <div className="flex flex-col items-center justify-center py-16 text-violet-600">
               <Loader2 className="w-12 h-12 animate-spin mb-4" />
-              <p className="font-bold">正在生成题目...</p>
+              <p className="font-bold">{localizeUiText("正在生成题目...")}</p>
             </div>
           )}
 
           {step === 'doing' && currentQ && (
             <div className="space-y-6">
               <div className="flex items-center justify-between text-sm text-slate-400">
-                <span>第 {currentIndex + 1} / {currentRoundItems.length} 题</span>
+                <span>{localizeUiText("第 ")}{currentIndex + 1} / {currentRoundItems.length}{localizeUiText(" 题")}</span>
                 <button onClick={goPrev} disabled={currentIndex === 0} className="p-1 rounded hover:bg-stone-100 disabled:opacity-30">
                   <ChevronLeft className="w-5 h-5" />
                 </button>
@@ -231,7 +228,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                 <div className={`p-4 rounded-xl text-sm ${isCorrect ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'}`}>
                   <div className="font-bold mb-1 flex items-center gap-2">
                     <Lightbulb className="w-4 h-4" />
-                    {isCorrect ? '回答正确' : '解析'}
+                    {isCorrect ? localizeUiText("回答正确") : localizeUiText("解析")}
                   </div>
                   <p className="leading-relaxed">{currentQ.explanation}</p>
                   {!isCorrect && onAddToTrap && selected !== null && !addedToTrapIds.has(currentQ.question) && (
@@ -248,11 +245,10 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                       }}
                       className="mt-3 flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-100 text-amber-800 text-sm font-bold hover:bg-amber-200"
                     >
-                      <ListPlus className="w-4 h-4" /> 记入错题本
-                    </button>
+                      <ListPlus className="w-4 h-4" />{localizeUiText(" 记入错题本 ")}</button>
                   )}
                   {!isCorrect && addedToTrapIds.has(currentQ.question) && (
-                    <p className="mt-3 text-amber-600 text-xs">已加入错题本</p>
+                    <p className="mt-3 text-amber-600 text-xs">{localizeUiText("已加入错题本")}</p>
                   )}
                 </div>
               )}
@@ -262,12 +258,10 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                     onClick={submitCurrentAnswer}
                     disabled={selected === null}
                     className="px-5 py-2.5 bg-violet-600 text-white rounded-xl font-bold disabled:opacity-50"
-                  >
-                    提交
-                  </button>
+                  >{localizeUiText(" 提交 ")}</button>
                 ) : (
                   <button onClick={goNext} className="px-5 py-2.5 bg-slate-800 text-white rounded-xl font-bold flex items-center gap-1">
-                    {currentIndex < currentRoundItems.length - 1 ? '下一题' : '完成'} <ChevronRight className="w-4 h-4" />
+                    {currentIndex < currentRoundItems.length - 1 ? localizeUiText("下一题") : localizeUiText("完成")} <ChevronRight className="w-4 h-4" />
                   </button>
                 )}
               </div>
@@ -276,26 +270,22 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
 
           {step === 'done' && (
             <div className="space-y-6 text-center py-4">
-              <p className="text-lg font-bold text-slate-800">本轮测验已完成</p>
+              <p className="text-lg font-bold text-slate-800">{localizeUiText("本轮测验已完成")}</p>
               <div className="flex flex-wrap gap-3 justify-center">
                 <button
                   onClick={finishRoundAndSave}
                   className="flex items-center gap-2 px-5 py-3 bg-violet-600 text-white rounded-xl font-bold hover:bg-violet-700"
-                >
-                  保存并返回
-                </button>
+                >{localizeUiText(" 保存并返回 ")}</button>
                 <button
                   onClick={enterReview}
                   className="flex items-center gap-2 px-5 py-3 bg-stone-100 text-slate-700 rounded-xl font-bold hover:bg-stone-200"
                 >
-                  <RotateCcw className="w-4 h-4" /> 回顾本轮 + 历史题
-                </button>
+                  <RotateCcw className="w-4 h-4" />{localizeUiText(" 回顾本轮 + 历史题 ")}</button>
                 <button
                   onClick={() => { finishRoundAndSave(); setStep('choose'); }}
                   className="flex items-center gap-2 px-5 py-3 bg-amber-50 text-amber-700 border border-amber-200 rounded-xl font-bold hover:bg-amber-100"
                 >
-                  <PlusCircle className="w-4 h-4" /> 继续练习
-                </button>
+                  <PlusCircle className="w-4 h-4" />{localizeUiText(" 继续练习 ")}</button>
               </div>
             </div>
           )}
@@ -303,8 +293,8 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
           {step === 'review' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <p className="font-bold text-slate-800">全部题目回顾（共 {allItems.length} 题）</p>
-                <button onClick={exitReview} className="text-sm text-violet-600 hover:underline">返回</button>
+                <p className="font-bold text-slate-800">{localizeUiText("全部题目回顾（共 ")}{allItems.length}{localizeUiText(" 题）")}</p>
+                <button onClick={exitReview} className="text-sm text-violet-600 hover:underline">{localizeUiText("返回")}</button>
               </div>
               <div className="space-y-4 max-h-[50vh] overflow-y-auto">
                 {allItems.map((q, i) => (
@@ -318,7 +308,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                       ))}
                     </ul>
                     <p className="text-sm text-slate-500 border-t border-stone-200 pt-2 mt-2">
-                      <span className="font-bold">解析：</span> {q.explanation}
+                      <span className="font-bold">{localizeUiText("解析：")}</span> {q.explanation}
                     </p>
                   </div>
                 ))}

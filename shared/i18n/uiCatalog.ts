@@ -1,3 +1,4 @@
+import { CURRENT_ENGLISH_UI } from './currentUiCatalog';
 import type { AppLanguage } from '@/types';
 
 /**
@@ -312,6 +313,9 @@ const ENGLISH_UI: Record<string, string> = {
   '上一分段': 'Previous section',
   '下一分段': 'Next section',
   '讲解深度': 'Explanation depth',
+  '讲解方式': 'Explanation style',
+  '有意思地讲': 'Make it engaging',
+  '回到正常讲法': 'Back to standard explanation',
   '简单讲': 'Simple',
   '正常讲': 'Normal',
   '换个有意思的讲法': 'Make it interesting',
@@ -1455,8 +1459,18 @@ Object.assign(ENGLISH_UI, {
   '例如：充满漂浮魔法书的古老图书馆，窗外是璀璨星空...': 'For example: an ancient library filled with floating spellbooks, with a starry sky outside...',
 });
 
+Object.assign(ENGLISH_UI, CURRENT_ENGLISH_UI);
+
 const translateDynamicUiText = (value: string): string | null => {
   const rules: Array<[RegExp, (...parts: string[]) => string]> = [
+    [/^错题本 · (\d+)$/, (_all, count) => `Mistake notebook · ${count}`],
+    [/^来自本机：(.+)$/, (_all, file) => `From this device: ${file}`],
+    [/^来自云端：(.+)$/, (_all, file) => `From cloud: ${file}`],
+    [/^上次生成：(.+)$/, (_all, date) => `Last generated: ${date}`],
+    [/^已读取 (\d+)\/(\d+) 页，点击整理这门课后才会调用 AI。$/, (_all, read, total) => `${read}/${total} pages read. AI runs only when you choose to organize this course.`],
+    [/^(\d+) 份材料导入失败，请稍后重试。$/, (_all, count) => `${count} materials could not be imported. Please try again.`],
+    [/^(.+) 起 · (\d+) 门课( · 有读取缺口)?$/, (_all, week, count, gaps) => `Week of ${week} · ${count} courses${gaps ? ' · Incomplete coverage' : ''}`],
+
     [/^(.+) 等 (\d+) 个关键点$/, (_all, concept, count) => `${concept} and ${count} key points`],
     [/^知识块 (\d+)$/, (_all, index) => `Knowledge block ${index}`],
     [/^第 (.+) 页$/, (_all, pages) => `pp. ${pages.replaceAll('、', ', ')}`],
@@ -1496,8 +1510,9 @@ const translateDynamicUiText = (value: string): string | null => {
 
 const translateUiValue = (value: string): string | null => ENGLISH_UI[value] ?? translateDynamicUiText(value);
 
-const originalText = new WeakMap<Text, string>();
-const originalAttributes = new WeakMap<Element, Map<string, string>>();
+type LocalizedValue = { source: string; translated: string };
+const originalText = new WeakMap<Text, LocalizedValue>();
+const originalAttributes = new WeakMap<Element, Map<string, LocalizedValue>>();
 const LOCALIZED_ATTRIBUTES = ['placeholder', 'title', 'aria-label'] as const;
 const SHORT_TEXT_UI_PARENTS = new Set(['BUTTON', 'LABEL', 'OPTION', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'NAV', 'ASIDE']);
 const ALWAYS_TRANSLATE_SHORT = new Set(['起', '止', '页', '项', '第', '共', '证据', '分']);
@@ -1512,11 +1527,12 @@ const translateTextNode = (node: Text): void => {
   const raw = node.data;
   const trimmed = raw.trim();
   const translated = translateUiValue(trimmed);
-  if (!translated) return;
+  if (!translated || translated === trimmed) return;
   const chineseLength = (trimmed.match(/[\u3400-\u9fff]/g) ?? []).length;
   if (chineseLength <= 3 && !ALWAYS_TRANSLATE_SHORT.has(trimmed) && !SHORT_TEXT_UI_PARENTS.has(parent.tagName) && !parent.closest('button, label, nav, aside, [role="button"], [role="tab"]')) return;
-  originalText.set(node, raw);
-  node.data = `${raw.match(/^\s*/)?.[0] ?? ''}${translated}${raw.match(/\s*$/)?.[0] ?? ''}`;
+  const value = `${raw.match(/^\s*/)?.[0] ?? ''}${translated}${raw.match(/\s*$/)?.[0] ?? ''}`;
+  originalText.set(node, { source: raw, translated: value });
+  node.data = value;
 };
 
 const translateElement = (element: Element): void => {
@@ -1525,13 +1541,13 @@ const translateElement = (element: Element): void => {
     const raw = element.getAttribute(attribute);
     if (!raw) continue;
     const translated = translateUiValue(raw.trim());
-    if (!translated) continue;
+    if (!translated || translated === raw) continue;
     let originals = originalAttributes.get(element);
     if (!originals) {
       originals = new Map();
       originalAttributes.set(element, originals);
     }
-    originals.set(attribute, raw);
+    originals.set(attribute, { source: raw, translated });
     element.setAttribute(attribute, translated);
   }
   for (const child of Array.from(element.childNodes)) {
@@ -1542,14 +1558,16 @@ const translateElement = (element: Element): void => {
 
 const restoreElement = (element: Element): void => {
   const attributes = originalAttributes.get(element);
-  attributes?.forEach((value, name) => element.setAttribute(name, value));
+  attributes?.forEach((value, name) => {
+    if (element.getAttribute(name) === value.translated) element.setAttribute(name, value.source);
+  });
   originalAttributes.delete(element);
   for (const child of Array.from(element.childNodes)) {
     if (child.nodeType === Node.TEXT_NODE) {
       const text = child as Text;
       const value = originalText.get(text);
       if (value !== undefined) {
-        text.data = value;
+        if (text.data === value.translated) text.data = value.source;
         originalText.delete(text);
       }
     } else if (child.nodeType === Node.ELEMENT_NODE) {

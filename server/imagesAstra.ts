@@ -1,5 +1,5 @@
-import { ExamAstraError } from './examAstra';
-import { localAstraProxy } from './examAstraProxy';
+import { ExamAstraError } from './examAstra.js';
+import { localAstraProxy } from './examAstraProxy.js';
 
 // Image generation is separate: Gemini 3.8 Flash only outputs text.
 const IMAGE_ORCHESTRATOR_MODEL = 'gpt-6-astra';

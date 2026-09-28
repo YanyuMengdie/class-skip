@@ -1,0 +1,35 @@
+.background-audio { position: relative; color: #2d4b3f; }
+.background-audio button { font: inherit; cursor: pointer; }
+.background-audio button:focus-visible, .background-audio input:focus-visible { outline: 2px solid #416854; outline-offset: 3px; }
+.background-audio .background-audio-trigger { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border: 1px solid transparent; border-radius: 5px; color: #45604f; background: transparent; }
+.background-audio .background-audio-trigger:hover, .background-audio .background-audio-trigger.is-active { background: #e6ede4; border-color: #cfd9cb; }
+.background-audio-panel { position: absolute; top: calc(100% + 12px); right: 0; z-index: 60; width: 352px; max-width: calc(100vw - 24px); max-height: calc(100dvh - 110px); overflow-y: auto; overscroll-behavior: contain; padding: 22px; background: #fbfaf6; border: 1px solid #dcded2; border-radius: 8px; box-shadow: 0 12px 36px #24392d24; text-align: left; }
+.background-audio-heading, .background-audio-heading h3 { display: flex; align-items: center; gap: 10px; }
+.background-audio-heading { justify-content: space-between; }
+.background-audio-heading h3 { margin: 0; font-family: Georgia, 'Noto Serif SC', serif; font-size: 20px; font-weight: 600; }
+.background-audio .background-audio-close { display: grid; place-items: center; padding: 6px; border: 0; border-radius: 4px; background: transparent; color: #6f7b70; }
+.background-audio .background-audio-close:hover { background: #e9ece2; }
+.background-audio-intro { margin: 10px 0 18px; color: #687568; font-size: 13px; line-height: 1.7; }
+.background-audio-tracks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.background-audio .background-audio-track { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 10px 12px; border: 1px solid #dddfd4; border-radius: 5px; background: #fffefa; color: #4c6050; text-align: left; font-size: 14px; }
+.background-audio .background-audio-track:hover { border-color: #94a38d; }
+.background-audio .background-audio-track.is-selected { background: #e5ede2; border-color: #6e8a6e; color: #2d513d; font-weight: 600; }
+.background-audio-track svg { flex-shrink: 0; }
+.background-audio-status { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; margin-top: 20px; padding-top: 16px; border-top: 1px solid #dcded2; font-size: 13px; }
+.background-audio-status > span { display: flex; align-items: center; gap: 6px; color: #62735e; }
+.background-audio-error { margin-top: 12px; padding: 12px; border-left: 3px solid #ac8650; background: #f6f0e3; color: #785824; font-size: 13px; line-height: 1.7; }
+.background-audio-error p { margin: 0 0 8px; }
+.background-audio-error button { padding: 4px 12px; border: 1px solid #c9b690; border-radius: 4px; background: #fffaf0; color: #765421; }
+.background-audio-controls { display: flex; align-items: center; gap: 16px; margin-top: 18px; }
+.background-audio .background-audio-play { flex: 0 0 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 5px; background: #355d49; color: white; }
+.background-audio .background-audio-play:hover:enabled { background: #284c3b; }
+.background-audio .background-audio-play:disabled { opacity: .4; cursor: not-allowed; }
+.background-audio-volume { flex: 1; min-width: 0; font-size: 12px; color: #596d59; }
+.background-audio-volume > span { display: flex; gap: 6px; align-items: center; }
+.background-audio-volume output { margin-left: auto; font-variant-numeric: tabular-nums; }
+.background-audio-volume input { display: block; width: 100%; height: 24px; margin-top: 3px; accent-color: #416854; cursor: pointer; }
+.background-audio-note { margin: 16px 0 0; font-size: 12px; line-height: 1.7; color: #758070; }
+.background-audio-spinner { animation: background-audio-spin 1s linear infinite; }
+@keyframes background-audio-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .background-audio-spinner { animation: none; } }
+@media (max-width: 640px) { .background-audio-trigger > span { display: none; } .background-audio-panel { padding: 18px; } }

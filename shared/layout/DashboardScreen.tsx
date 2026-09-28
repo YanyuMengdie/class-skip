@@ -66,6 +66,7 @@ import type { CourseBriefReport } from '@/features/canvas/brief/types';
 import { ReluctantHome, OverviewStyleChoices, ReluctantPdfPicker, reluctantModeLabel, type ReluctantMode } from '@/features/reluctant/ReluctantChoices';
 import { StudyBookLoader } from '@/features/reluctant/StudyBookLoader';
 import { ReluctantOverviewReader } from '@/features/reluctant/OverviewReader';
+import { LinearStudyReader } from '@/features/reluctant/LinearStudyReader';
 import { CuriosityEntryReader } from '@/features/reluctant/CuriosityEntryReader';
 import type { OverviewStyle } from '@/features/reluctant/overview';
 import { readingFailureMessage } from '@/services/readingAstraClient';
@@ -94,8 +95,10 @@ import {
   TinyStudyEntryType,
   type AppLanguage,
 } from '@/types';
-import { useAppLanguage } from '@/shared/i18n/appLanguage';
+import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
 import { LibraryFileActions } from './LibraryFileActions';
+import { LibraryBulkActions } from './LibraryBulkActions';
+import { runLibraryBatch } from './libraryBatch';
 import { LibraryFolderTree } from './LibraryFolderTree';
 import { getFolderPath } from './libraryFolders';
 import { dashboardFeatures, isDashboardFeatureVisible } from '@/shared/dashboardFeatures';
@@ -113,6 +116,8 @@ interface DashboardScreenProps {
   onLogin: () => void;
   onLogout: () => void;
   onRestoreSession: (session: CloudSession, options?: { initialPage?: number }) => void | Promise<void>;
+  onLibraryFileDeleted?: (fileId: string) => void;
+  onLibraryFileRenamed?: (fileId: string, name: string) => void;
   onUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
   onOpenCurrentStudy: () => void;
   onOpenExamWorkspace: () => void;
@@ -300,6 +305,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onLogin,
   onLogout,
   onRestoreSession,
+  onLibraryFileDeleted,
+  onLibraryFileRenamed,
   onUpload,
   onOpenCurrentStudy,
   onOpenExamWorkspace,
@@ -343,6 +350,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [deletingFolder, setDeletingFolder] = useState(false);
   const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
   const renameFolderRequestRef = useRef(false);
+  const [librarySelecting, setLibrarySelecting] = useState(false);
+  const [librarySelectedIds, setLibrarySelectedIds] = useState<string[]>([]);
+  useEffect(() => { setLibrarySelectedIds([]); }, [activeFolderId, search, user?.uid, activeTab]);
+  useEffect(() => { setLibrarySelecting(false); }, [user?.uid]);
+  const fileEditRequestRef = useRef(false);
+  const [editingFileId, setEditingFileId] = useState<string | null>(null);
   const [movingFileId, setMovingFileId] = useState<string | null>(null);
   const [libraryMoveNotice, setLibraryMoveNotice] = useState<{ message: string; parentId: string | null } | null>(null);
   const moveRequestRef = useRef<{ fileId: string; ownerId: string } | null>(null);
@@ -486,6 +499,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   }, [activeFolder, folders, search]);
 
   const openLibraryFolder = (folderId: string) => {
+    if (fileEditRequestRef.current) return;
     setActiveFolderId(folderId);
     setSearch('');
   };
@@ -505,6 +519,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         return title.includes(needle);
       });
   }, [activeFolderId, fileSessions, search]);
+
+  const librarySelectedFiles = visibleFiles.filter(file => librarySelectedIds.includes(file.id));
+  const toggleLibraryFile = (id: string) => {
+    if (fileEditRequestRef.current) return;
+    setLibrarySelectedIds(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id]);
+  };
 
   const selectedJointReviewPack = useMemo(
     () => jointReviewPacks.find((pack) => pack.id === selectedJointReviewPackId) ?? jointReviewPacks[0] ?? null,
@@ -569,7 +589,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   }, [visibleFiles]);
 
   const handleOpenSession = async (session: CloudSession) => {
-    if (openingSessionId) return;
+    if (openingSessionId || fileEditRequestRef.current) return;
     setOpeningSessionId(session.id);
     try {
       await onRestoreSession(session);
@@ -579,13 +599,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   };
 
   const handleCreateFolder = async () => {
-    if (!user || creatingFolder || deletingFolder || renameFolderRequestRef.current) {
+    if (!user || creatingFolder || deletingFolder || renameFolderRequestRef.current || fileEditRequestRef.current) {
       if (!user) onLogin();
       return;
     }
     const parentId = activeFolder?.id ?? null;
-    const parentName = activeFolder ? activeFolder.customTitle || activeFolder.fileName : '根目录';
-    const rawName = window.prompt(activeFolder ? `在「${parentName}」中新建子文件夹，例如 Reading 或 Lecture` : '新文件夹名称');
+    const parentName = activeFolder ? activeFolder.customTitle || activeFolder.fileName : localizeUiText('根目录');
+    const rawName = window.prompt(activeFolder ? text(`在「${parentName}」中新建子文件夹，例如 Reading 或 Lecture`, `Create a subfolder in “${parentName}”, e.g. Reading or Lecture`) : text('新文件夹名称', 'New folder name'));
     const name = rawName?.trim();
     if (!name) return;
     const uniqueName = getUniqueFolderName(name, folders.filter(folder => (folder.parentId ?? null) === parentId));
@@ -597,9 +617,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       const folder: CloudSession = { id, userId: ownerId, fileName: uniqueName, fileUrl: '', type: 'folder', parentId, createdAt: Date.now() };
       setSessions(previous => [folder, ...previous]);
       setSearch('');
-      setLibraryMoveNotice({ parentId: id, message: `已在「${parentName}」中新建「${uniqueName}」。` });
+      setLibraryMoveNotice({ parentId: id, message: text(`已在「${parentName}」中新建「${uniqueName}」。`, `Created “${uniqueName}” in “${parentName}”.`) });
     } catch {
-      window.alert('创建文件夹失败，请稍后重试。');
+      window.alert(localizeUiText('创建文件夹失败，请稍后重试。'));
     } finally {
       setCreatingFolder(false);
     }
@@ -607,19 +627,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const handleRenameFolder = async (folder: CloudSession) => {
     if (!user) { onLogin(); return; }
-    if (renameFolderRequestRef.current || creatingFolder || deletingFolder || moveRequestRef.current) return;
+    if (renameFolderRequestRef.current || creatingFolder || deletingFolder || moveRequestRef.current || fileEditRequestRef.current) return;
     const current = folders.find(item => item.id === folder.id && item.userId === user.uid);
     if (!current) return;
     const oldName = current.customTitle || current.fileName;
-    const rawName = window.prompt('重命名文件夹', oldName);
+    const rawName = window.prompt(localizeUiText('重命名文件夹'), oldName);
     if (rawName === null) return;
     const name = rawName.trim();
-    if (!name) { window.alert('文件夹名称不能为空。'); return; }
+    if (!name) { window.alert(localizeUiText('文件夹名称不能为空。')); return; }
     if (name === oldName) return;
     const duplicate = folders.some(item => item.id !== current.id
       && (item.parentId ?? null) === (current.parentId ?? null)
       && normalizeName(item.customTitle || item.fileName) === normalizeName(name));
-    if (duplicate) { window.alert('这一层已经有同名文件夹，请换一个名称。'); return; }
+    if (duplicate) { window.alert(localizeUiText('这一层已经有同名文件夹，请换一个名称。')); return; }
     const ownerId = user.uid;
     renameFolderRequestRef.current = true;
     setRenamingFolderId(current.id);
@@ -628,9 +648,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       if (libraryOwnerRef.current !== ownerId) return;
       setSessions(previous => previous.map(item => item.id === current.id ? { ...item, customTitle: name } : item));
       setSearch('');
-      setLibraryMoveNotice({ parentId: current.id, message: `已将「${oldName}」重命名为「${name}」。` });
+      setLibraryMoveNotice({ parentId: current.id, message: text(`已将「${oldName}」重命名为「${name}」。`, `Renamed “${oldName}” to “${name}”.`) });
     } catch {
-      if (libraryOwnerRef.current === ownerId) window.alert('重命名失败，原名称已保留，请稍后重试。');
+      if (libraryOwnerRef.current === ownerId) window.alert(localizeUiText('重命名失败，原名称已保留，请稍后重试。'));
     } finally {
       renameFolderRequestRef.current = false;
       setRenamingFolderId(null);
@@ -642,15 +662,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       onLogin();
       return;
     }
-    if (deletingFolder || creatingFolder || movingFileId || renameFolderRequestRef.current) return;
+    if (deletingFolder || creatingFolder || movingFileId || renameFolderRequestRef.current || fileEditRequestRef.current) return;
     const folderName = folder.customTitle || folder.fileName;
     const parentId = folder.parentId ?? null;
     const parent = folders.find(item => item.id === parentId);
-    const parentName = parent ? parent.customTitle || parent.fileName : '根目录';
+    const parentName = parent ? parent.customTitle || parent.fileName : localizeUiText('根目录');
     const containedItems = sessions.filter((session) => session.parentId === folder.id);
     const message = containedItems.length > 0
-      ? `确定删除文件夹“${folderName}”吗？里面的 PDF 和子文件夹都会保留，并移到「${parentName}」。`
-      : `确定删除文件夹“${folderName}”吗？`;
+      ? text(`确定删除文件夹“${folderName}”吗？里面的 PDF 和子文件夹都会保留，并移到「${parentName}」。`, `Delete folder “${folderName}”? Its PDFs and subfolders will be kept and moved to “${parentName}”.`)
+      : text(`确定删除文件夹“${folderName}”吗？`, `Delete folder “${folderName}”?`);
     if (!window.confirm(message)) return;
     const ownerId = user.uid;
     setDeletingFolder(true);
@@ -663,7 +683,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       setJointReviewFolderId(current => current === folder.id ? parentId ?? 'all' : current);
       setLibraryMoveNotice(null);
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : '删除文件夹失败，请稍后重试。');
+      window.alert(localizeUiText(error instanceof Error ? error.message : '删除文件夹失败，请稍后重试。'));
     } finally {
       setDeletingFolder(false);
     }
@@ -672,7 +692,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const handleMoveLibraryFile = async (fileId: string, parentId: string | null) => {
     const file = fileSessions.find(session => session.id === fileId);
     const destination = parentId === null ? null : folders.find(folder => folder.id === parentId);
-    if (!user || !file || file.userId !== user.uid || moveRequestRef.current || deletingFolder || renameFolderRequestRef.current
+    if (!user || !file || file.userId !== user.uid || moveRequestRef.current || fileEditRequestRef.current || deletingFolder || renameFolderRequestRef.current
       || parentId !== null && (!destination || destination.userId !== user.uid)) throw new Error('Invalid move destination');
     if ((file.parentId ?? null) === parentId) return;
     const operation = { fileId, ownerId: user.uid };
@@ -689,6 +709,71 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     } finally {
       if (moveRequestRef.current === operation) { moveRequestRef.current = null; setMovingFileId(null); }
     }
+  };
+
+  const handleEditLibraryFile = async (fileId: string, name?: string) => {
+    const file = fileSessions.find(session => session.id === fileId);
+    if (!user || !file || file.userId !== user.uid || fileEditRequestRef.current
+      || moveRequestRef.current || renameFolderRequestRef.current || deletingFolder || creatingFolder || openingSessionId)
+      throw new Error('This PDF is unavailable for editing');
+    if (name !== undefined && !name.trim()) throw new Error('A name is required');
+    const ownerId = user.uid;
+    fileEditRequestRef.current = true;
+    setEditingFileId(fileId);
+    try {
+      if (name !== undefined) await renameCloudSession(fileId, name.trim());
+      else await deleteCloudSession(fileId);
+      if (libraryOwnerRef.current !== ownerId) return;
+      if (name !== undefined) {
+        setSessions(previous => previous.map(item => item.id === fileId ? { ...item, customTitle: name.trim() } : item));
+        onLibraryFileRenamed?.(fileId, name.trim());
+        setSearch('');
+      } else {
+        setSessions(previous => previous.filter(item => item.id !== fileId));
+        setJointReviewSelectedIds(previous => { const next = { ...previous }; delete next[fileId]; return next; });
+        onLibraryFileDeleted?.(fileId);
+      }
+      setLibraryMoveNotice({ parentId: file.parentId ?? null, message: name !== undefined
+        ? text(`已重命名为「${name.trim()}」。`, `Renamed to “${name.trim()}”.`)
+        : text(`已删除「${file.customTitle || file.fileName}」。`, `Deleted “${file.customTitle || file.fileName}”.`) });
+    } finally {
+      fileEditRequestRef.current = false;
+      setEditingFileId(null);
+    }
+  };
+
+  const handleBulkLibraryFiles = async (ids: string[], action: 'move' | 'delete', parentId: string | null) => {
+    const ownerId = user?.uid;
+    const selected = [...new Set(ids)].map(id => fileSessions.find(file => file.id === id));
+    if (!ownerId || !selected.length || selected.some(file => !file || file.userId !== ownerId)
+      || fileEditRequestRef.current || moveRequestRef.current || renameFolderRequestRef.current
+      || deletingFolder || creatingFolder || openingSessionId
+      || (action === 'move' && parentId !== null && !folders.some(folder => folder.id === parentId && folder.userId === ownerId)))
+      throw new Error('These PDFs are unavailable for editing');
+    fileEditRequestRef.current = true;
+    setEditingFileId('batch');
+    try {
+      const result = await runLibraryBatch(ids, async id => {
+        const file = selected.find(item => item?.id === id)!;
+        if (action === 'delete') await deleteCloudSession(id);
+        else if ((file.parentId ?? null) !== parentId) await moveSession(id, parentId);
+      }, () => libraryOwnerRef.current === ownerId);
+      if (libraryOwnerRef.current !== ownerId) return result;
+      const completed = new Set(result.completedIds);
+      if (action === 'delete') {
+        setSessions(previous => previous.filter(file => !completed.has(file.id)));
+        setJointReviewSelectedIds(previous => Object.fromEntries(Object.entries(previous).filter(([id]) => !completed.has(id))));
+        result.completedIds.forEach(id => onLibraryFileDeleted?.(id));
+      } else {
+        setSessions(previous => previous.map(file => completed.has(file.id) ? { ...file, parentId } : file));
+      }
+      setLibrarySelectedIds(result.failedIds);
+      setLibraryMoveNotice({ parentId: action === 'move' ? parentId : activeFolderId === 'all' ? null : activeFolderId,
+        message: text(
+          `已${action === 'delete' ? '删除' : '移动'} ${completed.size} 份资料${result.failedIds.length ? `，${result.failedIds.length} 份未完成，已保留选中以便重试` : ''}。`,
+          `${completed.size} PDFs ${action === 'delete' ? 'deleted' : 'moved'}${result.failedIds.length ? `; ${result.failedIds.length} unfinished PDFs remain selected for retry` : ''}.`) });
+      return result;
+    } finally { fileEditRequestRef.current = false; setEditingFileId(null); }
   };
 
   const uploadLibraryFiles = async (pdfFiles: File[], targetParentId: string | null = activeFolderId === 'all' ? null : activeFolderId): Promise<string[]> => {
@@ -1039,7 +1124,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const handleRegenerateTinyEntries = () => {
     if (!selectedTinyStudySession || tinyEntryScanLoading) return;
-    if (!window.confirm('重新生成会替换这份资料现有的兴趣入口和入口内讲解。确定继续吗？')) return;
+    if (!window.confirm(localizeUiText('重新生成会替换这份资料现有的兴趣入口和入口内讲解。确定继续吗？'))) return;
     tinyEntryForceScanRef.current = true;
     tinyEntrySessionRef.current = null;
     setTinyEntrySession(null);
@@ -1185,12 +1270,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     if (creatingJointReviewPack) return;
     const selected = fileSessions.filter((session) => jointReviewSelectedIds[session.id]);
     if (selected.length < 2) {
-      window.alert('至少选择 2 份 PDF：一份 lecture，再加一份 reading / article / textbook。');
+      window.alert(localizeUiText('至少选择 2 份 PDF：一份 lecture，再加一份 reading / article / textbook。'));
       return;
     }
     const hasLecture = selected.some((session) => (jointReviewRoles[session.id] ?? 'reading') === 'lecture');
     if (!hasLecture) {
-      window.alert('请至少把一份材料标记为 Lecture。');
+      window.alert(localizeUiText('请至少把一份材料标记为 Lecture。'));
       return;
     }
     const title = jointReviewTitle.trim() || `${selected.find((session) => jointReviewRoles[session.id] === 'lecture')?.fileName ?? '新的课次'} 复习包`;
@@ -1220,7 +1305,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const handleDeleteJointReviewPack = async (pack: JointReviewPack) => {
     if (!user) return;
-    if (!window.confirm(`确定删除“${pack.title}”吗？不会删除里面的 PDF。`)) return;
+    if (!window.confirm(text(`确定删除“${pack.title}”吗？不会删除里面的 PDF。`, `Delete “${pack.title}”? Its PDFs will be kept.`))) return;
     const previous = jointReviewPacks;
     setJointReviewPacks((prev) => prev.filter((item) => item.id !== pack.id));
     try {
@@ -1403,7 +1488,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   };
 
   const renderLibrary = () => {
-    const uploadTargetName = activeFolder ? (activeFolder.customTitle || activeFolder.fileName) : '根目录';
+    const uploadTargetName = activeFolder ? (activeFolder.customTitle || activeFolder.fileName) : localizeUiText('根目录');
     const isLibraryUploading = !!libraryUploadStatus && libraryUploadStatus.completed < libraryUploadStatus.total;
     const uploadCompleted = !!libraryUploadStatus && libraryUploadStatus.completed >= libraryUploadStatus.total;
 
@@ -1420,7 +1505,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           >
             <span className="flex items-center gap-2 min-w-0">
               <LayoutGrid className="w-4 h-4 shrink-0" />
-              <span className="truncate">全部资料</span>
+              <span className="truncate">{localizeUiText("全部资料")}</span>
             </span>
             <span className="text-xs opacity-70">{fileSessions.length}</span>
           </button>
@@ -1437,11 +1522,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white border border-slate-200 text-sm font-bold text-slate-700 hover:border-slate-400 hover:text-slate-900 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {creatingFolder ? <Loader2 className="w-4 h-4 animate-spin" /> : <Folder className="w-4 h-4" />}
-            <span>{creatingFolder ? '创建中' : activeFolder ? '新建子文件夹' : '新建文件夹'}</span>
+            <span>{creatingFolder ? localizeUiText("创建中") : activeFolder ? localizeUiText("新建子文件夹") : localizeUiText("新建文件夹")}</span>
           </button>
           <label className={`flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white border border-dashed border-indigo-300 text-sm font-bold text-indigo-700 hover:border-indigo-500 hover:text-indigo-900 cursor-pointer transition-colors ${!user || isLibraryUploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
             {isLibraryUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
-            <span>{isLibraryUploading ? '保存中' : localMode ? '添加到本机' : '上传到云端'}</span>
+            <span>{isLibraryUploading ? localizeUiText("保存中") : localMode ? localizeUiText("添加到本机") : localizeUiText("上传到云端")}</span>
             <input
               type="file"
               accept=".pdf,application/pdf"
@@ -1458,13 +1543,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-md border border-[#B7C7BC] bg-[#E4EBE5] text-sm font-semibold text-[#294B3B] hover:border-[#789583] hover:bg-[#DCE6DE] disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
           >
             <GraduationCap className="w-4 h-4" />
-            <span>从 Canvas 导入</span>
+            <span>{localizeUiText("从 Canvas 导入")}</span>
           </button>
         </div>
 
         <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white border border-dashed border-slate-300 text-sm font-bold text-slate-600 hover:border-slate-500 hover:text-slate-900 cursor-pointer transition-colors">
           {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-          <span>{isProcessing ? '处理中' : '本地打开'}</span>
+          <span>{isProcessing ? localizeUiText("处理中") : localizeUiText("本地打开")}</span>
           <input type="file" accept=".pdf,image/*" className="hidden" onChange={onUpload} />
         </label>
       </aside>
@@ -1472,18 +1557,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <section className="min-w-0">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
           <div>
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">{localMode ? '本机资料库' : '云端资料库'}</h2>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">{localMode ? localizeUiText("本机资料库") : localizeUiText("云端资料库")}</h2>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-[#526B5D]">
-              <span>{localMode ? '资料和记录保存在当前浏览器，清除网站数据会丢失。' : '当前使用账号资料，本机原件仍然保留。'}</span>
+              <span>{localMode ? localizeUiText("资料和记录保存在当前浏览器，清除网站数据会丢失。") : localizeUiText("当前使用账号资料，本机原件仍然保留。")}</span>
               {isCloudUser(cloudUser)
-                ? <button type="button" disabled={copyingLocal} onClick={onSwitchStorage} className="underline">{localMode ? '切换到云端资料' : '查看本机资料'}</button>
-                : <button type="button" onClick={onLogin} className="underline">登录后可同步云端</button>}
-              {isCloudUser(cloudUser) && <button type="button" disabled={copyingLocal} onClick={() => void copyLocalToCloud()} className="underline">{copyingLocal ? '正在同步…' : '复制本机资料到账号'}</button>}
+                ? <button type="button" disabled={copyingLocal} onClick={onSwitchStorage} className="underline">{localMode ? localizeUiText("切换到云端资料") : localizeUiText("查看本机资料")}</button>
+                : <button type="button" onClick={onLogin} className="underline">{localizeUiText("登录后可同步云端")}</button>}
+              {isCloudUser(cloudUser) && <button type="button" disabled={copyingLocal} onClick={() => void copyLocalToCloud()} className="underline">{copyingLocal ? localizeUiText("正在同步…") : localizeUiText("复制本机资料到账号")}</button>}
             </div>
             {localCopyMessage && <p role="status" className="mt-2 text-sm">{localCopyMessage}</p>}
             {activeFolder ? (
-              <nav className="library-folder-breadcrumb" aria-label="文件夹路径">
-                <button type="button" onClick={() => openLibraryFolder('all')}>全部资料</button>
+              <nav className="library-folder-breadcrumb" aria-label={localizeUiText("文件夹路径")}>
+                <button type="button" onClick={() => openLibraryFolder('all')}>{localizeUiText("全部资料")}</button>
                 {activeFolderPath.map((folder, index) => (
                   <React.Fragment key={folder.id}>
                     <ChevronRight size={12} />
@@ -1493,7 +1578,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   </React.Fragment>
                 ))}
               </nav>
-            ) : <p className="text-sm text-slate-500 mt-1">{currentFileName ? `上次打开：${currentFileName}` : '选一份资料进去，学习页会接住你。'}</p>}
+            ) : <p className="text-sm text-slate-500 mt-1">{currentFileName ? text(`上次打开：${currentFileName}`, `Last opened: ${currentFileName}`) : localizeUiText("选一份资料进去，学习页会接住你。")}</p>}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 md:items-center">
             <button
@@ -1507,7 +1592,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             </button>
             <label className={`inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-slate-900 text-white text-sm font-bold cursor-pointer hover:bg-slate-700 transition-colors ${!user || isLibraryUploading ? 'opacity-50 cursor-not-allowed' : ''}`}>
               {isLibraryUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Cloud className="w-4 h-4" />}
-              <span>{isLibraryUploading ? '上传中' : `上传到${uploadTargetName}`}</span>
+              <span>{isLibraryUploading ? localizeUiText("上传中") : text(`上传到${uploadTargetName}`, `Upload to ${uploadTargetName}`)}</span>
               <input
                 type="file"
                 accept=".pdf,application/pdf"
@@ -1529,6 +1614,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </div>
         </div>
 
+        {user && <LibraryBulkActions key={user.uid} active={librarySelecting} files={librarySelectedFiles} folders={folders} total={visibleFiles.length}
+          disabled={loadingSessions || openingSessionId !== null || editingFileId !== null || movingFileId !== null || creatingFolder || deletingFolder || renamingFolderId !== null || isLibraryUploading}
+          onToggle={() => { setLibrarySelecting(value => !value); setLibrarySelectedIds([]); }}
+          onSelectAll={() => setLibrarySelectedIds(visibleFiles.map(file => file.id))} onClear={() => setLibrarySelectedIds([])} onApply={handleBulkLibraryFiles} />}
         {libraryMoveNotice && <div className="library-move-notice" role="status">
           <Check className="h-4 w-4 shrink-0" aria-hidden="true" /><span>{libraryMoveNotice.message}</span>
           <button type="button" className="library-move-view" onClick={() => { setActiveFolderId(libraryMoveNotice.parentId ?? 'all'); setSearch(''); }}>
@@ -1542,16 +1631,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-black text-slate-800">
-                  {uploadCompleted ? '上传完成' : `正在上传 ${libraryUploadStatus.completed}/${libraryUploadStatus.total}`}
+                  {uploadCompleted ? localizeUiText("上传完成") : text(`正在上传 ${libraryUploadStatus.completed}/${libraryUploadStatus.total}`, `Uploading ${libraryUploadStatus.completed}/${libraryUploadStatus.total}`)}
                 </p>
                 <p className="mt-1 text-xs text-slate-500 truncate">
                   {uploadCompleted
-                    ? `已放入${libraryUploadStatus.targetName || uploadTargetName}${libraryUploadStatus.failures.length ? `，${libraryUploadStatus.failures.length} 个失败` : ''}`
+                    ? text(`已放入${libraryUploadStatus.targetName || uploadTargetName}${libraryUploadStatus.failures.length ? `，${libraryUploadStatus.failures.length} 个失败` : ''}`, `Saved to ${libraryUploadStatus.targetName || uploadTargetName}${libraryUploadStatus.failures.length ? `; ${libraryUploadStatus.failures.length} failed` : ''}`)
                     : libraryUploadStatus.currentName}
                 </p>
                 {libraryUploadStatus.failures.length > 0 && (
-                  <p className="mt-2 text-xs font-bold text-rose-600">
-                    失败：{libraryUploadStatus.failures.join('、')}
+                  <p className="mt-2 text-xs font-bold text-rose-600">{localizeUiText(" 失败：")}{libraryUploadStatus.failures.join('、')}
                   </p>
                 )}
               </div>
@@ -1559,7 +1647,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 type="button"
                 onClick={() => setLibraryUploadStatus(null)}
                 className="p-1 rounded-md text-slate-400 hover:bg-white hover:text-slate-700"
-                aria-label="关闭上传状态"
+                aria-label={localizeUiText("关闭上传状态")}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1571,17 +1659,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           <>
             <div className="library-folder-location-bar">
               <button type="button" onClick={() => openLibraryFolder(activeFolder.parentId ?? 'all')}>
-                <ChevronLeft size={15} />{activeFolder.parentId ? '返回上级文件夹' : '返回全部资料'}
+                <ChevronLeft size={15} />{activeFolder.parentId ? localizeUiText("返回上级文件夹") : localizeUiText("返回全部资料")}
               </button>
               <div className="flex items-center gap-5">
                 <button type="button" onClick={() => handleRenameFolder(activeFolder)}
                   disabled={creatingFolder || deletingFolder || renamingFolderId !== null || movingFileId !== null}>
                   {renamingFolderId === activeFolder.id ? <Loader2 size={15} className="animate-spin" /> : <PencilLine size={15} />}
-                  {renamingFolderId === activeFolder.id ? '重命名中' : '重命名'}
+                  {renamingFolderId === activeFolder.id ? localizeUiText("重命名中") : localizeUiText("重命名")}
                 </button>
                 <button type="button" onClick={handleCreateFolder} disabled={creatingFolder || deletingFolder || renamingFolderId !== null}>
-                  {creatingFolder ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}新建子文件夹
-                </button>
+                  {creatingFolder ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}{localizeUiText("新建子文件夹 ")}</button>
               </div>
             </div>
             {visibleSubfolders.length > 0 && (
@@ -1592,7 +1679,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     <button type="button" key={folder.id} className="library-subfolder-card" onClick={() => openLibraryFolder(folder.id)}>
                       <Folder size={26} />
                       <span><strong>{folder.customTitle || folder.fileName}</strong>
-                        <small>{folderFileTotals[folder.id] ?? 0} 份 PDF{childCount > 0 ? ` · ${childCount} 个子文件夹` : ''}</small></span>
+                        <small>{folderFileTotals[folder.id] ?? 0}{localizeUiText(" 份 PDF")}{childCount > 0 ? text(` · ${childCount} 个子文件夹`, ` · ${childCount} subfolders`) : ''}</small></span>
                       <ChevronRight size={16} />
                     </button>
                   );
@@ -1605,15 +1692,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {!user ? (
           <div className="min-h-[320px] bg-white border border-slate-200 rounded-lg flex flex-col items-center justify-center text-center p-8">
             <CloudOff className="w-10 h-10 text-slate-300 mb-4" />
-            <p className="text-lg font-black text-slate-800">登录后查看云端资料</p>
+            <p className="text-lg font-black text-slate-800">{localizeUiText("登录后查看云端资料")}</p>
             <button
               type="button"
               onClick={onLogin}
               className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-bold hover:bg-slate-700"
             >
-              <LogIn className="w-4 h-4" />
-              登录
-            </button>
+              <LogIn className="w-4 h-4" />{localizeUiText(" 登录 ")}</button>
           </div>
         ) : loadingSessions ? (
           <div className="min-h-[320px] flex items-center justify-center text-slate-400">
@@ -1622,19 +1707,22 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         ) : visibleFiles.length === 0 && visibleSubfolders.length === 0 ? (
           <div className="min-h-[320px] bg-white border border-slate-200 rounded-lg flex flex-col items-center justify-center text-center p-8">
             <FileText className="w-10 h-10 text-slate-300 mb-4" />
-            <p className="text-lg font-black text-slate-800">{search.trim() ? '没有找到匹配的资料或文件夹' : '这里还没有资料'}</p>
-            {activeFolder && !search.trim() && <p className="mt-2 text-sm text-slate-500">可以新建子文件夹、上传 PDF，或从其他文件夹移入资料。</p>}
+            <p className="text-lg font-black text-slate-800">{search.trim() ? localizeUiText("没有找到匹配的资料或文件夹") : localizeUiText("这里还没有资料")}</p>
+            {activeFolder && !search.trim() && <p className="mt-2 text-sm text-slate-500">{localizeUiText("可以新建子文件夹、上传 PDF，或从其他文件夹移入资料。")}</p>}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-5">
             {visibleFiles.map((session, index) => (
-              <div key={session.id} className="library-card-shell">
+              <div key={session.id} className={`library-card-shell${librarySelecting ? ' is-selecting' : ''}${librarySelecting && librarySelectedIds.includes(session.id) ? ' is-selected' : ''}`}>
               <button
                 type="button"
-                onClick={() => handleOpenSession(session)}
-                disabled={openingSessionId !== null || movingFileId === session.id}
+                onClick={() => librarySelecting ? toggleLibraryFile(session.id) : handleOpenSession(session)}
+                aria-pressed={librarySelecting ? librarySelectedIds.includes(session.id) : undefined}
+                aria-label={librarySelecting ? text(`选择资料 ${session.customTitle || session.fileName}`, `Select ${session.customTitle || session.fileName}`) : undefined}
+                disabled={openingSessionId !== null || movingFileId === session.id || editingFileId !== null}
                 className="craft-library-card group text-left border rounded-lg overflow-hidden disabled:cursor-wait disabled:opacity-80"
               >
+                {librarySelecting && <span className="library-selection-check" aria-hidden="true">{librarySelectedIds.includes(session.id) && <Check size={19} />}</span>}
                 <div className="h-44 bg-[#f7faf9] border-b border-slate-100 p-5 overflow-hidden relative">
                   {coverPreviews[session.id] ? (
                     <img
@@ -1687,8 +1775,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   <p className="mt-2 text-xs text-slate-500">{formatDate(session.createdAt, language)}</p>
                 </div>
               </button>
-              <LibraryFileActions file={session} folders={folders} inFolder={activeFolderId !== 'all'}
-                disabled={openingSessionId !== null || movingFileId !== null || deletingFolder || renamingFolderId !== null} onMove={handleMoveLibraryFile} />
+              {!librarySelecting && <LibraryFileActions file={session} folders={folders} inFolder={activeFolderId !== 'all'}
+                disabled={openingSessionId !== null || movingFileId !== null || deletingFolder || renamingFolderId !== null || editingFileId !== null || creatingFolder}
+                onMove={handleMoveLibraryFile} onRename={(id, name) => handleEditLibraryFile(id, name)} onDelete={id => handleEditLibraryFile(id)} />}
               </div>
             ))}
           </div>
@@ -1712,10 +1801,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <div className="space-y-6">
         <section className="rounded-lg border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-sky-50 p-5 md:p-6">
           <p className="text-xs font-black uppercase text-indigo-600">Joint Review</p>
-          <h2 className="mt-2 text-2xl font-black text-slate-900">课次复习包</h2>
-          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">
-            把 lecture slides 和课前 paper / article / textbook 放在一起，让 AI 先整理它们的关系，再告诉你怎么搭配复习。
-          </p>
+          <h2 className="mt-2 text-2xl font-black text-slate-900">{localizeUiText("课次复习包")}</h2>
+          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">{localizeUiText(" 把 lecture slides 和课前 paper / article / textbook 放在一起，让 AI 先整理它们的关系，再告诉你怎么搭配复习。 ")}</p>
         </section>
 
         {jointReviewError && (
@@ -1727,16 +1814,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <div className="grid grid-cols-1 2xl:grid-cols-[420px_minmax(0,1fr)] gap-6 items-start">
           <aside className="space-y-4">
             <section className="rounded-lg border border-slate-200 bg-white p-5">
-              <h3 className="text-lg font-black text-slate-900">创建一个课次</h3>
-              <p className="mt-1 text-sm leading-relaxed text-slate-500">
-                先选已有云端 PDF，至少一份标成 Lecture。
-              </p>
+              <h3 className="text-lg font-black text-slate-900">{localizeUiText("创建一个课次")}</h3>
+              <p className="mt-1 text-sm leading-relaxed text-slate-500">{localizeUiText(" 先选已有云端 PDF，至少一份标成 Lecture。 ")}</p>
 
               <input
                 value={jointReviewTitle}
                 onChange={(event) => setJointReviewTitle(event.target.value)}
                 disabled={!user}
-                placeholder="例如 Lecture 10 Emotion"
+                placeholder={localizeUiText("例如 Lecture 10 Emotion")}
                 className="mt-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-slate-400 disabled:bg-slate-50"
               />
 
@@ -1745,19 +1830,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   type="button"
                   onClick={onLogin}
                   className="mt-4 w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white"
-                >
-                  登录后创建
-                </button>
+                >{localizeUiText(" 登录后创建 ")}</button>
               ) : fileSessions.length === 0 ? (
-                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                  资料库里还没有云端 PDF。先上传一些 lecture 和 reading。
-                </div>
+                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">{localizeUiText(" 资料库里还没有云端 PDF。先上传一些 lecture 和 reading。 ")}</div>
               ) : (
                 <>
                   <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-2">
                     <div className="mb-2 flex items-center justify-between gap-2 px-1">
-                      <span className="text-xs font-black text-slate-400">选择范围</span>
-                      <span className="text-xs font-bold text-slate-400">已选 {selectedCount}</span>
+                      <span className="text-xs font-black text-slate-400">{localizeUiText("选择范围")}</span>
+                      <span className="text-xs font-bold text-slate-400">{localizeUiText("已选 ")}{selectedCount}</span>
                     </div>
                     <div className="max-h-40 space-y-1 overflow-y-auto pr-1 custom-scrollbar">
                       <button
@@ -1769,7 +1850,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       >
                         <span className="flex min-w-0 items-center gap-2">
                           <LayoutGrid className="h-4 w-4 shrink-0" />
-                          <span className="truncate">全部资料</span>
+                          <span className="truncate">{localizeUiText("全部资料")}</span>
                         </span>
                         <span className="text-xs opacity-70">{fileSessions.length}</span>
                       </button>
@@ -1798,14 +1879,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   </div>
 
                   <p className="mt-3 text-xs font-bold text-slate-400">
-                    {jointReviewActiveFolder ? `当前文件夹：${getFolderPath(jointReviewActiveFolder.id, folders).map(folder => folder.customTitle || folder.fileName).join(' / ')}（含子文件夹）` : '当前显示：全部资料'}
+                    {jointReviewActiveFolder ? text(`当前文件夹：${getFolderPath(jointReviewActiveFolder.id, folders).map(folder => folder.customTitle || folder.fileName).join(' / ')}（含子文件夹）`, `Current folder: ${getFolderPath(jointReviewActiveFolder.id, folders).map(folder => folder.customTitle || folder.fileName).join(' / ')} (including subfolders)`) : localizeUiText("当前显示：全部资料")}
                   </p>
 
                   <div className="mt-3 max-h-[420px] space-y-2 overflow-y-auto pr-1 custom-scrollbar">
                     {jointReviewVisibleFiles.length === 0 ? (
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-sm font-bold text-slate-400">
-                        这个文件夹里还没有 PDF。
-                      </div>
+                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-sm font-bold text-slate-400">{localizeUiText(" 这个文件夹里还没有 PDF。 ")}</div>
                     ) : (
                       jointReviewVisibleFiles.map((session) => {
                         const checked = !!jointReviewSelectedIds[session.id];
@@ -1854,20 +1933,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     disabled={creatingJointReviewPack || selectedCount < 2}
                     className="mt-4 flex w-full items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-black text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    {creatingJointReviewPack ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
-                    创建复习包
-                  </button>
+                    {creatingJointReviewPack ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}{localizeUiText(" 创建复习包 ")}</button>
                 </>
               )}
             </section>
 
             <section className="rounded-lg border border-slate-200 bg-white p-5">
               <div className="mb-3 flex items-center justify-between gap-3">
-                <h3 className="text-lg font-black text-slate-900">已有复习包</h3>
+                <h3 className="text-lg font-black text-slate-900">{localizeUiText("已有复习包")}</h3>
                 {loadingJointReviewPacks && <Loader2 className="h-4 w-4 animate-spin text-slate-400" />}
               </div>
               {jointReviewPacks.length === 0 ? (
-                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">还没有课次复习包。</p>
+                <p className="rounded-lg bg-slate-50 p-4 text-sm text-slate-500">{localizeUiText("还没有课次复习包。")}</p>
               ) : (
                 <div className="space-y-2">
                   {jointReviewPacks.map((pack) => {
@@ -1885,7 +1962,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       >
                         <span className="block truncate text-sm font-black">{pack.title}</span>
                         <span className={`mt-1 block text-xs ${active ? 'text-white/60' : 'text-slate-400'}`}>
-                          {pack.materials.length} 份材料 · {pack.generatedAt ? '已生成说明' : '未生成'}
+                          {pack.materials.length}{localizeUiText(" 份材料 · ")}{pack.generatedAt ? localizeUiText("已生成说明") : localizeUiText("未生成")}
                         </span>
                       </button>
                     );
@@ -1901,22 +1978,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50">
                   <BookOpen className="h-8 w-8 text-slate-300" />
                 </div>
-                <p className="mt-5 text-lg font-black text-slate-800">先创建一个课次复习包</p>
-                <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
-                  选 lecture 和 readings，AI 会先帮你整理它们之间的关系。
-                </p>
+                <p className="mt-5 text-lg font-black text-slate-800">{localizeUiText("先创建一个课次复习包")}</p>
+                <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">{localizeUiText(" 选 lecture 和 readings，AI 会先帮你整理它们之间的关系。 ")}</p>
               </div>
             ) : (
               <div className="flex min-h-[680px] flex-col">
                 <div className="border-b border-slate-100 p-5">
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0">
-                      <p className="text-xs font-black uppercase text-indigo-600">课次复习包</p>
+                      <p className="text-xs font-black uppercase text-indigo-600">{localizeUiText("课次复习包")}</p>
                       <h3 className="mt-1 text-2xl font-black text-slate-900">{selectedJointReviewPack.title}</h3>
                       <p className="mt-1 text-sm text-slate-500">
                         {selectedJointReviewPack.generatedAt
-                          ? `上次生成：${new Date(selectedJointReviewPack.generatedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
-                          : '还没有生成联合复习说明'}
+                          ? text(`上次生成：${new Date(selectedJointReviewPack.generatedAt).toLocaleString(language, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, `Last generated: ${new Date(selectedJointReviewPack.generatedAt).toLocaleString(language, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`)
+                          : localizeUiText("还没有生成联合复习说明")}
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -1927,16 +2002,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                         className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-black text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {isGeneratingSelected ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-                        {selectedJointReviewPack.summaryMarkdown ? '重新生成说明' : '生成联合复习说明'}
+                        {selectedJointReviewPack.summaryMarkdown ? localizeUiText("重新生成说明") : localizeUiText("生成联合复习说明")}
                       </button>
                       <button
                         type="button"
                         onClick={() => handleDeleteJointReviewPack(selectedJointReviewPack)}
                         className="inline-flex items-center justify-center gap-2 rounded-lg border border-rose-100 bg-white px-3 py-2 text-sm font-black text-rose-600 hover:bg-rose-50"
                       >
-                        <Trash2 className="h-4 w-4" />
-                        删除
-                      </button>
+                        <Trash2 className="h-4 w-4" />{localizeUiText(" 删除 ")}</button>
                     </div>
                   </div>
 
@@ -1953,9 +2026,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
                   <div className="mt-5 flex flex-wrap gap-2 rounded-lg bg-slate-50 p-1">
                     {[
-                      { id: 'briefing' as const, label: '复习说明', icon: FileText },
-                      { id: 'guide' as const, label: '联合领读', icon: MessageCircle },
-                      { id: 'exam' as const, label: '考试整合', icon: Check },
+                      { id: 'briefing' as const, label: localizeUiText("复习说明"), icon: FileText },
+                      { id: 'guide' as const, label: localizeUiText("联合领读"), icon: MessageCircle },
+                      { id: 'exam' as const, label: localizeUiText("考试整合"), icon: Check },
                     ].map((tab) => {
                       const active = jointReviewDetailMode === tab.id;
                       return (
@@ -1979,10 +2052,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   {jointReviewDetailMode === 'guide' ? (
                     <div className="mx-auto flex min-h-[500px] max-w-4xl flex-col rounded-lg border border-slate-200 bg-white shadow-sm">
                       <div className="border-b border-slate-100 p-4">
-                        <p className="text-sm font-black text-slate-900">联合领读</p>
-                        <p className="mt-1 text-xs leading-6 text-slate-500">
-                          以 lecture 为主线；需要证据、背景或出处时，再把 reading / article / textbook 拉进来。
-                        </p>
+                        <p className="text-sm font-black text-slate-900">{localizeUiText("联合领读")}</p>
+                        <p className="mt-1 text-xs leading-6 text-slate-500">{localizeUiText(" 以 lecture 为主线；需要证据、背景或出处时，再把 reading / article / textbook 拉进来。 ")}</p>
                       </div>
 
                       <div className="flex-1 space-y-4 overflow-y-auto bg-slate-50/50 p-4 custom-scrollbar">
@@ -1991,10 +2062,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                             <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-indigo-100 bg-indigo-50">
                               <MessageCircle className="h-8 w-8 text-indigo-300" />
                             </div>
-                            <p className="mt-5 text-lg font-black text-slate-800">从 lecture 主线开始</p>
-                            <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
-                              AI 会一小段一小段带你复习；遇到需要课前阅读支撑的地方，会顺手接上。
-                            </p>
+                            <p className="mt-5 text-lg font-black text-slate-800">{localizeUiText("从 lecture 主线开始")}</p>
+                            <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">{localizeUiText(" AI 会一小段一小段带你复习；遇到需要课前阅读支撑的地方，会顺手接上。 ")}</p>
                           </div>
                         ) : (
                           guideMessages.map((msg, index) => (
@@ -2029,9 +2098,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                         {isGuideLoading && (
                           <div className="flex justify-start">
                             <div className="flex items-center gap-3 rounded-2xl rounded-tl-none border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-500 shadow-sm">
-                              <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />
-                              正在把 lecture 和 readings 接起来...
-                            </div>
+                              <Loader2 className="h-4 w-4 animate-spin text-indigo-500" />{localizeUiText(" 正在把 lecture 和 readings 接起来... ")}</div>
                           </div>
                         )}
                       </div>
@@ -2040,28 +2107,24 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                         <div className="mb-3 flex flex-wrap gap-2">
                           <button
                             type="button"
-                            onClick={() => handleSendJointReviewGuide(selectedJointReviewPack, guideMessages.length === 0 ? '请开始联合领读。先用 lecture 主线讲第一小段，必要时调用 readings 支撑。' : '继续下一小段。')}
+                            onClick={() => handleSendJointReviewGuide(selectedJointReviewPack, guideMessages.length === 0 ? localizeUiText("请开始联合领读。先用 lecture 主线讲第一小段，必要时调用 readings 支撑。") : localizeUiText("继续下一小段。"))}
                             disabled={isGuideLoading}
                             className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-black text-white hover:bg-slate-700 disabled:opacity-40"
                           >
-                            {guideMessages.length === 0 ? '开始联合领读' : '继续下一小段'}
+                            {guideMessages.length === 0 ? localizeUiText("开始联合领读") : localizeUiText("继续下一小段")}
                           </button>
                           <button
                             type="button"
-                            onClick={() => handleSendJointReviewGuide(selectedJointReviewPack, '这一段先只按 lecture 主线讲，不要展开 reading。')}
+                            onClick={() => handleSendJointReviewGuide(selectedJointReviewPack, localizeUiText("这一段先只按 lecture 主线讲，不要展开 reading。"))}
                             disabled={isGuideLoading}
                             className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            只讲 lecture
-                          </button>
+                          >{localizeUiText(" 只讲 lecture ")}</button>
                           <button
                             type="button"
-                            onClick={() => handleSendJointReviewGuide(selectedJointReviewPack, '把刚才这一点背后的 reading / article 证据补一下。')}
+                            onClick={() => handleSendJointReviewGuide(selectedJointReviewPack, localizeUiText("把刚才这一点背后的 reading / article 证据补一下。"))}
                             disabled={isGuideLoading || guideMessages.length === 0}
                             className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            补 reading 证据
-                          </button>
+                          >{localizeUiText(" 补 reading 证据 ")}</button>
                         </div>
                         <div className="flex items-end gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 focus-within:border-slate-400">
                           <textarea
@@ -2074,7 +2137,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                               }
                             }}
                             disabled={isGuideLoading}
-                            placeholder="问联合领读 AI：这页 lecture 对应哪篇 reading？"
+                            placeholder={localizeUiText("问联合领读 AI：这页 lecture 对应哪篇 reading？")}
                             rows={1}
                             className="min-h-[40px] flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm text-slate-700 outline-none placeholder:text-slate-400 disabled:opacity-50"
                           />
@@ -2083,7 +2146,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                             onClick={() => handleSendJointReviewGuide(selectedJointReviewPack, jointReviewGuideInput)}
                             disabled={isGuideLoading || !jointReviewGuideInput.trim()}
                             className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40"
-                            aria-label="发送"
+                            aria-label={localizeUiText("发送")}
                           >
                             <Send className="h-4 w-4" />
                           </button>
@@ -2095,13 +2158,10 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
                         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                           <div>
-                            <p className="text-sm font-black text-slate-900">考试整合</p>
-                            <p className="mt-1 max-w-2xl text-xs leading-6 text-slate-500">
-                              把 lecture 主线和 readings 的证据整理成考前版本：最小答案、加分 evidence、易混点和自测题。
-                            </p>
+                            <p className="text-sm font-black text-slate-900">{localizeUiText("考试整合")}</p>
+                            <p className="mt-1 max-w-2xl text-xs leading-6 text-slate-500">{localizeUiText(" 把 lecture 主线和 readings 的证据整理成考前版本：最小答案、加分 evidence、易混点和自测题。 ")}</p>
                             {selectedJointReviewPack.examPrepGeneratedAt && (
-                              <p className="mt-2 text-xs font-bold text-slate-400">
-                                上次生成：{new Date(selectedJointReviewPack.examPrepGeneratedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                              <p className="mt-2 text-xs font-bold text-slate-400">{localizeUiText(" 上次生成：")}{new Date(selectedJointReviewPack.examPrepGeneratedAt).toLocaleString(language, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                               </p>
                             )}
                           </div>
@@ -2112,7 +2172,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                             className="inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-black text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                           >
                             {isExamGenerating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                            {selectedJointReviewPack.examPrepMarkdown ? '重新生成考试整合' : '生成考试整合'}
+                            {selectedJointReviewPack.examPrepMarkdown ? localizeUiText("重新生成考试整合") : localizeUiText("生成考试整合")}
                           </button>
                         </div>
                       </section>
@@ -2120,10 +2180,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       {isExamGenerating ? (
                         <div className="flex min-h-[420px] flex-col items-center justify-center rounded-lg border border-slate-200 bg-white text-center shadow-sm">
                           <Loader2 className="h-9 w-9 animate-spin text-emerald-500" />
-                          <p className="mt-4 text-lg font-black text-slate-800">正在整理考前版本</p>
-                          <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
-                            我会区分 lecture 的最小答案和 readings 的加分证据，再整理可能题型和易混点。
-                          </p>
+                          <p className="mt-4 text-lg font-black text-slate-800">{localizeUiText("正在整理考前版本")}</p>
+                          <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">{localizeUiText(" 我会区分 lecture 的最小答案和 readings 的加分证据，再整理可能题型和易混点。 ")}</p>
                         </div>
                       ) : selectedJointReviewPack.examPrepMarkdown ? (
                         <article className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm md:p-7">
@@ -2149,20 +2207,16 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                           <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-emerald-100 bg-emerald-50">
                             <Check className="h-8 w-8 text-emerald-300" />
                           </div>
-                          <p className="mt-5 text-lg font-black text-slate-800">还没生成考试整合</p>
-                          <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
-                            点上方按钮后，AI 会把这组材料整理成可以直接考前看的答题版本。
-                          </p>
+                          <p className="mt-5 text-lg font-black text-slate-800">{localizeUiText("还没生成考试整合")}</p>
+                          <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">{localizeUiText(" 点上方按钮后，AI 会把这组材料整理成可以直接考前看的答题版本。 ")}</p>
                         </div>
                       )}
                     </div>
                   ) : isGeneratingSelected ? (
                     <div className="flex min-h-[420px] flex-col items-center justify-center text-center">
                       <Loader2 className="h-9 w-9 animate-spin text-indigo-500" />
-                      <p className="mt-4 text-lg font-black text-slate-800">正在整理材料关系</p>
-                      <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
-                        我会先看 lecture 和 readings 的角色，再生成主线、对应关系、复习优先级和考试用法。
-                      </p>
+                      <p className="mt-4 text-lg font-black text-slate-800">{localizeUiText("正在整理材料关系")}</p>
+                      <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">{localizeUiText(" 我会先看 lecture 和 readings 的角色，再生成主线、对应关系、复习优先级和考试用法。 ")}</p>
                     </div>
                   ) : selectedJointReviewPack.summaryMarkdown ? (
                     <article className="mx-auto max-w-4xl rounded-lg border border-slate-200 bg-white p-5 md:p-7 shadow-sm">
@@ -2185,10 +2239,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                       <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-slate-200 bg-white">
                         <FileText className="h-8 w-8 text-slate-300" />
                       </div>
-                      <p className="mt-5 text-lg font-black text-slate-800">还没生成说明</p>
-                      <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">
-                        点上方按钮后，AI 会回答：这些 reading 和 lecture 到底怎么一起复习。
-                      </p>
+                      <p className="mt-5 text-lg font-black text-slate-800">{localizeUiText("还没生成说明")}</p>
+                      <p className="mt-2 max-w-md text-sm leading-7 text-slate-500">{localizeUiText(" 点上方按钮后，AI 会回答：这些 reading 和 lecture 到底怎么一起复习。 ")}</p>
                     </div>
                   )}
                 </div>
@@ -2212,7 +2264,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               type="button"
               onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1))}
               className="p-2 rounded-lg hover:bg-slate-100"
-              aria-label="上个月"
+              aria-label={localizeUiText("上个月")}
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -2223,7 +2275,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               type="button"
               onClick={() => setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 1))}
               className="p-2 rounded-lg hover:bg-slate-100"
-              aria-label="下个月"
+              aria-label={localizeUiText("下个月")}
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -2281,7 +2333,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               onClick={addEvent}
               disabled={!user || !newEventTitle.trim()}
               className="p-2 rounded-lg bg-slate-900 text-white disabled:opacity-30"
-              aria-label="新增日程"
+              aria-label={localizeUiText("新增日程")}
             >
               <Plus className="w-4 h-4" />
             </button>
@@ -2291,7 +2343,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             {loadingCalendar ? (
               <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
             ) : selectedEvents.length === 0 ? (
-              <p className="text-sm text-slate-400 py-8 text-center">没有日程</p>
+              <p className="text-sm text-slate-400 py-8 text-center">{localizeUiText("没有日程")}</p>
             ) : (
               selectedEvents.map((event) => (
                 <div key={event.id} className="flex items-start gap-3 rounded-lg border border-slate-200 p-3">
@@ -2304,7 +2356,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     type="button"
                     onClick={() => removeEvent(event.id)}
                     className="p-1 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50"
-                    aria-label="删除日程"
+                    aria-label={localizeUiText("删除日程")}
                   >
                     <X className="w-4 h-4" />
                   </button>
@@ -2319,8 +2371,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const renderCalendar = () => (
     <div className="space-y-6">
-      <div className="flex flex-wrap gap-2" aria-label="课程和个人日历视图">
-        <button type="button" aria-pressed={calendarView === 'local'} onClick={() => setCalendarView('local')} className="px-4 py-2 rounded-lg border text-sm font-bold">本地大纲周报</button>
+      <div className="flex flex-wrap gap-2" aria-label={localizeUiText("课程和个人日历视图")}>
+        <button type="button" aria-pressed={calendarView === 'local'} onClick={() => setCalendarView('local')} className="px-4 py-2 rounded-lg border text-sm font-bold">{localizeUiText("本地大纲周报")}</button>
         <button type="button" aria-pressed={calendarView === 'brief'} onClick={() => setCalendarView('brief')}
           className={`px-4 py-2 rounded-lg border text-sm font-bold ${calendarView === 'brief' ? 'bg-[#315c4a] border-[#315c4a] text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
           {text('本周课程', 'Course brief')}
@@ -2338,12 +2390,12 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const renderMemo = () => (
     <div className="grid grid-cols-1 xl:grid-cols-[360px_minmax(0,1fr)] gap-6">
       <section className="bg-white border border-slate-200 rounded-lg p-5 h-fit">
-        <h2 className="text-xl font-black text-slate-900">便签</h2>
+        <h2 className="text-xl font-black text-slate-900">{localizeUiText("便签")}</h2>
         <textarea
           value={memoInput}
           onChange={(event) => setMemoInput(event.target.value)}
           disabled={!user}
-          placeholder={user ? '写一条便签' : '请先登录'}
+          placeholder={user ? localizeUiText("写一条便签") : localizeUiText("请先登录")}
           className="mt-4 w-full h-40 rounded-lg border border-slate-200 p-3 text-sm outline-none resize-none focus:border-slate-400 disabled:bg-slate-50"
         />
         <button
@@ -2352,18 +2404,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           disabled={!user || !memoInput.trim()}
           className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-slate-900 text-white text-sm font-bold disabled:opacity-30"
         >
-          <Check className="w-4 h-4" />
-          保存
-        </button>
+          <Check className="w-4 h-4" />{localizeUiText(" 保存 ")}</button>
       </section>
 
       <section className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-3 gap-4 content-start">
         {loadingMemos ? (
           <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
         ) : memos.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-lg min-h-[240px] flex items-center justify-center text-slate-400">
-            暂无便签
-          </div>
+          <div className="bg-white border border-slate-200 rounded-lg min-h-[240px] flex items-center justify-center text-slate-400">{localizeUiText(" 暂无便签 ")}</div>
         ) : (
           memos.map((memo) => (
             <article key={memo.id} className="bg-white border border-slate-200 rounded-lg p-4 min-h-40 group">
@@ -2374,7 +2422,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   type="button"
                   onClick={() => removeMemo(memo.id)}
                   className="p-1 rounded-md text-slate-300 hover:text-rose-500 hover:bg-rose-50 opacity-100 md:opacity-0 md:group-hover:opacity-100"
-                  aria-label="删除便签"
+                  aria-label={localizeUiText("删除便签")}
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -2409,18 +2457,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         <section className="bg-white border border-slate-200 rounded-lg p-6">
           <div className="flex items-center gap-3 mb-5">
             <Sparkles className="w-5 h-5 text-amber-500" />
-            <h2 className="text-xl font-black text-slate-900">我的成长</h2>
+            <h2 className="text-xl font-black text-slate-900">{localizeUiText("我的成长")}</h2>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             <div className="rounded-lg bg-slate-50 border border-slate-100 p-4">
-              <p className="text-sm font-black text-slate-800">最近状态趋势</p>
+              <p className="text-sm font-black text-slate-800">{localizeUiText("最近状态趋势")}</p>
               <p className="mt-2 text-sm leading-relaxed text-slate-600">{profile.recentTrend}</p>
             </div>
             <div className="rounded-lg bg-slate-50 border border-slate-100 p-4">
-              <p className="text-sm font-black text-slate-800">最近打开</p>
+              <p className="text-sm font-black text-slate-800">{localizeUiText("最近打开")}</p>
               <div className="mt-3 space-y-2">
                 {recentDocs.length === 0 ? (
-                  <p className="text-sm text-slate-400">还没有云端资料</p>
+                  <p className="text-sm text-slate-400">{localizeUiText("还没有云端资料")}</p>
                 ) : (
                   recentDocs.map((session) => (
                     <button
@@ -2474,20 +2522,20 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
       <section className="bg-white border border-slate-200 rounded-lg p-6">
         <div className="flex items-center justify-between gap-3 mb-5">
-          <h2 className="text-xl font-black text-slate-900">关于我</h2>
+          <h2 className="text-xl font-black text-slate-900">{localizeUiText("关于我")}</h2>
           <button
             type="button"
             onClick={rotateWelcomeLine}
             className="p-2 rounded-lg border border-slate-200 hover:bg-slate-50"
-            aria-label="换一句迎接的话"
-            title="换一句"
+            aria-label={localizeUiText("换一句迎接的话")}
+            title={localizeUiText("换一句")}
           >
             <RefreshCcw className="w-4 h-4" />
           </button>
         </div>
 
         <label className="block">
-          <span className="text-xs font-black text-slate-400 uppercase">迎接的话</span>
+          <span className="text-xs font-black text-slate-400 uppercase">{localizeUiText("迎接的话")}</span>
           <textarea
             value={profile.welcomeLine}
             onChange={(event) => updateProfile('welcomeLine', event.target.value)}
@@ -2497,11 +2545,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
         <div className="mt-5 grid grid-cols-1 lg:grid-cols-2 gap-4">
           {[
-            ['smoothAndStuck', '哪里顺 / 哪里卡'] as const,
-            ['focusDuration', '专注能撑多久'] as const,
-            ['stuckReaction', '卡住时的反应'] as const,
-            ['bestTime', '什么时候状态最好'] as const,
-            ['recentTrend', '最近怎么样'] as const,
+            ['smoothAndStuck', localizeUiText("哪里顺 / 哪里卡")] as const,
+            ['focusDuration', localizeUiText("专注能撑多久")] as const,
+            ['stuckReaction', localizeUiText("卡住时的反应")] as const,
+            ['bestTime', localizeUiText("什么时候状态最好")] as const,
+            ['recentTrend', localizeUiText("最近怎么样")] as const,
           ].map(([key, label]) => (
             <label key={key} className="block">
               <span className="text-xs font-black text-slate-400 uppercase">{label}</span>
@@ -2555,9 +2603,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               className={`rounded-lg px-4 py-2.5 text-sm font-black transition-colors ${
                 language === 'zh-CN' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:text-slate-900'
               }`}
-            >
-              简体中文
-            </button>
+            >{localizeUiText(" 简体中文 ")}</button>
             <button
               type="button"
               onClick={() => onLanguageChange('en')}
@@ -2604,15 +2650,15 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <section className="rounded-lg border border-slate-200 bg-white min-h-[560px] overflow-hidden">
         <div className="border-b border-slate-100 p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <p className="text-xs font-black uppercase text-sky-600">兴趣入口</p>
+            <p className="text-xs font-black uppercase text-sky-600">{localizeUiText("兴趣入口")}</p>
             <h3 className="mt-1 text-xl font-black text-slate-900">
-              {selectedTinyStudySession ? '这份资料可以从哪里开始？' : '先选一份 PDF'}
+              {selectedTinyStudySession ? localizeUiText("这份资料可以从哪里开始？") : localizeUiText("先选一份 PDF")}
             </h3>
             <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-500">
               {tinyEntrySession?.documentSummary
                 || (selectedTinyStudySession
-                  ? '从资料里挑出几个有意思的问题、实验或现象，选你想先看的那一点。'
-                  : '从左边选一份资料。')}
+                  ? localizeUiText("从资料里挑出几个有意思的问题、实验或现象，选你想先看的那一点。")
+                  : localizeUiText("从左边选一份资料。"))}
             </p>
           </div>
           {selectedTinyStudySession && tinyEntrySession && (
@@ -2622,9 +2668,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               disabled={tinyEntryScanLoading}
               className="shrink-0 inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-600 hover:bg-slate-50 disabled:opacity-40"
             >
-              {tinyEntryScanLoading ? <StudyBookLoader size="compact" /> : <RefreshCcw className="h-4 w-4" />}
-              重新找入口
-            </button>
+              {tinyEntryScanLoading ? <StudyBookLoader size="compact" /> : <RefreshCcw className="h-4 w-4" />}{localizeUiText(" 重新找入口 ")}</button>
           )}
         </div>
 
@@ -2632,35 +2676,31 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           {!selectedTinyStudySession ? (
             <div className="min-h-[380px] flex flex-col items-center justify-center text-center">
               <BookOpen className="h-10 w-10 text-slate-300" />
-              <p className="mt-4 font-black text-slate-800">从左边选一份资料</p>
-              <p className="mt-2 text-sm text-slate-500">不用打开 PDF，我先帮你找几个可能愿意读下去的地方。</p>
+              <p className="mt-4 font-black text-slate-800">{localizeUiText("从左边选一份资料")}</p>
+              <p className="mt-2 text-sm text-slate-500">{localizeUiText("不用打开 PDF，我先帮你找几个可能愿意读下去的地方。")}</p>
             </div>
           ) : (
             <div className="space-y-5">
               {!tinyEntrySession && !tinyEntryScanLoading && (
                 <div className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-5">
-                  <p className="text-xs font-black uppercase text-indigo-600">已经选中</p>
+                  <p className="text-xs font-black uppercase text-indigo-600">{localizeUiText("已经选中")}</p>
                   <h4 className="mt-1 truncate text-base font-black text-slate-900">
                     {selectedTinyStudySession.customTitle || selectedTinyStudySession.fileName}
                   </h4>
-                  <p className="mt-2 text-sm leading-relaxed text-slate-600">
-                    暂时没能准备好这份资料，可以再试一次。
-                  </p>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-600">{localizeUiText(" 暂时没能准备好这份资料，可以再试一次。 ")}</p>
                   <button
                     type="button"
                     onClick={handleConfirmTinyEntryScan}
                     className="mt-4 inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-black text-white hover:bg-indigo-500"
-                  >
-                    再试一次，帮我找入口
-                  </button>
+                  >{localizeUiText(" 再试一次，帮我找入口 ")}</button>
                 </div>
               )}
 
               {tinyEntryScanLoading && !tinyEntrySession ? (
                 <div role="status" className="min-h-[300px] flex flex-col items-center justify-center text-center">
                   <StudyBookLoader />
-                  <p className="mt-4 font-black text-slate-800">正在翻一遍资料，找有意思的入口...</p>
-                  <p className="mt-2 text-sm text-slate-500">只保留能在原文里找到依据的内容，不强行凑数。</p>
+                  <p className="mt-4 font-black text-slate-800">{localizeUiText("正在翻一遍资料，找有意思的入口...")}</p>
+                  <p className="mt-2 text-sm text-slate-500">{localizeUiText("只保留能在原文里找到依据的内容，不强行凑数。")}</p>
                 </div>
               ) : tinyEntrySession?.entries.length ? (
                 <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
@@ -2690,8 +2730,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                           <h4 className="mt-3 text-base font-black leading-snug text-slate-900">{entry.title}</h4>
                           <p className="mt-2 text-sm leading-6 text-slate-500 line-clamp-3">{entry.teaser}</p>
                           <div className="mt-4 flex items-center justify-between text-xs font-black text-slate-400">
-                            <span>第 {entry.pageStart}-{entry.pageEnd} 页</span>
-                            <span className="inline-flex items-center gap-1 text-slate-700">从这里开始 <ArrowRight className="h-3.5 w-3.5" /></span>
+                            <span>{localizeUiText("第 ")}{entry.pageStart}-{entry.pageEnd}{localizeUiText(" 页")}</span>
+                            <span className="inline-flex items-center gap-1 text-slate-700">{localizeUiText("从这里开始 ")}<ArrowRight className="h-3.5 w-3.5" /></span>
                           </div>
                         </div>
                       </button>
@@ -2704,9 +2744,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 <div className="rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-600">{tinyEntryError}</div>
               )}
               {tinyEntryCloudWarning && (
-                <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700">
-                  这次可以正常使用，但入口记录暂时没有同步到云端。
-                </div>
+                <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-700">{localizeUiText(" 这次可以正常使用，但入口记录暂时没有同步到云端。 ")}</div>
               )}
             </div>
           )}
@@ -2750,144 +2788,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         style={overviewStyle} onStyleChange={setOverviewStyle} language={language}
         onOpenPage={page => { void onRestoreSession(selectedTinyStudySession, { initialPage: page }); }}
       /> : reluctantMode === 'linear' ? (
-            <section className="rounded-lg border border-slate-200 bg-white min-h-[560px] flex flex-col overflow-hidden">
-              <div className="border-b border-slate-100 p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
-                <div>
-                  <p className="text-xs font-black uppercase text-emerald-600">大白话从头讲</p>
-                  <h3 className="mt-1 text-xl font-black text-slate-900">
-                    {selectedTinyStudySession ? (selectedTinyStudySession.customTitle || selectedTinyStudySession.fileName) : '先选一份 PDF'}
-                  </h3>
-                  <p className="mt-1 text-sm text-slate-500">最简单的大白话，一次只讲一小段。</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setReluctantView('home')}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50"
-                  >
-                    <ChevronLeft className="h-4 w-4" />
-                    换一种讲法
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => runTinyStudyStep(tinyStudyTurns.length === 0 ? 'start' : 'next')}
-                    disabled={!canStartTinyStudy}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {tinyStudyLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <BookOpen className="w-4 h-4" />}
-                    {tinyStudyTurns.length === 0 ? '从开头开始讲' : '继续下一小段'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-5 md:p-6 bg-slate-50/40">
-                {tinyStudyTurns.length === 0 && !tinyStudyLoading ? (
-                  <div className="h-full min-h-[360px] flex flex-col items-center justify-center text-center">
-                    <div className="w-20 h-20 rounded-2xl bg-white border border-slate-200 flex items-center justify-center shadow-sm">
-                      <Coffee className="w-9 h-9 text-slate-300" />
-                    </div>
-                    <p className="mt-5 text-lg font-black text-slate-800">先不用打开资料</p>
-                    <p className="mt-2 max-w-sm text-sm leading-7 text-slate-500">
-                      我会从开头讲一小段。你愿意再看，我们再往后走。
-                    </p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {tinyStudyTurns.map((turn, index) => (
-                      <article key={turn.id} className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                        <div className="mb-3 flex items-center justify-between gap-3">
-                          <span className="text-xs font-black text-slate-400">第 {index + 1} 小段</span>
-                          <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-black text-emerald-700">
-                            {turn.action === 'next' ? '下一小段' : '开头'}
-                          </span>
-                        </div>
-                        <p className="whitespace-pre-wrap text-base leading-8 text-slate-700">{turn.text}</p>
-
-                        {turn.followUps.length > 0 && (
-                          <div className="mt-4 space-y-3 border-t border-slate-100 pt-4">
-                            {turn.followUps.map((followUp) => (
-                              <div key={followUp.id} className="rounded-lg border border-indigo-100 bg-indigo-50/60 p-4">
-                                <p className="mb-2 text-xs font-black text-indigo-600">
-                                  {TINY_STUDY_FOLLOW_UP_LABELS[followUp.action]}
-                                </p>
-                                <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{followUp.text}</p>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {tinyStudyLoading && tinyStudyLoadingTargetId === turn.id && (
-                          <div role="status" className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50/60 p-4 flex items-center gap-3 text-indigo-700">
-                            <StudyBookLoader size="compact" />
-                            <span className="text-sm font-black">
-                              正在{tinyStudyLoadingAction ? TINY_STUDY_FOLLOW_UP_LABELS[tinyStudyLoadingAction as Exclude<TinyStudyAction, 'start' | 'next'>] : '补充'}这段...
-                            </span>
-                          </div>
-                        )}
-
-                        <div className="mt-4 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => runTinyStudyStep('simpler', turn.id)}
-                            disabled={!canStartTinyStudy}
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            这段讲白一点
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => runTinyStudyStep('deeper', turn.id)}
-                            disabled={!canStartTinyStudy}
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            这段多讲一点
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => runTinyStudyStep('example', turn.id)}
-                            disabled={!canStartTinyStudy}
-                            className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                          >
-                            换个例子
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                    {tinyStudyLoading && !tinyStudyLoadingTargetId && (
-                      <div role="status" className="rounded-lg border border-slate-200 bg-white p-5 flex items-center gap-3 text-slate-500">
-                        <StudyBookLoader size="compact" />
-                        <span className="text-sm font-bold">正在用最简单的话讲给你听...</span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {tinyStudyError && (
-                  <div className="mt-4 rounded-lg border border-rose-100 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-600">
-                    {tinyStudyError}
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-slate-100 bg-white p-4 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => runTinyStudyStep('next')}
-                  disabled={!canStartTinyStudy || tinyStudyTurns.length === 0}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-black text-slate-700 hover:bg-slate-50 disabled:opacity-40"
-                >
-                  继续下一小段
-                </button>
-                <button
-                  type="button"
-                  onClick={handleOpenTinyStudyMaterial}
-                  disabled={!selectedTinyStudySession || openingSessionId !== null}
-                  className="ml-auto rounded-lg bg-emerald-600 px-3 py-2 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-40"
-                >
-                  打开资料
-                </button>
-              </div>
-            </section>
+        <LinearStudyReader
+          title={selectedTinyStudySession.customTitle || selectedTinyStudySession.fileName}
+          language={language}
+          turns={tinyStudyTurns}
+          loading={tinyStudyLoading}
+          loadingTargetId={tinyStudyLoadingTargetId}
+          loadingAction={tinyStudyLoadingAction}
+          error={tinyStudyError}
+          canStart={canStartTinyStudy}
+          canOpen={openingSessionId === null}
+          onStep={runTinyStudyStep}
+          onOpen={handleOpenTinyStudyMaterial}
+        />
       ) : renderTinyEntryPanel()}
     </div>;
   };
@@ -2897,10 +2810,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <section className="rounded-lg border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-rose-50 p-5 md:p-6">
         <div className="max-w-3xl">
           <p className="text-xs font-black uppercase text-emerald-600">Energy Refill</p>
-          <h2 className="mt-2 text-2xl font-black text-slate-900">能量补给</h2>
-          <p className="mt-2 text-sm leading-relaxed text-slate-600">
-            学不动的时候先来这里。一个帮你拆出第一步，一个陪你缓一缓。
-          </p>
+          <h2 className="mt-2 text-2xl font-black text-slate-900">{localizeUiText("能量补给")}</h2>
+          <p className="mt-2 text-sm leading-relaxed text-slate-600">{localizeUiText(" 学不动的时候先来这里。一个帮你拆出第一步，一个陪你缓一缓。 ")}</p>
         </div>
       </section>
 
@@ -2939,11 +2850,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               </div>
             </div>
             {isCloudUser(cloudUser) ? (
-              <button type="button" onClick={onLogout} className="p-2 rounded-lg hover:bg-white" aria-label="退出登录">
+              <button type="button" onClick={onLogout} className="p-2 rounded-lg hover:bg-white" aria-label={localizeUiText("退出登录")}>
                 <LogOut className="w-4 h-4 text-slate-500" />
               </button>
             ) : (
-              <button type="button" onClick={onLogin} className="p-2 rounded-lg hover:bg-white" aria-label="登录">
+              <button type="button" onClick={onLogin} className="p-2 rounded-lg hover:bg-white" aria-label={localizeUiText("登录")}>
                 <LogIn className="w-4 h-4 text-slate-500" />
               </button>
             )}
@@ -3072,8 +2983,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                     type="button"
                     onClick={rotateWelcomeLine}
                     className="ml-auto p-2 rounded-lg bg-white/70 hover:bg-white shrink-0"
-                    aria-label="换一句"
-                    title="换一句"
+                    aria-label={localizeUiText("换一句")}
+                    title={localizeUiText("换一句")}
                   >
                     <RefreshCcw className="w-4 h-4 text-slate-600" />
                   </button>

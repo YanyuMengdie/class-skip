@@ -1,3 +1,4 @@
+import type { ReadingMedia } from './readingAids';
 import type {
   ChatMessage,
   SkimContentType,
@@ -11,6 +12,7 @@ import type {
 } from '@/types';
 
 export interface SkimExplanationTurnDraft {
+  readingMedia?: ReadingMedia;
   responseKind: 'explanation' | 'transition';
   messageMarkdown: string;
   spineItems: SkimExplanationSpineItem[];
@@ -20,6 +22,7 @@ export interface SkimExplanationTurnDraft {
 }
 
 export interface SkimExplanationVariantDraft {
+  readingMedia?: ReadingMedia;
   messageMarkdown: string;
   coveredSpineItemIds: string[];
   deferredSpineItemIds: string[];
@@ -165,6 +168,7 @@ export const createSkimExplanationState = (
     depth,
     style,
     messageMarkdown: draft.messageMarkdown,
+    ...(draft.readingMedia ? {readingMedia:draft.readingMedia} : {}),
     coveredSpineItemIds: unique(draft.coveredSpineItemIds),
     deferredSpineItemIds: unique(draft.deferredSpineItemIds),
     pageRefs: unique(draft.pageRefs).sort((a, b) => a - b),
@@ -216,6 +220,7 @@ export const createSkimExplanationStateFromLegacyMessage = (
     depth: targetDepth,
     style: targetStyle,
     messageMarkdown: draft.messageMarkdown,
+    ...(draft.readingMedia ? {readingMedia:draft.readingMedia} : {}),
     coveredSpineItemIds: unique(draft.coveredSpineItemIds),
     deferredSpineItemIds: unique(draft.deferredSpineItemIds),
     pageRefs: unique(draft.pageRefs).sort((a, b) => a - b),

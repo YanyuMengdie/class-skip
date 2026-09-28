@@ -1,4 +1,4 @@
-import { ExamAstraError } from './examAstra';
+import { ExamAstraError } from './examAstra.js';
 
 const bucket = 'ai-tutor-647fd.firebasestorage.app';
 /** Only the signed-in user's temporary request object can be read. Never accept arbitrary URLs. */

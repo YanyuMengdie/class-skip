@@ -1,5 +1,5 @@
-import { ExamAstraError, requestAstraResponse, toOpenAISchema } from './examAstra';
-import { localAstraProxy } from './examAstraProxy';
+import { ExamAstraError, requestAstraResponse, toOpenAISchema } from './examAstra.js';
+import { localAstraProxy } from './examAstraProxy.js';
 
 export const READING_ASTRA_BODY_LIMIT = 48 * 1024 * 1024;
 export const READING_ASTRA_FILE_LIMIT = 32 * 1024 * 1024;

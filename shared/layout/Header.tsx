@@ -1,7 +1,10 @@
+import { useStudySupport } from '@/features/studySupport/StudySupportContext';
+import type { BackgroundAudioStatus, BackgroundAudioError } from '@/features/background-audio/useBackgroundAudio';
+import { useAppLanguage, localizeUiText, localizeText } from '@/shared/i18n/appLanguage';
 import { isCloudUser } from '@/services/workspaceUser';
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Play, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Coffee, Star, Sun, Mic, BookOpen, Swords, X, Timer, MoreHorizontal, LayoutDashboard } from 'lucide-react';
+import { Upload, ChevronLeft, ChevronRight, FileText, Clock, Pause, Maximize, Minimize, LayoutTemplate, AlignLeft, AlignRight, Columns, Rocket, Layers, Gamepad2, Cloud, CloudOff, LogOut, User as UserIcon, Menu, Star, Sun, Mic, BookOpen, X, Timer, MoreHorizontal, LayoutDashboard } from 'lucide-react';
 import { MusicPlayer } from '@/shared/layout/MusicPlayer';
 import { ViewMode } from '@/types';
 import type { WorkspaceUser as User } from '@/services/workspaceUser'; 
@@ -25,6 +28,9 @@ interface HeaderProps {
 
   // Audio props
   isPlayingAudio: boolean;
+  audioStatus?: BackgroundAudioStatus;
+  audioError?: BackgroundAudioError | null;
+  onAudioRetry?: () => void;
   currentTrackName: string | null;
   volume: number;
   onAudioPlayPause: () => void;
@@ -93,9 +99,6 @@ interface HeaderProps {
   onOpenExamWorkspace?: () => void;
 
 
-  // 海龟汤
-  onOpenTurtleSoup?: () => void;
-
   // 番茄钟（与「我学完一段」打通）
   pomodoroSegmentSeconds?: number;
   pomodoroBreakSeconds?: number;
@@ -132,6 +135,9 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTimer,
   progressPercentage,
   isPlayingAudio,
+  audioStatus,
+  audioError,
+  onAudioRetry,
   currentTrackName,
   volume,
   onAudioPlayPause,
@@ -171,7 +177,6 @@ export const Header: React.FC<HeaderProps> = ({
   isTranscriptionSupported,
   onOpenReview,
   onOpenExamWorkspace,
-  onOpenTurtleSoup,
   pomodoroSegmentSeconds = 25 * 60,
   pomodoroBreakSeconds = 5 * 60,
   onPomodoroSegmentChange,
@@ -182,6 +187,7 @@ export const Header: React.FC<HeaderProps> = ({
   onPomodoroStart,
   onPomodoroStop
 }) => {
+  useAppLanguage();
   const [timerPopoverOpen, setTimerPopoverOpen] = useState(false);
   const timerPopoverRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -193,44 +199,23 @@ export const Header: React.FC<HeaderProps> = ({
     return () => { clearTimeout(id); document.removeEventListener('click', close); };
   }, [timerPopoverOpen]);
 
-  const [restPopoverOpen, setRestPopoverOpen] = useState(false);
-  const restPopoverRef = useRef<HTMLDivElement>(null);
-  const [restMinutes, setRestMinutes] = useState(5);
-  const [restCountdownSec, setRestCountdownSec] = useState<number | null>(null);
+  const supportPaused = useStudySupport()?.paused ?? false;
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const [restSubmenuOpen, setRestSubmenuOpen] = useState(false);
   const moreMenuRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!restPopoverOpen) return;
-    const close = (e: MouseEvent) => {
-      if (restPopoverRef.current && !restPopoverRef.current.contains(e.target as Node)) setRestPopoverOpen(false);
-    };
-    const id = window.setTimeout(() => document.addEventListener('click', close), 0);
-    return () => { clearTimeout(id); document.removeEventListener('click', close); };
-  }, [restPopoverOpen]);
   useEffect(() => {
     const close = (e: MouseEvent) => {
       if (moreMenuRef.current && !moreMenuRef.current.contains(e.target as Node)) {
         setMoreMenuOpen(false);
-        setRestSubmenuOpen(false);
       }
     };
     if (moreMenuOpen) document.addEventListener('click', close);
     return () => document.removeEventListener('click', close);
   }, [moreMenuOpen]);
   useEffect(() => {
-    if (restCountdownSec === null || restCountdownSec > 0) return;
-    const t = window.setTimeout(() => {
-      setRestCountdownSec(null);
-      alert('该回去学啦～');
-    }, 100);
-    return () => clearTimeout(t);
-  }, [restCountdownSec]);
-  useEffect(() => {
-    if (restCountdownSec === null || restCountdownSec <= 0) return;
-    const interval = setInterval(() => setRestCountdownSec((s) => s! - 1), 1000);
-    return () => clearInterval(interval);
-  }, [restCountdownSec]);
+    if (!supportPaused) return;
+    setMoreMenuOpen(false);
+    setTimerPopoverOpen(false);
+  }, [supportPaused]);
 
   const isPomodoroActive = pomodoroPhase === 'study' || pomodoroPhase === 'break';
   const displayTime = isPomodoroActive ? (pomodoroRemainingSeconds ?? 0) : studyTime;
@@ -244,8 +229,8 @@ export const Header: React.FC<HeaderProps> = ({
           <button 
              onClick={onToggleSidebar}
              className="p-2 hover:bg-stone-100 rounded-lg text-stone-500 hover:text-stone-800 transition-colors"
-             title="资料与页面缩略图"
-             aria-label="资料与页面缩略图"
+             title={localizeUiText("资料与页面缩略图")}
+             aria-label={localizeUiText("资料与页面缩略图")}
           >
              <Menu className="w-5 h-5" />
           </button>
@@ -255,8 +240,8 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               onClick={onOpenDashboard}
               className="p-2 hover:bg-stone-100 rounded-lg text-stone-500 hover:text-stone-800 transition-colors"
-              title="返回资料库"
-              aria-label="返回资料库"
+              title={localizeUiText("返回资料库")}
+              aria-label={localizeUiText("返回资料库")}
             >
               <LayoutDashboard className="w-5 h-5" />
             </button>
@@ -266,39 +251,37 @@ export const Header: React.FC<HeaderProps> = ({
             <FileText className="w-5 h-5 text-white" />
           </div>
           <div className="reading-toolbar-file min-w-0">
-            <h1 className="text-lg text-slate-800 tracking-tight">
-              逃课神器
-            </h1>
+            <h1 className="text-lg text-slate-800 tracking-tight">{localizeUiText(" 逃课神器 ")}</h1>
             {fileName && <p className="text-[11px] text-slate-400 truncate" title={fileName}>{fileName}</p>}
           </div>
         </div>
 
         {/* Center: Navigation */}
         <div className="reading-toolbar-navigation flex items-center">
-             <div className="reading-page-navigation flex items-center" aria-label="原文翻页">
+             <div className="reading-page-navigation flex items-center" aria-label={localizeUiText("原文翻页")}>
                 <button
                     onClick={onPrev}
                     disabled={currentPage <= 1}
                     className="p-1.5 rounded-full hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:hover:bg-transparent transition-all active:scale-95"
-                    aria-label="上一页"
+                    aria-label={localizeUiText("上一页")}
                 >
                     <ChevronLeft className="w-5 h-5" />
                 </button>
-                <span className="reading-page-counter text-sm text-slate-600 font-mono text-center" title="当前原文页码">
+                <span className="reading-page-counter text-sm text-slate-600 font-mono text-center" title={localizeUiText("当前原文页码")}>
                     {totalPages > 0 ? `${currentPage} / ${totalPages}` : "0 / 0"}
                 </span>
                 <button
                     onClick={onNext}
                     disabled={currentPage >= totalPages}
                     className="p-1.5 rounded-full hover:bg-violet-50 hover:text-violet-600 disabled:opacity-30 disabled:hover:bg-transparent transition-all active:scale-95"
-                    aria-label="下一页"
+                    aria-label={localizeUiText("下一页")}
                 >
                     <ChevronRight className="w-5 h-5" />
                 </button>
              </div>
 
              {fileName && (
-               <span className="reading-toolbar-current-file" title={fileName} aria-label={`当前资料：${fileName}`}>
+               <span className="reading-toolbar-current-file" title={fileName} aria-label={localizeText(`当前资料：${fileName}`, `Current material: ${fileName}`)} data-preserve-language="true">
                  {fileName}
                </span>
              )}
@@ -314,20 +297,20 @@ export const Header: React.FC<HeaderProps> = ({
                     }`}
                  >
                     {viewMode === 'skim' ? <Layers className="w-3.5 h-3.5" /> : <Rocket className="w-3.5 h-3.5" />}
-                    <span>{viewMode === 'skim' ? '页面工具' : '进入领读'}</span>
+                    <span>{viewMode === 'skim' ? localizeUiText("页面工具") : localizeUiText("进入领读")}</span>
                  </button>
              )}
 
              {/* Immersive Layout Controls */}
              {isImmersive && onLayoutPreset && viewMode === 'deep' && (
                  <div className="flex items-center bg-stone-100 rounded-lg p-1 space-x-1">
-                     <button onClick={() => onLayoutPreset(70)} className="p-1.5 hover:bg-white rounded text-stone-500 hover:text-stone-800 transition-all" title="左侧优先">
+                     <button onClick={() => onLayoutPreset(70)} className="p-1.5 hover:bg-white rounded text-stone-500 hover:text-stone-800 transition-all" title={localizeUiText("左侧优先")}>
                          <AlignLeft className="w-4 h-4" />
                      </button>
-                     <button onClick={() => onLayoutPreset(50)} className="p-1.5 hover:bg-white rounded text-stone-500 hover:text-stone-800 transition-all" title="均分">
+                     <button onClick={() => onLayoutPreset(50)} className="p-1.5 hover:bg-white rounded text-stone-500 hover:text-stone-800 transition-all" title={localizeUiText("均分")}>
                          <Columns className="w-4 h-4" />
                      </button>
-                     <button onClick={() => onLayoutPreset(30)} className="p-1.5 hover:bg-white rounded text-stone-500 hover:text-stone-800 transition-all" title="右侧优先">
+                     <button onClick={() => onLayoutPreset(30)} className="p-1.5 hover:bg-white rounded text-stone-500 hover:text-stone-800 transition-all" title={localizeUiText("右侧优先")}>
                          <AlignRight className="w-4 h-4" />
                      </button>
                  </div>
@@ -346,40 +329,40 @@ export const Header: React.FC<HeaderProps> = ({
                   ? 'is-danger'
                   : 'is-primary'
               }`}
-              title={isStudySessionActive ? '结束本次学习并生成小结' : '开始记录本次学习'}
-              aria-label={isStudySessionActive ? '结束本次学习' : '开始本次学习'}
+              title={isStudySessionActive ? localizeUiText("结束本次学习并生成小结") : localizeUiText("开始记录本次学习")}
+              aria-label={isStudySessionActive ? localizeUiText("结束本次学习") : localizeUiText("开始本次学习")}
             >
               <Timer className="w-3.5 h-3.5" />
-              <span>{isStudySessionActive ? `结束 ${formatTime(Math.round(studySessionElapsedMs / 1000))}` : '开始学习'}</span>
+              <span>{isStudySessionActive ? localizeText(`结束 ${formatTime(Math.round(studySessionElapsedMs / 1000))}`, `End ${formatTime(Math.round(studySessionElapsedMs / 1000))}`) : localizeUiText("开始学习")}</span>
             </button>
           )}
 
           {/* 学习工具 */}
           {onOpenReview && (
-            <button onClick={onOpenReview} className="editorial-toolbar-control reading-toolbar-tool is-emphasized flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold" title="选择文档进行测验、闪卡、考前速览等" aria-label="学习工具">
+            <button onClick={onOpenReview} className="editorial-toolbar-control reading-toolbar-tool is-emphasized flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold" title={localizeUiText("选择文档进行测验、闪卡、考前速览等")} aria-label={localizeUiText("学习工具")}>
               <BookOpen className="w-3.5 h-3.5" />
-              <span>学习工具</span>
+              <span>{localizeUiText("学习工具")}</span>
             </button>
           )}
           {onOpenExamWorkspace && (
             <button
               onClick={onOpenExamWorkspace}
               className="editorial-toolbar-control reading-toolbar-tool is-secondary flex items-center space-x-1.5 px-3 py-1.5 text-xs font-bold"
-              title="直接复习当前讲义，也可以在工作台切换到考试复习"
-              aria-label="复习本讲"
+              title={localizeUiText("直接复习当前讲义，也可以在工作台切换到考试复习")}
+              aria-label={localizeUiText("复习本讲")}
             >
               <LayoutDashboard className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">复习本讲</span>
+              <span className="hidden sm:inline">{localizeUiText("复习本讲")}</span>
             </button>
           )}
-          {/* 更多：上课、学累了/休息、重点标记、沉浸、课堂录音、计时、背景音入口等 */}
+          {/* 更多：上课、重点标记、沉浸、课堂录音、计时、背景音入口等 */}
           <div className="relative" ref={moreMenuRef}>
             <button
               type="button"
-              onClick={() => { setMoreMenuOpen((o) => !o); setRestSubmenuOpen(false); }}
+              onClick={() => setMoreMenuOpen((o) => !o)}
               className="flex items-center p-2 rounded-xl bg-stone-100 text-stone-600 hover:bg-stone-200 transition-colors"
-              title="更多功能"
-              aria-label="更多"
+              title={localizeUiText("更多功能")}
+              aria-label={localizeUiText("更多")}
               aria-expanded={moreMenuOpen}
             >
               <MoreHorizontal className="w-5 h-5" />
@@ -388,8 +371,7 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="reading-toolbar-more-menu absolute right-0 top-full mt-2 w-56 bg-white rounded-xl shadow-xl border border-stone-200 py-1 z-[300]">
                 {onStartClass && !isClassroomMode && (
                   <button type="button" onClick={() => { onStartClass(); setMoreMenuOpen(false); }} disabled={isTranscriptionSupported === false} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50 disabled:opacity-50">
-                    <Mic className="w-4 h-4 text-slate-500" /> 上课
-                  </button>
+                    <Mic className="w-4 h-4 text-slate-500" />{localizeUiText(" 上课 ")}</button>
                 )}
                 {isClassroomMode && (
                   <button
@@ -398,54 +380,28 @@ export const Header: React.FC<HeaderProps> = ({
                     className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-rose-600 hover:bg-rose-50"
                   >
                     <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
-                    {isClassroomPanelVisible ? '正在查看课堂字幕' : '返回课堂字幕'}
+                    {isClassroomPanelVisible ? localizeUiText("正在查看课堂字幕") : localizeUiText("返回课堂字幕")}
                   </button>
                 )}
-                <div className="relative">
-                  <button type="button" onClick={() => setRestSubmenuOpen((o) => !o)} className="w-full flex items-center justify-between gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
-                    <span className="flex items-center gap-2"><Coffee className="w-4 h-4 text-amber-500" /> 学累了 / 休息</span>
-                    <ChevronRight className={`w-4 h-4 text-slate-400 transition-transform ${restSubmenuOpen ? 'rotate-90' : ''}`} />
-                  </button>
-                  {restSubmenuOpen && (
-                    <div className="bg-amber-50/80 border-t border-amber-100 py-1">
-                      <button type="button" onClick={() => { setTimerPopoverOpen(true); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
-                        <Clock className="w-3.5 h-3.5" /> 番茄钟
-                      </button>
-                      <button type="button" onClick={() => { onMusicPanelOpenChange?.(true); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
-                        <Play className="w-3.5 h-3.5" /> 白噪音
-                      </button>
-                      {onOpenTurtleSoup && <button type="button" onClick={() => { onOpenTurtleSoup(); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
-                        <Swords className="w-3.5 h-3.5" /> 海龟汤
-                      </button>}
-
-                      <button type="button" onClick={() => { setRestPopoverOpen(true); setMoreMenuOpen(false); setRestSubmenuOpen(false); }} className="w-full flex items-center gap-2 px-4 pl-8 py-2 text-left text-xs font-medium text-slate-700 hover:bg-amber-100/80">
-                        <Timer className="w-3.5 h-3.5" /> 休息一下
-                      </button>
-                    </div>
-                  )}
-                </div>
                 {onOpenMarkPanel && totalPages > 0 && (
                   <button type="button" onClick={() => { onOpenMarkPanel(); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
-                    <Star className={`w-4 h-4 ${hasMarkOnCurrentPage ? 'fill-amber-500 text-amber-500' : 'text-slate-500'}`} /> 重点标记
-                  </button>
+                    <Star className={`w-4 h-4 ${hasMarkOnCurrentPage ? 'fill-amber-500 text-amber-500' : 'text-slate-500'}`} />{localizeUiText(" 重点标记 ")}</button>
                 )}
                 <button type="button" onClick={() => { onToggleImmersive(); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
-                  {isImmersive ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />} {isImmersive ? '退出沉浸' : '沉浸模式'}
+                  {isImmersive ? <Minimize className="w-4 h-4" /> : <Maximize className="w-4 h-4" />} {isImmersive ? localizeUiText("退出沉浸") : localizeUiText("沉浸模式")}
                 </button>
                 {onOpenLectureTranscript && (
                   <button type="button" onClick={() => { onOpenLectureTranscript(); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
-                    <Mic className="w-4 h-4 text-slate-500" /> 课堂录音{!hasLectureHistory && <span className="text-[10px] text-slate-400">(暂无)</span>}
+                    <Mic className="w-4 h-4 text-slate-500" />{localizeUiText(" 课堂录音")}{!hasLectureHistory && <span className="text-[10px] text-slate-400">{localizeUiText("(暂无)")}</span>}
                   </button>
                 )}
                 <div className="border-t border-stone-100 mt-1 pt-1">
                   <button type="button" onClick={() => { setTimerPopoverOpen(true); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
                     <Clock className="w-4 h-4 text-slate-500" />
                     <span className="font-mono">{formatTime(displayTime)}</span>
-                    {isPomodoroActive && <span className="text-[10px] text-amber-600">番茄</span>}
+                    {isPomodoroActive && <span className="text-[10px] text-amber-600">{localizeUiText("番茄")}</span>}
                   </button>
-                  <button type="button" onClick={() => { onMusicPanelOpenChange?.(!musicPanelOpen); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">
-                    背景音
-                  </button>
+                  <button type="button" onClick={() => { onMusicPanelOpenChange?.(!musicPanelOpen); setMoreMenuOpen(false); }} className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-stone-50">{localizeUiText(" 背景音 ")}</button>
                 </div>
               </div>
             )}
@@ -454,9 +410,9 @@ export const Header: React.FC<HeaderProps> = ({
           {/* 上传 */}
           <div className="relative">
             <input type="file" id="file-upload" className="hidden" accept=".pdf,image/*" multiple={false} onChange={onUpload} />
-            <label htmlFor="file-upload" className={`editorial-toolbar-control reading-toolbar-tool is-secondary flex items-center space-x-2 px-3 py-1.5 cursor-pointer transition-all text-xs font-bold ${isProcessing ? 'opacity-70 cursor-not-allowed' : ''}`} aria-label={isProcessing ? '处理中' : '上传'}>
+            <label htmlFor="file-upload" className={`editorial-toolbar-control reading-toolbar-tool is-secondary flex items-center space-x-2 px-3 py-1.5 cursor-pointer transition-all text-xs font-bold ${isProcessing ? 'opacity-70 cursor-not-allowed' : ''}`} aria-label={isProcessing ? localizeUiText("处理中") : localizeUiText("上传")}>
               {isProcessing ? <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-              <span className="hidden sm:inline">{isProcessing ? '处理中...' : '上传'}</span>
+              <span className="hidden sm:inline">{isProcessing ? localizeUiText("处理中...") : localizeUiText("上传")}</span>
             </label>
           </div>
 
@@ -464,10 +420,12 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="reading-toolbar-music">
           <MusicPlayer
             isPlaying={isPlayingAudio}
+            status={audioStatus}
+            error={audioError}
+            onRetry={onAudioRetry}
             currentTrack={currentTrackName}
             volume={volume}
             onPlayPause={onAudioPlayPause}
-            onVideoSelect={onVideoSelect}
             onVolumeChange={onAudioVolumeChange}
             onTrackChange={onAudioTrackChange}
             open={musicPanelOpen}
@@ -478,18 +436,17 @@ export const Header: React.FC<HeaderProps> = ({
           {/* 账户 */}
           {isCloudUser(user) ? (
             <div className="relative group">
-              <button className="flex items-center space-x-1 p-1.5 pr-3 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 hover:bg-emerald-100 transition-colors" title="已登录" aria-label="账户">
+              <button className="flex items-center space-x-1 p-1.5 pr-3 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 hover:bg-emerald-100 transition-colors" title={localizeUiText("已登录")} aria-label={localizeUiText("账户")}>
                 {user.photoURL ? <img src={user.photoURL} className="w-6 h-6 rounded-full border border-white" alt="" /> : <UserIcon className="w-5 h-5" />}
-                <span className="text-[10px] font-bold hidden xl:inline">{localWorkspace ? '本机保存' : isSyncing ? '同步中' : '已同步'}</span>
+                <span className="text-[10px] font-bold hidden xl:inline">{localWorkspace ? localizeUiText("本机保存") : isSyncing ? localizeUiText("同步中") : localizeUiText("已同步")}</span>
               </button>
               <div className="absolute top-full right-0 mt-2 w-32 bg-white rounded-xl shadow-xl border border-stone-100 p-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all z-50">
                 <button onClick={onLogout} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-500 hover:bg-rose-50 rounded-lg">
-                  <LogOut className="w-3.5 h-3.5" /> 退出登录
-                </button>
+                  <LogOut className="w-3.5 h-3.5" />{localizeUiText(" 退出登录 ")}</button>
               </div>
             </div>
           ) : (
-            <button onClick={onLogin} className="p-2 text-stone-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all" title="登录开启云同步" aria-label="登录">
+            <button onClick={onLogin} className="p-2 text-stone-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all" title={localizeUiText("登录开启云同步")} aria-label={localizeUiText("登录")}>
               <CloudOff className="w-5 h-5" />
             </button>
           )}
@@ -502,64 +459,33 @@ export const Header: React.FC<HeaderProps> = ({
       {timerPopoverOpen && createPortal(
         <div ref={timerPopoverRef} className="fixed w-72 bg-white rounded-xl shadow-xl border border-stone-200 p-3 z-[200]" style={{ top: '4.5rem', right: '1rem' }}>
             <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-stone-600">计时</span>
+              <span className="text-xs font-bold text-stone-600">{localizeUiText("计时")}</span>
               <button type="button" onClick={() => setTimerPopoverOpen(false)} className="p-1 hover:bg-stone-100 rounded"><X className="w-4 h-4" /></button>
             </div>
             {!isPomodoroActive ? (
               <>
-                <p className="text-xs text-stone-500 mb-2">普通计时：累计学习时长。</p>
+                <p className="text-xs text-stone-500 mb-2">{localizeUiText("普通计时：累计学习时长。")}</p>
                 <div className="flex items-center justify-between">
                   <span className="font-mono text-sm">{formatTime(studyTime)}</span>
-                  <button type="button" onClick={() => { onToggleTimer(); setTimerPopoverOpen(false); }} className="px-2 py-1 bg-stone-100 rounded text-xs font-bold">{isTimerRunning ? '暂停' : '开始'}</button>
+                  <button type="button" onClick={() => { onToggleTimer(); setTimerPopoverOpen(false); }} className="px-2 py-1 bg-stone-100 rounded text-xs font-bold">{isTimerRunning ? localizeUiText("暂停") : localizeUiText("开始")}</button>
                 </div>
                 <div className="border-t border-stone-100 mt-3 pt-3">
-                  <p className="text-xs font-bold text-amber-700 mb-2">番茄钟（学完一段可玩海龟汤）</p>
+                  <p className="text-xs font-bold text-amber-700 mb-2">{localizeUiText("番茄钟")}</p>
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    <label>一段（分钟）<input type="number" min={1} max={90} value={Math.round(pomodoroSegmentSeconds / 60)} onChange={(e) => onPomodoroSegmentChange?.(Math.max(1, Number(e.target.value) || 25) * 60)} className="w-full mt-0.5 px-2 py-1 border border-stone-200 rounded" /></label>
-                    <label>休息（分钟）<input type="number" min={0} max={30} value={Math.round(pomodoroBreakSeconds / 60)} onChange={(e) => onPomodoroBreakChange?.(Math.max(0, Number(e.target.value) || 5) * 60)} className="w-full mt-0.5 px-2 py-1 border border-stone-200 rounded" /></label>
+                    <label>{localizeUiText("一段（分钟）")}<input type="number" min={1} max={90} value={Math.round(pomodoroSegmentSeconds / 60)} onChange={(e) => onPomodoroSegmentChange?.(Math.max(1, Number(e.target.value) || 25) * 60)} className="w-full mt-0.5 px-2 py-1 border border-stone-200 rounded" /></label>
+                    <label>{localizeUiText("休息（分钟）")}<input type="number" min={0} max={30} value={Math.round(pomodoroBreakSeconds / 60)} onChange={(e) => onPomodoroBreakChange?.(Math.max(0, Number(e.target.value) || 5) * 60)} className="w-full mt-0.5 px-2 py-1 border border-stone-200 rounded" /></label>
                   </div>
-                  <button type="button" onClick={() => { onPomodoroStart?.(); setTimerPopoverOpen(false); }} className="mt-2 w-full py-2 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600">开始番茄钟</button>
+                  <button type="button" onClick={() => { onPomodoroStart?.(); setTimerPopoverOpen(false); }} className="mt-2 w-full py-2 bg-amber-500 text-white rounded-lg text-xs font-bold hover:bg-amber-600">{localizeUiText("开始番茄钟")}</button>
                 </div>
               </>
             ) : (
               <>
-                <p className="text-xs text-stone-500 mb-1">{pomodoroPhase === 'study' ? '本段剩余' : '休息剩余'}</p>
+                <p className="text-xs text-stone-500 mb-1">{pomodoroPhase === 'study' ? localizeUiText("本段剩余") : localizeUiText("休息剩余")}</p>
                 <p className="font-mono text-lg font-bold text-slate-700">{formatTime(pomodoroRemainingSeconds)}</p>
-                <p className="text-xs text-amber-600 mt-1">已完成 {completedSegmentsCount} 段 · 海龟汤可用 {completedSegmentsCount} 次</p>
-                <button type="button" onClick={() => { onPomodoroStop?.(); setTimerPopoverOpen(false); }} className="mt-2 w-full py-2 bg-stone-200 text-stone-700 rounded-lg text-xs font-bold hover:bg-stone-300">结束番茄钟</button>
+                <p className="text-xs text-amber-600 mt-1">{localizeUiText("已完成 ")}{completedSegmentsCount}{localizeUiText(" 段")}</p>
+                <button type="button" onClick={() => { onPomodoroStop?.(); setTimerPopoverOpen(false); }} className="mt-2 w-full py-2 bg-stone-200 text-stone-700 rounded-lg text-xs font-bold hover:bg-stone-300">{localizeUiText("结束番茄钟")}</button>
               </>
             )}
-        </div>,
-        document.body
-      )}
-
-      {/* 休息一下弹层（Portal 到 body） */}
-      {restPopoverOpen && createPortal(
-        <div ref={restPopoverRef} className="fixed w-72 bg-white rounded-xl shadow-xl border border-stone-200 p-3 z-[200]" style={{ top: '4.5rem', right: '1rem' }}>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-stone-600">休息</span>
-              <button type="button" onClick={() => setRestPopoverOpen(false)} className="p-1 hover:bg-stone-100 rounded"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100 space-y-3">
-              <p className="font-semibold text-slate-800 flex items-center gap-2 text-sm"><Timer className="w-4 h-4 text-emerald-600" />休息一下</p>
-              {restCountdownSec === null ? (
-                <>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-slate-600">休息</span>
-                    <select value={restMinutes} onChange={(e) => setRestMinutes(Number(e.target.value))} className="rounded-lg border border-stone-200 px-2 py-1 text-sm">
-                      {[3, 5, 10, 15].map((m) => (<option key={m} value={m}>{m} 分钟</option>))}
-                    </select>
-                  </div>
-                  <button type="button" onClick={() => setRestCountdownSec(restMinutes * 60)} className="w-full py-2 rounded-lg bg-emerald-500 text-white text-sm font-medium hover:bg-emerald-600 transition-colors">开始休息</button>
-                </>
-              ) : (
-                <div className="text-center py-2">
-                  <p className="text-2xl font-mono font-bold text-emerald-700">{Math.floor(restCountdownSec / 60)}:{(restCountdownSec % 60).toString().padStart(2, '0')}</p>
-                  <p className="text-xs text-slate-500 mt-1">到点提醒你回去学</p>
-                  <button type="button" onClick={() => setRestCountdownSec(null)} className="mt-2 text-xs text-slate-500 hover:text-slate-700">取消</button>
-                </div>
-              )}
-            </div>
         </div>,
         document.body
       )}

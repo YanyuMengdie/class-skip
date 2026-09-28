@@ -71,6 +71,30 @@ afterEach(() => {
 });
 
 describe('overview factual coverage and source validation', () => {
+  it('generates saved English names and definitions in the same opted-in teaching request', async () => {
+    const terms = [{ term: '身体信号', english: 'Bodily signals', explanation: '身体的反应可以成为选择时的线索。', aliases: [] }];
+    generateContentMock.mockResolvedValue(modelResponse({ ...explanation, terms }));
+    const result = await generateReluctantOverviewExplanation(outline, 'plain', { clickableTerms: true });
+    expect(result.terms).toEqual(terms);
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    const params = generateContentMock.mock.calls[0][0];
+    expect(params.config.responseSchema.required).toContain('terms');
+    expect(params.contents[0].parts[0].text).toContain('ALL technical concepts');
+    await generateReluctantOverviewExplanation(outline, 'plain');
+    expect(generateContentMock.mock.calls[1][0].config.responseSchema.properties.terms).toBeUndefined();
+  });
+
+  it('adds lightweight visuals only when opted in, in the existing explanation request', async () => {
+    generateContentMock.mockResolvedValue(modelResponse(explanation));
+    await generateReluctantOverviewExplanation(outline, 'plain', { lightweightVisuals: true });
+    expect(generateContentMock).toHaveBeenCalledTimes(1);
+    const params = generateContentMock.mock.calls[0][0];
+    expect(params.config.responseSchema.properties.sections.items.properties.visual).toBeDefined();
+    expect(params.contents[0].parts[0].text).toContain('at most 3 sections[].visual');
+    generateContentMock.mockClear();
+    await generateReluctantOverviewExplanation(outline, 'plain');
+    expect(generateContentMock.mock.calls[0][0].config.responseSchema.properties.sections.items.properties.visual).toBeUndefined();
+  });
   it('accepts source points including late-page qualifications and complete variants', () => {
     expect(parseOverviewOutline(JSON.stringify(outline), 34)).toEqual(outline);
     expect(parseOverviewExplanation(explanation, outline)).toEqual(explanation);

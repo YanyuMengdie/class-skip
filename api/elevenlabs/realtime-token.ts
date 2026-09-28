@@ -1,8 +1,8 @@
-import { ProductionAuthError } from '../../server/productionAuth';
+import { ProductionAuthError } from '../../server/productionAuth.js';
 import {
   createElevenLabsRealtimeToken,
   ElevenLabsTranscriptionError,
-} from '../../server/elevenlabsTranscription';
+} from '../../server/elevenlabsTranscription.js';
 
 export default async function handler(request: any, response: any) {
   if (request.method !== 'POST') {

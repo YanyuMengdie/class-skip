@@ -1,3 +1,4 @@
+import { useSupportSurface } from '@/features/studySupport/StudySupportContext';
 import { authenticatedApiFetch } from '@/services/authenticatedApi';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
@@ -32,7 +33,6 @@ const prose = (value: string) => <ReactMarkdown skipHtml allowedElements={['p', 
 const uniqueSources = (sources: RoundCitation[]) => sources.filter((source, index) => sources.findIndex((item) => item.materialId === source.materialId && item.page === source.page) === index);
 type StudyRoundProvider = 'gemini' | 'astra';
 export type AstraConfiguration = 'checking' | 'ready' | 'missing' | 'unavailable';
-const modelLabel = () => 'Gemini 3.8 Flash';
 /** Select the current transport without rewriting historical model metadata. */
 export const studyRoundProvider = (_blueprint: RoundBlueprint): StudyRoundProvider => 'gemini';
 
@@ -78,10 +78,8 @@ export function StudyRoundModelChoice({ configuration, language, busy = false, o
   configuration: AstraConfiguration; language: RoundLanguage;
   busy?: boolean; onRefresh: () => void;
 }) {
-  return <div className="study-round-model-choice">
-    <span className="study-round-model-label">Gemini 3.8 Flash</span>
-    {configuration !== 'ready' && <AstraConfigurationNotice configuration={configuration} language={language} onRefresh={onRefresh} busy={busy} />}
-  </div>;
+  if (configuration === 'ready') return null;
+  return <AstraConfigurationNotice configuration={configuration} language={language} onRefresh={onRefresh} busy={busy} />;
 }
 
 /** A paused draft can still be resumed, so its surrounding labels must not prime the answer. */
@@ -472,6 +470,31 @@ export function StudyRoundPanel({ context, storageKey, language, onOpenSource, o
     predict: t('预测变化', 'Predict a change'), data: t('解读结果', 'Interpret results'),
   })[exercise.taskType];
 
+  const companionPausedRound = useRef<string | null>(null);
+  useSupportSurface({
+    scope: `round:${storageKey}:${round?.id ?? ''}`, priority: 30, busy: !!busy || requestUnavailable,
+    boundary: `${round?.currentQuestionId ?? ''}:${round?.phase ?? ''}`,
+    actions: round?.phase === 'answering' ? [
+      { id: 'hint', label: t('给一点提示', 'A small hint'), run: () => { void getSupport('hint'); } },
+      { id: 'explain', label: t('先讲给我', 'Explain it first'), run: () => { void getSupport('explanation'); } },
+    ] : [],
+    pause: () => {
+      // Pause only an active answer; in-flight feedback may finish and remain saved.
+      const current = roundRef.current;
+      if (current?.phase === 'answering') {
+        cancelPending();
+        companionPausedRound.current = current.id;
+        commit(pauseRound(current));
+      }
+      if (!canWriteStore.current) throw new Error('Round storage unavailable');
+      saveRoundStore(storageKey, storeRef.current);
+    },
+    resume: () => {
+      if (companionPausedRound.current && roundRef.current?.id === companionPausedRound.current && roundRef.current.phase === 'paused') resume();
+      companionPausedRound.current = null;
+    },
+  });
+
   return <section ref={panelRef} className="study-round" aria-label={t('本轮学习', 'Study round')}>
     {storageError && <div role="alert" className="study-round-storage-error"><AlertCircle size={18} /><div><strong>{t('记录尚未安全保存', 'Records are not safely saved')}</strong><p>{storageError}</p><button type="button" onClick={exportRecords}><Download size={15} />{t('导出记录备份', 'Export backup')}</button></div></div>}
     {error && <div role="alert" className="study-round-notice"><AlertCircle size={18} /><p>{error}</p></div>}
@@ -491,7 +514,7 @@ export function StudyRoundPanel({ context, storageKey, language, onOpenSource, o
       {history.previousQuestions.length > 0 && <p className="study-round-muted">{t('会参考以前的问题，尽量换个问法或情境检查。', 'Earlier questions will inform new wording or situations for this round.')}</p>}
       {store.rounds.some((item) => item.blueprint.scope.id === context.scope.id && item.attempts.length) && <details className="study-round-history-wrap"><summary>{t('之前的完整作答', 'Previous full answers')}</summary>{pastAnswers(store.rounds.filter((item) => item.blueprint.scope.id === context.scope.id))}</details>}
     </div> : <>
-      <header className="study-round-toolbar"><div><span className="study-round-eyebrow">{round.phase === 'ended' ? t('本轮已结束', 'ROUND FINISHED') : round.phase === 'paused' ? t('已暂停', 'PAUSED') : t('本轮学习', 'CURRENT ROUND')}</span><span className="study-round-model-label">{modelLabel()}</span><span className="study-round-attempt-counter">{t(`已提交 ${round.attempts.length} / ${round.blueprint.maxAttempts} 次`, `${round.attempts.length} / ${round.blueprint.maxAttempts} attempts submitted`)}</span></div><div className="study-round-toolbar-actions">{round.phase !== 'ended' && <><button type="button" onClick={() => { if (round.phase === 'paused') { resume(); return; } cancelPending(); if (roundRef.current) commit(pauseRound(roundRef.current)); }}>{round.phase === 'paused' ? <Play size={15} /> : <Pause size={15} />}{round.phase === 'paused' ? t('继续', 'Resume') : t('暂停', 'Pause')}</button><button type="button" onClick={() => { cancelPending(); if (roundRef.current) commit(endRound(roundRef.current)); }}>{t('结束本轮', 'Finish round')}</button></>}<button type="button" onClick={exportRecords} aria-label={t('导出完整记录', 'Export full records')} title={t('导出完整记录', 'Export full records')}><Download size={16} /></button></div></header>
+      <header className="study-round-toolbar"><div><span className="study-round-eyebrow">{round.phase === 'ended' ? t('本轮已结束', 'ROUND FINISHED') : round.phase === 'paused' ? t('已暂停', 'PAUSED') : t('本轮学习', 'CURRENT ROUND')}</span><span className="study-round-attempt-counter">{t(`已提交 ${round.attempts.length} / ${round.blueprint.maxAttempts} 次`, `${round.attempts.length} / ${round.blueprint.maxAttempts} attempts submitted`)}</span></div><div className="study-round-toolbar-actions">{round.phase !== 'ended' && <><button type="button" onClick={() => { if (round.phase === 'paused') { resume(); return; } cancelPending(); if (roundRef.current) commit(pauseRound(roundRef.current)); }}>{round.phase === 'paused' ? <Play size={15} /> : <Pause size={15} />}{round.phase === 'paused' ? t('继续', 'Resume') : t('暂停', 'Pause')}</button><button type="button" onClick={() => { cancelPending(); if (roundRef.current) commit(endRound(roundRef.current)); }}>{t('结束本轮', 'Finish round')}</button></>}<button type="button" onClick={exportRecords} aria-label={t('导出完整记录', 'Export full records')} title={t('导出完整记录', 'Export full records')}><Download size={16} /></button></div></header>
       {astraConfiguration !== 'ready' && <AstraConfigurationNotice configuration={astraConfiguration} language={language} onRefresh={() => void refreshAstraConfiguration()} busy={!!busy} />}
       {previousAt > 0 && <p className="study-round-history-note">{t('上次同范围作答', 'Previous attempt in this scope')} {formatDate(previousAt)} · {t('间隔', 'Gap:')} {formatGap(previousAt, round.startedAt)}</p>}
       {(round.phase === 'answering' || round.phase === 'paused') && question && !hasReviewedPresentation(question) ? <div className="study-round-legacy-question"><AlertCircle size={25} /><h2>{t('这轮旧题需要重新整理', 'This older round needs fresh questions')}</h2><p>{t('旧题可能在作答前展示过内容提示，暂不再用来检查独立回忆。原来的作答、反馈和草稿都保留。', 'Earlier questions may have exposed answer content before submission. They are retained with your answers and draft, but are not used to check unaided recall.')}</p>{round.draft && <details><summary>{t('查看保留的草稿', 'View your saved draft')}</summary><p className="study-round-original-answer">{round.draft}</p></details>}<button type="button" className="study-round-primary" onClick={() => newRound(false)}>{t('保留记录，准备新一轮', 'Keep records and prepare a new round')}<ArrowRight size={16} /></button></div> : round.phase === 'paused' ? <div className="study-round-pause"><Pause size={30} /><h2>{t('先歇一会儿', 'Take a breather')}</h2><p>{storageError ? t('草稿和帮助记录暂留在当前页面，请先导出备份。', 'Your draft and help history are on this page. Export a backup.') : t('草稿、作答和用过的帮助都已保留在这台设备。', 'Your draft, answers, and help history are saved on this device.')}</p><button type="button" className="study-round-primary" onClick={resume}><Play size={16} />{t('从这里继续', 'Continue from here')}</button></div> : round.phase === 'ended' && report ? <div className="study-round-report">

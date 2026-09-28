@@ -1,10 +1,10 @@
 import { gunzipSync } from 'node:zlib';
-import { consumeStoredPayload } from './storedPayload';
+import { consumeStoredPayload } from './storedPayload.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { once } from 'node:events';
-import { ExamAstraError } from './examAstra';
-import { CanvasProxyError, requestCanvasApi, requestCanvasDownload } from './canvasProxy';
-import { ProductionAuthError, requireProductionUser } from './productionAuth';
+import { ExamAstraError } from './examAstra.js';
+import { CanvasProxyError, requestCanvasApi, requestCanvasDownload } from './canvasProxy.js';
+import { ProductionAuthError, requireProductionUser } from './productionAuth.js';
 
 type Request = IncomingMessage & { body?: unknown };
 function headers(response: ServerResponse) {

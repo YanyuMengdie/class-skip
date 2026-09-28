@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
-import { ASTRA_MODEL, ExamAstraError, requestExamAstra } from './examAstra';
+import { ASTRA_MODEL, ExamAstraError, requestExamAstra } from './examAstra.js';
 
 const loopback = (value: string) => ['localhost', '127.0.0.1', '[::1]', '::1', '::ffff:127.0.0.1'].includes(value.toLowerCase());
 export function isLocalExamRequest(request: Pick<IncomingMessage, 'headers' | 'socket'>): boolean {

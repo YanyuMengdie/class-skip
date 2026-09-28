@@ -80,3 +80,20 @@ export async function deleteLocalFolder(folder: CloudSession): Promise<void> {
     tx.oncomplete = () => resolve(); tx.onerror = tx.onabort = () => reject(tx.error);
   });
 }
+
+/** Remove the library record and its local PDF in one transaction. */
+export async function deleteLocalSession(sessionId: string): Promise<void> {
+  const db = await database();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('records', 'readwrite');
+    const store = tx.objectStore('records');
+    const req = store.get(`sessions/${sessionId}`);
+    req.onsuccess = () => {
+      const row = req.result as CloudSession | undefined;
+      store.delete(`sessions/${sessionId}`);
+      if (row?.fileUrl?.startsWith('classskip-local:')) store.delete(`files/${row.fileUrl.slice('classskip-local:'.length)}`);
+    };
+    tx.oncomplete = () => resolve();
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error('删除失败，资料已保留。'));
+  });
+}

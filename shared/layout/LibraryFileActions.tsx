@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { Check, Folder, FolderInput, FolderOutput, Loader2, MoreHorizontal, Search, X } from 'lucide-react';
+import { Check, Folder, FolderInput, FolderOutput, Loader2, MoreHorizontal, PencilLine, Trash2, Search, X } from 'lucide-react';
 import type { CloudSession } from '@/types';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { getFolderPath } from './libraryFolders';
@@ -10,13 +10,18 @@ interface LibraryFileActionsProps {
   folders: CloudSession[];
   inFolder: boolean;
   disabled?: boolean;
+  onRename: (fileId: string, name: string) => Promise<void>;
+  onDelete: (fileId: string) => Promise<void>;
   onMove: (fileId: string, parentId: string | null) => Promise<void>;
 }
 
-export function LibraryFileActions({ file, folders, inFolder, disabled, onMove }: LibraryFileActionsProps) {
+export function LibraryFileActions({ file, folders, inFolder, disabled, onMove, onRename, onDelete }: LibraryFileActionsProps) {
   const { text } = useAppLanguage();
   const [open, setOpen] = useState(false);
   const [choosing, setChoosing] = useState(false);
+  const [editing, setEditing] = useState<'rename' | 'delete' | null>(null);
+  const [name, setName] = useState('');
+  const editDialogRef = useRef<HTMLDialogElement>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [pending, setPending] = useState(false);
@@ -52,6 +57,27 @@ export function LibraryFileActions({ file, folders, inFolder, disabled, onMove }
     if (!choosing && dialog?.open) { dialog.close(); triggerRef.current?.focus(); }
   }, [choosing]);
 
+  useEffect(() => {
+    const dialog = editDialogRef.current;
+    if (editing && dialog && !dialog.open) dialog.showModal();
+    if (!editing && dialog?.open) { dialog.close(); triggerRef.current?.focus(); }
+  }, [editing]);
+
+  const edit = async () => {
+    if (!editing || requestRef.current || disabled || (editing === 'rename' && !name.trim())) return;
+    requestRef.current = true;
+    setPending(true); setError('');
+    try {
+      if (editing === 'rename') await onRename(file.id, name.trim());
+      else await onDelete(file.id);
+      setEditing(null);
+    } catch {
+      setError(editing === 'rename'
+        ? text('重命名失败，原名称已保留，请重试。', 'Could not rename this PDF. Its original name is unchanged. Please retry.')
+        : text('删除失败，资料仍在列表中，请重试。', 'Could not delete this PDF. It remains in the list. Please retry.'));
+    } finally { requestRef.current = false; setPending(false); }
+  };
+
   const move = async (parentId: string | null) => {
     if (requestRef.current || disabled || (file.parentId ?? null) === parentId) return;
     requestRef.current = true;
@@ -86,9 +112,33 @@ export function LibraryFileActions({ file, folders, inFolder, disabled, onMove }
       {file.parentId && <button type="button" role="menuitem" disabled={disabled || pending} onClick={() => void move(null)}>
         <FolderOutput size={17} /><span>{inFolder ? text('移出当前文件夹', 'Remove from this folder') : text('移出所属文件夹', 'Remove from its folder')}</span>
       </button>}
+      <button type="button" role="menuitem" disabled={disabled || pending} onClick={() => { setName(file.customTitle || file.fileName); setError(''); setOpen(false); setEditing('rename'); }}>
+        <PencilLine size={17} /><span>{text('重命名', 'Rename')}</span>
+      </button>
+      <button type="button" role="menuitem" className="library-file-delete" disabled={disabled || pending} onClick={() => { setError(''); setOpen(false); setEditing('delete'); }}>
+        <Trash2 size={17} /><span>{text('删除资料', 'Delete PDF')}</span>
+      </button>
       {error && <p className="library-file-error" role="alert">{error}</p>}
     </div>}
 
+    <dialog ref={editDialogRef} className="library-move-dialog" aria-labelledby={`${id}-edit-title`} aria-describedby={`${id}-edit-description`}
+      onCancel={event => { event.preventDefault(); if (!requestRef.current) setEditing(null); }}
+      onClick={event => { if (event.target === event.currentTarget && !requestRef.current) setEditing(null); }}>
+      <form className="library-move-content" onSubmit={event => { event.preventDefault(); void edit(); }}>
+        <header><span className="library-move-icon">{editing === 'delete' ? <Trash2 size={22} /> : <PencilLine size={22} />}</span><button type="button" aria-label={text('关闭', 'Close')} disabled={pending} onClick={() => setEditing(null)}><X size={20} /></button></header>
+        <h2 id={`${id}-edit-title`}>{editing === 'delete' ? text('删除这份资料？', 'Delete this PDF?') : text('重命名资料', 'Rename PDF')}</h2>
+        <p className="library-move-filename">{file.customTitle || file.fileName}</p>
+        <p id={`${id}-edit-description`} className="library-move-description">{editing === 'delete'
+          ? text('这份资料会从当前资料库删除，其下的学习记录将无法从这里恢复。不会删除电脑里的原始文件、其他资料或独立保存的复习记录；已关联这份资料的复习可能需要重新选择原文。此操作不可撤销。', 'This PDF will be removed from this library, and its study history will no longer be recoverable here. Original files on your computer, other PDFs, and separately saved review records are kept. Linked reviews may need their source PDF selected again. This cannot be undone.')
+          : text('只修改资料库里的名称，原始文件和学习记录都会保留。', 'Only the library name changes. The original file and learning history are kept.')}</p>
+        {editing === 'rename' && <label className="library-rename-label">{text('资料名称', 'PDF name')}<input autoFocus required maxLength={200} value={name} disabled={pending} onChange={event => setName(event.target.value)} /></label>}
+        {error && <p className="library-file-error" role="alert">{error}</p>}
+        <footer><button type="button" autoFocus={editing === 'delete'} disabled={pending} onClick={() => setEditing(null)}>{text('取消', 'Cancel')}</button>
+          <button type="submit" className={editing === 'delete' ? 'library-delete-confirm' : 'library-move-confirm'} disabled={pending || disabled || (editing === 'rename' && (!name.trim() || name.trim() === (file.customTitle || file.fileName)))}>
+            {pending && <Loader2 size={16} className="library-file-spin" />}{pending ? text('正在保存…', 'Saving…') : editing === 'delete' ? text('确认删除', 'Delete PDF') : text('保存名称', 'Save name')}
+          </button></footer>
+      </form>
+    </dialog>
     <dialog ref={dialogRef} className="library-move-dialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
       onCancel={event => { event.preventDefault(); if (!pending) setChoosing(false); }}
       onClick={event => { if (event.target === event.currentTarget && !pending) setChoosing(false); }}>

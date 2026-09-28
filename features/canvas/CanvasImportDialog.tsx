@@ -16,7 +16,7 @@ import {
   type CanvasFile,
   type CanvasProfile,
 } from '@/services/canvas';
-import { useAppLanguage } from '@/shared/i18n/appLanguage';
+import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
 import { currentCourseFileLoad, type CourseFileLoad } from './courseFileView';
 
 interface CanvasImportDialogProps {
@@ -206,71 +206,71 @@ export const CanvasImportDialog: React.FC<CanvasImportDialogProps> = ({ open, di
         <header className="flex items-start justify-between gap-4 border-b border-[#DCD9CF] px-6 py-5 md:px-8">
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#6F756F]">Canvas Import</p>
-            <h2 id="canvas-import-title" className="mt-2 font-serif text-2xl font-normal text-[#202822]">从 Canvas 带回课件</h2>
-            <p className="mt-2 text-sm text-[#6F756F]">连接你的学校 Canvas，读取课程与课件；课程简报还可整理公告与任务安排。不会改动 Canvas。</p>
+            <h2 id="canvas-import-title" className="mt-2 font-serif text-2xl font-normal text-[#202822]">{localizeUiText("从 Canvas 带回课件")}</h2>
+            <p className="mt-2 text-sm text-[#6F756F]">{localizeUiText("连接你的学校 Canvas，读取课程与课件；课程简报还可整理公告与任务安排。不会改动 Canvas。")}</p>
           </div>
-          <button type="button" onClick={onClose} disabled={importing} className="rounded-sm p-2 text-[#6F756F] hover:bg-[#E4EBE5] hover:text-[#202822] disabled:opacity-40" aria-label="关闭 Canvas 导入"><X className="h-5 w-5" /></button>
+          <button type="button" onClick={onClose} disabled={importing} className="rounded-sm p-2 text-[#6F756F] hover:bg-[#E4EBE5] hover:text-[#202822] disabled:opacity-40" aria-label={localizeUiText("关闭 Canvas 导入")}><X className="h-5 w-5" /></button>
         </header>
 
         {!connection ? (
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-8 md:px-8 md:py-10">
             <div className="mx-auto grid max-w-3xl gap-10 md:grid-cols-[minmax(0,1fr)_260px]">
               <div>
-                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#6F756F]">01 · 连接学校账号</p>
-                <h3 className="mt-3 font-serif text-3xl font-normal text-[#202822]">读取你现在真正使用的课程</h3>
-                <p className="mt-4 max-w-xl text-sm leading-7 text-[#6F756F]">访问令牌相当于一把临时钥匙，只保存在当前标签页的会话中。断开连接会清除令牌；浏览器恢复会话时可能保留。</p>
+                <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#6F756F]">{localizeUiText("01 · 连接学校账号")}</p>
+                <h3 className="mt-3 font-serif text-3xl font-normal text-[#202822]">{localizeUiText("读取你现在真正使用的课程")}</h3>
+                <p className="mt-4 max-w-xl text-sm leading-7 text-[#6F756F]">{localizeUiText("访问令牌相当于一把临时钥匙，只保存在当前标签页的会话中。断开连接会清除令牌；浏览器恢复会话时可能保留。")}</p>
                 <label className="mt-7 block">
-                  <span className="text-xs font-semibold text-[#505851]">Canvas 地址</span>
+                  <span className="text-xs font-semibold text-[#505851]">{localizeUiText("Canvas 地址")}</span>
                   <input placeholder="https://canvas.your-school.edu" value={canvasUrl} onChange={(event) => setCanvasUrl(event.target.value)} className="mt-2 w-full rounded-sm border border-[#D0CEC5] bg-[#FBFAF6] px-3.5 py-3 text-sm text-[#202822] outline-none focus:border-[#789583]" />
                 </label>
                 <label className="mt-4 block">
-                  <span className="text-xs font-semibold text-[#505851]">个人访问令牌</span>
+                  <span className="text-xs font-semibold text-[#505851]">{localizeUiText("个人访问令牌")}</span>
                   <span className="relative mt-2 block">
-                    <input type={showToken ? 'text' : 'password'} value={accessToken} onChange={(event) => setAccessToken(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') handleConnect(); }} placeholder="粘贴 Access Token" autoComplete="off" className="w-full rounded-sm border border-[#D0CEC5] bg-[#FBFAF6] px-3.5 py-3 pr-11 text-sm text-[#202822] outline-none focus:border-[#789583]" />
-                    <button type="button" onClick={() => setShowToken((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-2 text-[#858A84] hover:bg-[#E4EBE5]" aria-label={showToken ? '隐藏令牌' : '显示令牌'}>{showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
+                    <input type={showToken ? 'text' : 'password'} value={accessToken} onChange={(event) => setAccessToken(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') handleConnect(); }} placeholder={localizeUiText("粘贴 Access Token")} autoComplete="off" className="w-full rounded-sm border border-[#D0CEC5] bg-[#FBFAF6] px-3.5 py-3 pr-11 text-sm text-[#202822] outline-none focus:border-[#789583]" />
+                    <button type="button" onClick={() => setShowToken((value) => !value)} className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-2 text-[#858A84] hover:bg-[#E4EBE5]" aria-label={showToken ? localizeUiText("隐藏令牌") : localizeUiText("显示令牌")}>{showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}</button>
                   </span>
                 </label>
-                {error && <p className="mt-3 text-sm font-medium text-[#A55B3D]">{error}</p>}
+                {error && <p className="mt-3 text-sm font-medium text-[#A55B3D]">{localizeUiText(error)}</p>}
                 <button type="button" onClick={handleConnect} disabled={connecting} className="mt-6 inline-flex min-w-36 items-center justify-center gap-2 rounded-sm bg-[#294B3B] px-5 py-3 text-sm font-semibold text-[#FBFAF6] hover:bg-[#202822] disabled:opacity-50">
-                  {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GraduationCap className="h-4 w-4" />}{connecting ? '正在连接' : '连接 Canvas'}
+                  {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <GraduationCap className="h-4 w-4" />}{connecting ? localizeUiText("正在连接") : localizeUiText("连接 Canvas")}
                 </button>
               </div>
               <aside className="rounded-sm border border-[#DCD9CF] bg-[#F3F0E8] p-5">
-                <p className="text-xs font-semibold text-[#202822]">如何取得令牌</p>
+                <p className="text-xs font-semibold text-[#202822]">{localizeUiText("如何取得令牌")}</p>
                 <ol className="mt-4 space-y-3 text-xs leading-5 text-[#6F756F]">
-                  <li><span className="mr-2 font-serif italic text-[#3F6653]">1</span>打开 Canvas 的「账号 → 设置」</li>
-                  <li><span className="mr-2 font-serif italic text-[#3F6653]">2</span>找到「Approved Integrations」</li>
-                  <li><span className="mr-2 font-serif italic text-[#3F6653]">3</span>新建 Access Token 并复制</li>
+                  <li><span className="mr-2 font-serif italic text-[#3F6653]">1</span>{localizeUiText("打开 Canvas 的「账号 → 设置」")}</li>
+                  <li><span className="mr-2 font-serif italic text-[#3F6653]">2</span>{localizeUiText("找到「Approved Integrations」")}</li>
+                  <li><span className="mr-2 font-serif italic text-[#3F6653]">3</span>{localizeUiText("新建 Access Token 并复制")}</li>
                 </ol>
-                <a href={canvasSettingsUrl(canvasUrl) ?? undefined} aria-disabled={!canvasSettingsUrl(canvasUrl)} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-1.5 text-xs font-semibold text-[#3F6653] hover:text-[#294B3B]">打开 Canvas 设置 <ExternalLink className="h-3.5 w-3.5" /></a>
-                <div className="mt-5 flex items-start gap-2 border-t border-[#DCD9CF] pt-4 text-[11px] leading-5 text-[#6F756F]"><LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#3F6653]" />令牌不会上传到逃课神器账号，也不会写入资料库。</div>
+                <a href={canvasSettingsUrl(canvasUrl) ?? undefined} aria-disabled={!canvasSettingsUrl(canvasUrl)} target="_blank" rel="noreferrer" className="mt-5 inline-flex items-center gap-1.5 text-xs font-semibold text-[#3F6653] hover:text-[#294B3B]">{localizeUiText("打开 Canvas 设置 ")}<ExternalLink className="h-3.5 w-3.5" /></a>
+                <div className="mt-5 flex items-start gap-2 border-t border-[#DCD9CF] pt-4 text-[11px] leading-5 text-[#6F756F]"><LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#3F6653]" />{localizeUiText("令牌不会上传到逃课神器账号，也不会写入资料库。")}</div>
               </aside>
             </div>
           </div>
         ) : finishedCount > 0 ? (
           <div className="grid min-h-[440px] place-items-center px-6 py-12 text-center">
-            <div className="max-w-md"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E4EBE5] text-[#3F6653]"><Check className="h-6 w-6" /></div><p className="mt-6 font-serif text-3xl text-[#202822]">课件已经带回来了</p><p className="mt-3 text-sm leading-6 text-[#6F756F]">{language === 'en' ? `${finishedCount} Canvas PDF${finishedCount === 1 ? '' : 's'} saved to ${finishedDestination}.` : `${finishedCount} 份 Canvas PDF 已保存到「${finishedDestination}」，可以直接打开学习。`}</p><button type="button" onClick={onClose} className="mt-7 rounded-sm bg-[#294B3B] px-5 py-2.5 text-sm font-semibold text-[#FBFAF6] hover:bg-[#202822]">回到资料库</button></div>
+            <div className="max-w-md"><div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#E4EBE5] text-[#3F6653]"><Check className="h-6 w-6" /></div><p className="mt-6 font-serif text-3xl text-[#202822]">{localizeUiText("课件已经带回来了")}</p><p className="mt-3 text-sm leading-6 text-[#6F756F]">{language === 'en' ? `${finishedCount} Canvas PDF${finishedCount === 1 ? '' : 's'} saved to ${finishedDestination}.` : `${finishedCount} 份 Canvas PDF 已保存到「${finishedDestination}」，可以直接打开学习。`}</p><button type="button" onClick={onClose} className="mt-7 rounded-sm bg-[#294B3B] px-5 py-2.5 text-sm font-semibold text-[#FBFAF6] hover:bg-[#202822]">{localizeUiText("回到资料库")}</button></div>
           </div>
         ) : (
           <div className="grid min-h-0 flex-1 md:grid-cols-[270px_minmax(0,1fr)]">
             <aside className="min-h-0 overflow-y-auto border-b border-[#DCD9CF] bg-[#F3F0E8] p-5 md:border-b-0 md:border-r md:p-6">
               <div className="rounded-sm border border-[#CFD9D1] bg-[#E4EBE5] p-4">
-                <div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-sm bg-[#3F6653] text-white"><GraduationCap className="h-4 w-4" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[#202822]">{profile?.name || 'Canvas'}</p><p className="mt-0.5 truncate text-[11px] text-[#6F756F]">{canvasHostLabel(connection.canvasUrl)} · {language === 'en' ? 'Connected' : '已连接'}</p></div><button type="button" onClick={handleDisconnect} className="rounded-sm p-1.5 text-[#6F756F] hover:bg-[#FBFAF6] hover:text-[#A55B3D]" title="断开 Canvas"><LogOut className="h-3.5 w-3.5" /></button></div>
-                <div className="mt-4 flex items-center gap-2 border-t border-[#C9D4CB] pt-3 text-[11px] text-[#3F6653]"><LockKeyhole className="h-3.5 w-3.5" />只读 · 不修改学校课程</div>
+                <div className="flex items-center gap-3"><div className="grid h-9 w-9 place-items-center rounded-sm bg-[#3F6653] text-white"><GraduationCap className="h-4 w-4" /></div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-[#202822]">{profile?.name || 'Canvas'}</p><p className="mt-0.5 truncate text-[11px] text-[#6F756F]">{canvasHostLabel(connection.canvasUrl)} · {language === 'en' ? 'Connected' : '已连接'}</p></div><button type="button" onClick={handleDisconnect} className="rounded-sm p-1.5 text-[#6F756F] hover:bg-[#FBFAF6] hover:text-[#A55B3D]" title={localizeUiText("断开 Canvas")}><LogOut className="h-3.5 w-3.5" /></button></div>
+                <div className="mt-4 flex items-center gap-2 border-t border-[#C9D4CB] pt-3 text-[11px] text-[#3F6653]"><LockKeyhole className="h-3.5 w-3.5" />{localizeUiText("只读 · 不修改学校课程")}</div>
               </div>
-              <p className="mb-2 mt-6 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#6F756F]">当前课程 · {courses.length}</p>
+              <p className="mb-2 mt-6 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#6F756F]">{localizeUiText("当前课程 · ")}{courses.length}</p>
               <div className="space-y-1.5">
                 {courses.map((course) => <button key={course.id} type="button" disabled={importing} onClick={() => { setSelected({}); setError(''); setActiveCourseId(course.id); }} className={`w-full rounded-sm border px-3 py-3 text-left transition-colors disabled:opacity-50 ${course.id === activeCourseId ? 'border-[#8BA697] bg-[#FBFAF6]' : 'border-transparent hover:bg-[#FBFAF6]/70'}`}><span className="block truncate text-xs font-semibold text-[#202822]">{course.course_code || course.name}</span><span className="mt-1 block truncate text-[11px] text-[#6F756F]">{course.name}</span></button>)}
-                {courses.length === 0 && <p className="px-3 py-5 text-xs leading-5 text-[#6F756F]">Canvas 没有返回正在进行中的课程。</p>}
+                {courses.length === 0 && <p className="px-3 py-5 text-xs leading-5 text-[#6F756F]">{localizeUiText("Canvas 没有返回正在进行中的课程。")}</p>}
               </div>
             </aside>
             <div className="min-h-0 overflow-y-auto px-6 py-5 md:px-8 md:py-6">
-              <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#DCD9CF] pb-5"><div className="min-w-0"><p className="text-xs text-[#6F756F]">{activeCourse?.term?.name || 'Current courses'}</p><h3 className="mt-1 truncate text-lg font-semibold text-[#202822]">{activeCourse ? `${activeCourse.course_code || ''} · ${activeCourse.name}` : '选择一门课程'}</h3></div><button type="button" disabled={!activeCourseId || loadingFiles} onClick={() => setReloadNonce((value) => value + 1)} className="inline-flex items-center gap-2 text-xs font-semibold text-[#3F6653] hover:text-[#294B3B] disabled:opacity-40"><RefreshCcw className={`h-3.5 w-3.5 ${loadingFiles ? 'animate-spin' : ''}`} />重新读取</button></div>
-              {error && <p className="mt-4 rounded-sm border border-[#D9BCAA] bg-[#F6ECE5] px-4 py-3 text-sm text-[#8D4D34]">{error}</p>}
+              <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#DCD9CF] pb-5"><div className="min-w-0"><p className="text-xs text-[#6F756F]">{activeCourse?.term?.name || 'Current courses'}</p><h3 className="mt-1 truncate text-lg font-semibold text-[#202822]">{activeCourse ? `${activeCourse.course_code || ''} · ${activeCourse.name}` : localizeUiText("选择一门课程")}</h3></div><button type="button" disabled={!activeCourseId || loadingFiles} onClick={() => setReloadNonce((value) => value + 1)} className="inline-flex items-center gap-2 text-xs font-semibold text-[#3F6653] hover:text-[#294B3B] disabled:opacity-40"><RefreshCcw className={`h-3.5 w-3.5 ${loadingFiles ? 'animate-spin' : ''}`} />{localizeUiText("重新读取")}</button></div>
+              {error && <p className="mt-4 rounded-sm border border-[#D9BCAA] bg-[#F6ECE5] px-4 py-3 text-sm text-[#8D4D34]">{localizeUiText(error)}</p>}
               {fileWarnings.length > 0 && <div role="status" className="mt-4 rounded-sm border border-[#D9D1AB] bg-[#FAF6E8] px-4 py-3 text-sm text-[#75603A]">{fileWarnings.map((warning, index) => <p key={index} className={index ? 'mt-2' : ''}>{warning}</p>)}</div>}
-              {(fileError || fileWarnings.length > 0) && courseLink && <a href={courseLink} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#3F6653]">在 Canvas 打开本课 <ExternalLink className="h-3.5 w-3.5" /></a>}
-              {loadingFiles ? <div className="grid min-h-72 place-items-center text-sm text-[#6F756F]"><span role="status" className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />正在读取本课可访问的课件</span></div> : fileError ? <div role="alert" className="mt-5 rounded-sm border border-[#D9BCAA] bg-[#F6ECE5] px-4 py-5 text-sm text-[#8D4D34]"><p className="font-semibold">这门课的文件列表暂时无法读取</p><p className="mt-2 leading-6">{fileError}</p><p className="mt-2 text-xs">这不是“没有课件”。其他课程的文件不会显示在这里。</p></div> : files.length === 0 ? <div className="grid min-h-72 place-items-center text-center"><div><FileText className="mx-auto h-7 w-7 text-[#9DA39D]" /><p className="mt-3 text-sm font-semibold text-[#505851]">{activeCourseId ? '本次可访问的目录中未找到 PDF 或 PowerPoint' : '先选择一门课程'}</p><p className="mt-1 text-xs text-[#858A84]">其他链接中的资料或未开放内容，仍需在 Canvas 核对。</p></div></div> : (
-                <div className="mt-5 space-y-6">{groupedFiles.map(([folderName, folderFiles]) => <section key={folderName}><p className="mb-2 text-xs font-semibold text-[#6F756F]">{folderName}</p><div className="divide-y divide-[#E4E0D7] border-y border-[#E4E0D7]">{folderFiles.map((file) => { const supported = isPdf(file); return <label key={file.id} className={`flex items-center gap-3 py-3.5 ${supported ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'}`}><input type="checkbox" checked={!!selected[file.id]} disabled={!supported || importing} onChange={() => setSelected((previous) => ({ ...previous, [file.id]: !previous[file.id] }))} className="h-4 w-4 accent-[#3F6653]" /><FileText className={`h-4 w-4 shrink-0 ${supported ? 'text-[#3F6653]' : 'text-[#9B9E99]'}`} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-[#202822]">{file.display_name || file.filename}</p><p className="mt-1 text-[11px] text-[#858A84]">{supported ? ['PDF', formatBytes(file.size), formatDate(file.updated_at, language)].filter(Boolean).join(' · ') : 'PowerPoint · 当前阅读器仅支持 PDF'}</p></div><ChevronRight className="h-4 w-4 text-[#B0B3AD]" /></label>; })}</div></section>)}</div>
+              {(fileError || fileWarnings.length > 0) && courseLink && <a href={courseLink} target="_blank" rel="noopener noreferrer" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#3F6653]">{localizeUiText("在 Canvas 打开本课 ")}<ExternalLink className="h-3.5 w-3.5" /></a>}
+              {loadingFiles ? <div className="grid min-h-72 place-items-center text-sm text-[#6F756F]"><span role="status" className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />{localizeUiText("正在读取本课可访问的课件")}</span></div> : fileError ? <div role="alert" className="mt-5 rounded-sm border border-[#D9BCAA] bg-[#F6ECE5] px-4 py-5 text-sm text-[#8D4D34]"><p className="font-semibold">{localizeUiText("这门课的文件列表暂时无法读取")}</p><p className="mt-2 leading-6">{fileError}</p><p className="mt-2 text-xs">{localizeUiText("这不是“没有课件”。其他课程的文件不会显示在这里。")}</p></div> : files.length === 0 ? <div className="grid min-h-72 place-items-center text-center"><div><FileText className="mx-auto h-7 w-7 text-[#9DA39D]" /><p className="mt-3 text-sm font-semibold text-[#505851]">{activeCourseId ? localizeUiText("本次可访问的目录中未找到 PDF 或 PowerPoint") : localizeUiText("先选择一门课程")}</p><p className="mt-1 text-xs text-[#858A84]">{localizeUiText("其他链接中的资料或未开放内容，仍需在 Canvas 核对。")}</p></div></div> : (
+                <div className="mt-5 space-y-6">{groupedFiles.map(([folderName, folderFiles]) => <section key={folderName}><p className="mb-2 text-xs font-semibold text-[#6F756F]">{folderName}</p><div className="divide-y divide-[#E4E0D7] border-y border-[#E4E0D7]">{folderFiles.map((file) => { const supported = isPdf(file); return <label key={file.id} className={`flex items-center gap-3 py-3.5 ${supported ? 'cursor-pointer' : 'cursor-not-allowed opacity-55'}`}><input type="checkbox" checked={!!selected[file.id]} disabled={!supported || importing} onChange={() => setSelected((previous) => ({ ...previous, [file.id]: !previous[file.id] }))} className="h-4 w-4 accent-[#3F6653]" /><FileText className={`h-4 w-4 shrink-0 ${supported ? 'text-[#3F6653]' : 'text-[#9B9E99]'}`} /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-[#202822]" data-preserve-language="true">{file.display_name || file.filename}</p><p className="mt-1 text-[11px] text-[#858A84]">{supported ? ['PDF', formatBytes(file.size), formatDate(file.updated_at, language)].filter(Boolean).join(' · ') : localizeUiText("PowerPoint · 当前阅读器仅支持 PDF")}</p></div><ChevronRight className="h-4 w-4 text-[#B0B3AD]" /></label>; })}</div></section>)}</div>
               )}
             </div>
           </div>
@@ -291,8 +291,8 @@ export const CanvasImportDialog: React.FC<CanvasImportDialogProps> = ({ open, di
               </label>
             </div>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={onClose} disabled={importing} className="rounded-sm border border-[#D0CEC5] bg-[#FBFAF6] px-4 py-2 text-sm font-semibold text-[#505851] hover:border-[#9DA39D] disabled:opacity-40">取消</button>
-              <button type="button" onClick={handleImport} disabled={disabled || importing || !validDestination || selectedFiles.length === 0} className="inline-flex min-w-32 items-center justify-center gap-2 rounded-sm bg-[#294B3B] px-4 py-2 text-sm font-semibold text-[#FBFAF6] hover:bg-[#202822] disabled:cursor-not-allowed disabled:opacity-45">{importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <GraduationCap className="h-4 w-4" />}{importing ? '正在下载并导入' : '导入所选材料'}</button>
+              <button type="button" onClick={onClose} disabled={importing} className="rounded-sm border border-[#D0CEC5] bg-[#FBFAF6] px-4 py-2 text-sm font-semibold text-[#505851] hover:border-[#9DA39D] disabled:opacity-40">{localizeUiText("取消")}</button>
+              <button type="button" onClick={handleImport} disabled={disabled || importing || !validDestination || selectedFiles.length === 0} className="inline-flex min-w-32 items-center justify-center gap-2 rounded-sm bg-[#294B3B] px-4 py-2 text-sm font-semibold text-[#FBFAF6] hover:bg-[#202822] disabled:cursor-not-allowed disabled:opacity-45">{importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <GraduationCap className="h-4 w-4" />}{importing ? localizeUiText("正在下载并导入") : localizeUiText("导入所选材料")}</button>
             </div>
           </footer>
         )}

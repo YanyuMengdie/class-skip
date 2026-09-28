@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import { ArrowUp, BookOpen, Check, FileText, RefreshCcw } from 'lucide-react';
+import { ArrowUp, BookOpen, Check, ChevronDown, FileText, RefreshCcw } from 'lucide-react';
+import { OverviewProse } from './OverviewProse';
+import { overviewPageRanges } from './overviewMarkdown';
+import './overviewReader.css';
 import { StudyBookLoader } from './StudyBookLoader';
 import type { AppLanguage, CloudSession } from '@/types';
 import { extractPdfText, fetchFileFromUrl, readFileAsDataURL } from '@/lib/pdf/pdfUtils';
@@ -137,7 +139,7 @@ export const ReluctantOverviewReader: React.FC<ReluctantOverviewReaderProps> = (
 
   return (
     <section className="overflow-hidden rounded-2xl border border-[#dcded5] bg-[#fffdf8] shadow-sm" aria-label={text('整份资料讲解', 'Document overview')}>
-      <p className="truncate border-b border-[#e4e4da] px-5 py-3 text-sm text-[#74786e] md:px-8" title={session.customTitle || session.fileName}>{session.customTitle || session.fileName}</p>
+      <p className="truncate border-b border-[#e4e4da] px-5 py-3 text-sm text-[#74786e] md:px-8" title={session.customTitle || session.fileName} data-preserve-language="true">{session.customTitle || session.fileName}</p>
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#e4e4da] px-5 py-4 md:px-8">
         <div className="inline-flex rounded-xl bg-[#eeeee5] p-1" role="group" aria-label={text('讲解方式', 'Explanation style')}>
           {(['plain', 'story'] as const).map((option) => (
@@ -187,44 +189,37 @@ export const ReluctantOverviewReader: React.FC<ReluctantOverviewReaderProps> = (
       )}
 
       {ready && explanation && cache && (
-        <div key={requestKey} ref={readerRef} onScroll={handleScroll} className="max-h-[72vh] min-h-[340px] overflow-y-auto px-6 py-8 md:px-12 md:py-10 custom-scrollbar" tabIndex={0} aria-label={text('讲解正文', 'Explanation text')}>
-          <article className="mx-auto max-w-[760px]">
-            <div className="mb-7 flex items-center gap-2 text-xs font-semibold tracking-wide text-[#7c8679]">
+        <div key={requestKey} ref={readerRef} onScroll={handleScroll} className="overview-reader-scroll custom-scrollbar" tabIndex={0} aria-label={text('讲解正文', 'Explanation text')}>
+          <article className="overview-article" lang={language} data-preserve-language="true">
+            <div className="overview-eyebrow">
               <BookOpen className="h-4 w-4" />{text('整份资料的主线', 'The main thread of the document')}
             </div>
-            <h2 className="mb-8 font-serif text-2xl font-semibold leading-relaxed text-[#304c3d] md:text-3xl">{explanation.title}</h2>
-            <div className="space-y-8">
+            <h2 className="overview-title">{explanation.title}</h2>
+            <div className="overview-sections">
               {explanation.sections.map((section, index) => {
                 const pointIds = new Set(section.pointIds);
-                const pages = [...new Set(cache.outline.points.filter((point) => pointIds.has(point.id)).flatMap((point) => point.pages))].sort((a, b) => a - b);
+                const points = cache.outline.points.filter(point => pointIds.has(point.id));
+                const pages = [...new Set(points.flatMap(point => point.pages))].sort((a, b) => a - b);
+                const authoredHeading = /^#{2,4}\s/m.test(section.text);
+                // Older saved explanations have no headings; use their existing source-linked idea.
+                const heading = !authoredHeading && index > 0 ? points[0]?.idea : undefined;
+                const ranges = overviewPageRanges(pages);
+                const compactPages = ranges.slice(0, 4).join(language === 'en' ? ', ' : '、');
                 return (
-                  <section key={index}>
-                    <div className="text-[17px] leading-[1.95] text-[#444d43] md:text-[18px]">
-                      <ReactMarkdown
-                        skipHtml
-                        allowedElements={['p', 'strong', 'em', 'br', 'ul', 'ol', 'li', 'blockquote', 'h3', 'h4']}
-                        unwrapDisallowed
-                        components={{
-                          p: ({ children }) => <p className="mb-4 last:mb-0">{children}</p>,
-                          strong: ({ children }) => <strong className="font-semibold text-[#335541]">{children}</strong>,
-                          h3: ({ children }) => <h3 className="mb-3 mt-5 text-lg font-semibold text-[#335541]">{children}</h3>,
-                          h4: ({ children }) => <h4 className="mb-3 mt-5 font-semibold text-[#335541]">{children}</h4>,
-                          ul: ({ children }) => <ul className="mb-4 list-disc space-y-2 pl-6">{children}</ul>,
-                          ol: ({ children }) => <ol className="mb-4 list-decimal space-y-2 pl-6">{children}</ol>,
-                          blockquote: ({ children }) => <blockquote className="my-4 border-l-2 border-[#c8d5c4] pl-4">{children}</blockquote>,
-                        }}
-                      >{section.text}</ReactMarkdown>
-                    </div>
+                  <section key={index} className="overview-section">
+                    {heading && <div className="overview-section-heading"><span className="overview-section-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span><h3>{heading}</h3></div>}
+                    <OverviewProse value={section.text} caveats={points.map(point => point.caveat).filter(Boolean)} language={language} />
                     {pages.length > 0 && (
-                      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[#879080]">
-                        <FileText className="h-3.5 w-3.5" aria-hidden="true" />
-                        <span>{text('对应原页', 'Source pages')}</span>
-                        {pages.map((page) => (
-                          <button key={page} type="button" onClick={() => { flushScroll(); onOpenPage(page); }} aria-label={text(`查看 PDF 第 ${page} 页`, `Open PDF page ${page}`)} className="rounded-md border border-[#e0e5d9] px-2 py-1 text-[#5a7259] transition-colors hover:bg-[#edf2e7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#557255]">
-                            {page}
-                          </button>
-                        ))}
-                      </div>
+                      <details className="overview-sources">
+                        <summary aria-label={text(`展开原文页码，共 ${pages.length} 页`, `Expand source references, ${pages.length} pages`)}>
+                          <FileText size={13} aria-hidden="true" />
+                          <span>{text('原文 ', 'Source pp. ')}{compactPages}{ranges.length > 4 ? text(` 等 ${pages.length} 页`, ` · ${pages.length} pages total`) : ''}</span>
+                          <ChevronDown size={13} className="overview-source-chevron" aria-hidden="true" />
+                        </summary>
+                        <div className="overview-source-buttons">
+                          {pages.map(page => <button key={page} type="button" onClick={() => { flushScroll(); onOpenPage(page); }} aria-label={text(`查看 PDF 第 ${page} 页`, `Open PDF page ${page}`)}>{page}</button>)}
+                        </div>
+                      </details>
                     )}
                   </section>
                 );

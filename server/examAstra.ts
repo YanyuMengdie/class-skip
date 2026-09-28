@@ -4,7 +4,10 @@ export const ASTRA_MODEL = GEMINI_MODEL; // Legacy configuration export; not an 
 export const ASTRA_TIMEOUT_MS = 150_000;
 
 export class ExamAstraError extends Error {
-  diagnostics?: { stage: 'waiting_for_response' | 'reading_response' | 'parsing_response'; elapsedMs: number };
+  diagnostics?: {
+    stage: 'waiting_for_response' | 'reading_response' | 'parsing_response'; elapsedMs: number;
+    upstreamStatus?: number; providerStatus?: string; networkCode?: string;
+  };
   constructor(public code: string, public status: number, message: string) { super(message); }
 }
 const invalid = (message = 'Invalid exam model request.'): never => { throw new ExamAstraError('invalid_request', 400, message); };
@@ -72,11 +75,36 @@ export function parseExamAstraRequest(value: unknown): ExamAstraRequest {
 }
 
 function upstreamFailure(status: number): never {
+  if (status === 402) throw new ExamAstraError('billing_required', 402, 'Gemini reported depleted prepaid credits.');
   if (status === 401 || status === 403) throw new ExamAstraError('unauthorized', status, 'Gemini rejected the key or model access.');
   if (status === 429) throw new ExamAstraError('rate_limit', 429, 'Gemini quota or rate limit reached.');
   if (status === 408 || status === 504) throw new ExamAstraError('timeout', 504, 'Gemini request timed out.');
   if (status === 400 || status === 404 || status === 422) throw new ExamAstraError('invalid_request', 400, 'Gemini did not accept the model request.');
+  if (status === 500) throw new ExamAstraError('provider_internal', 502, 'Gemini returned an internal server error.');
+  if (status === 503) throw new ExamAstraError('provider_overloaded', 503, 'Gemini is overloaded or temporarily unavailable.');
   throw new ExamAstraError('unavailable', 502, 'Gemini is temporarily unavailable.');
+}
+
+// Only expose known status symbols, never Google's free-form body (which may echo input).
+const providerStatuses = new Set(['INVALID_ARGUMENT', 'FAILED_PRECONDITION', 'RESOURCE_EXHAUSTED',
+  'UNAUTHENTICATED', 'PERMISSION_DENIED', 'NOT_FOUND', 'CANCELLED', 'INTERNAL', 'UNAVAILABLE',
+  'DEADLINE_EXCEEDED', 'UNKNOWN', 'DATA_LOSS', 'ABORTED', 'OUT_OF_RANGE', 'UNIMPLEMENTED']);
+const networkCodes = new Set(['ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT',
+  'ENETUNREACH', 'EHOSTUNREACH', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT', 'UND_ERR_SOCKET', 'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'DEPTH_ZERO_SELF_SIGNED_CERT', 'ERR_TLS_CERT_ALTNAME_INVALID']);
+function networkFailureCode(error: unknown, depth = 0): string | undefined {
+  if (!record(error) || depth > 4) return undefined;
+  if (typeof error.code === 'string' && networkCodes.has(error.code)) return error.code;
+  const cause = networkFailureCode(error.cause, depth + 1);
+  if (cause) return cause;
+  if (Array.isArray(error.errors)) {
+    for (const nested of error.errors) {
+      const code = networkFailureCode(nested, depth + 1);
+      if (code) return code;
+    }
+  }
+  return undefined;
 }
 
 export async function requestExamAstra(apiKey: string, raw: unknown, options: { signal?: AbortSignal; fetch?: typeof fetch } = {}): Promise<{ text: string }> {
@@ -101,6 +129,8 @@ export async function requestAstraResponse(apiKey: string, data: {
   let timedOut = false;
   const started = Date.now();
   let stage: 'waiting_for_response' | 'reading_response' | 'parsing_response' = 'waiting_for_response';
+  let upstreamStatus: number | undefined;
+  let providerStatus: string | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let cancel: ((error: ExamAstraError) => void) | undefined;
   const cancellation = new Promise<never>((_, reject) => { cancel = reject; });
@@ -134,7 +164,16 @@ export async function requestAstraResponse(apiKey: string, data: {
           },
         }),
       });
-      if (!response.ok) upstreamFailure(response.status);
+      upstreamStatus = response.status;
+      if (!response.ok) {
+        // Preserve HTTP status even when the error body is missing or is not JSON.
+        try {
+          const body: unknown = await response.json();
+          const status = record(body) && record(body.error) ? body.error.status : undefined;
+          if (typeof status === 'string' && providerStatuses.has(status)) providerStatus = status;
+        } catch { /* The upstream HTTP failure remains the primary diagnosis. */ }
+        upstreamFailure(response.status);
+      }
       stage = 'reading_response';
       const result: unknown = await response.json();
       stage = 'parsing_response';
@@ -169,8 +208,15 @@ export async function requestAstraResponse(apiKey: string, data: {
     const failure = error instanceof ExamAstraError ? error
       : timedOut ? new ExamAstraError('timeout', 504, 'Gemini request timed out.')
       : controller.signal.aborted ? new ExamAstraError('cancelled', 499, 'Request cancelled.')
-      : new ExamAstraError('unavailable', 502, 'Unable to connect to Gemini.');
-    if (data.briefProfile) failure.diagnostics = { stage, elapsedMs: Date.now() - started };
+      : new ExamAstraError(stage === 'waiting_for_response' ? 'provider_connection' : 'provider_response', 502,
+        stage === 'waiting_for_response' ? 'Unable to connect to Gemini.' : 'Unable to read Gemini response.');
+    const networkCode = networkFailureCode(error);
+    failure.diagnostics = { stage, elapsedMs: Date.now() - started,
+      ...(upstreamStatus !== undefined ? { upstreamStatus } : {}),
+      ...(providerStatus ? { providerStatus } : {}), ...(networkCode ? { networkCode } : {}) };
+    if (failure.code !== 'cancelled') {
+      console.warn('[Gemini request failed]', { code: failure.code, ...failure.diagnostics });
+    }
     throw failure;
   } finally {
     clearTimeout(timeout);

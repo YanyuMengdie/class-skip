@@ -3,8 +3,8 @@ import { request as httpsRequest } from 'node:https';
 import { isIP } from 'node:net';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
-import { isLocalExamRequest } from './examAstraProxy';
-import { canvasFileAccessProblem } from '../shared/canvasFileAccess';
+import { isLocalExamRequest } from './examAstraProxy.js';
+import { canvasFileAccessProblem } from '../shared/canvasFileAccess.js';
 
 export const CANVAS_MAX_PAGES = 100;
 export const CANVAS_API_MAX_BYTES = 20 * 1024 * 1024;

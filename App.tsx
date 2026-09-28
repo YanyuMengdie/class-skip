@@ -1,9 +1,12 @@
+import { useBackgroundAudio } from '@/features/background-audio/useBackgroundAudio';
 import { useReviewCache } from '@/features/review/lib/useReviewCache';
 import { reviewSourceKey, notesToTree } from '@/features/review/lib/reviewNotes';
 import { StudyToolMenu } from '@/features/review/StudyToolMenu';
 import { prepareLectureKnowledge, type PrepareLectureKnowledgeOptions } from '@/features/exam/round/lectureKnowledge';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { StudyCompanion } from '@/features/studySupport/StudyCompanion';
+import { useStudySupport, useSupportSurface } from '@/features/studySupport/StudySupportContext';
 import { Header } from '@/shared/layout/Header';
 import { dashboardFeatures } from '@/shared/dashboardFeatures';
 import { SlideViewer } from '@/features/reader/slide-viewer/SlideViewer';
@@ -19,7 +22,7 @@ import { Sidebar } from '@/shared/layout/Sidebar';
 import { Notebook } from '@/features/reader/notebook/Notebook';
 import { HistoryModal } from '@/shared/history/HistoryModal';
 import { GalgameOverlay } from '@/components/GalgameOverlay';
-import { GalgameSettings } from '@/components/GalgameSettings'; 
+import { GalgameSettings } from '@/components/GalgameSettings';
 import { WelcomeScreen } from '@/shared/layout/WelcomeScreen';
 import { DashboardScreen } from '@/shared/layout/DashboardScreen';
 import { QuizReviewPanel } from '@/features/review/tools/QuizReviewPanel';
@@ -46,6 +49,7 @@ import { ExamPredictionPanel } from '@/features/exam/ExamPredictionPanel';
 import { ExamHubModal } from '@/features/exam/ExamHubModal';
 import { ExamWorkspacePage } from '@/features/exam/workspace/ExamWorkspacePage';
 import { ReviewWorkspaceEntry } from '@/features/exam/workspace/ReviewWorkspaceEntry';
+import { CramWorkspace } from '@/features/exam/cram/CramWorkspace';
 import { createLectureReviewMaterial } from '@/features/exam/lib/lectureReviewScope';
 import { convertPdfToImages, readFileAsDataURL, extractPdfText, generateFileHash, fetchFileFromUrl } from '@/lib/pdf/pdfUtils';
 import { buildArtifactSourceLabel } from '@/shared/lib/artifactSourceLabel';
@@ -65,7 +69,7 @@ import { storageService } from '@/services/storageService';
 import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, deleteSkimSessionFromCloud, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud, deleteTutorSessionFromCloud } from '@/services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { LOCAL_WORKSPACE_USER, isLocalUser, isCloudUser, type WorkspaceUser as User } from '@/services/workspaceUser';
-import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, LectureAudioRecording, LectureRealtimeLine, LectureRealtimeStatus, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, TutorSession, SkimContentType, SkimAuxiliaryMaterial, SkimReadingRoute, SkimStudyStyle, SkimExplanationDepth, SkimRecordDeck, SkimRecordCardState, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession, LectureCaseLearningState } from '@/types';
+import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, LectureAudioRecording, LectureRealtimeLine, LectureRealtimeStatus, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, TutorSession, SkimContentType, SkimAuxiliaryMaterial, SkimReadingRoute, SkimStudyStyle, SkimExplanationDepth, SkimExplanationStyle, SkimRecordDeck, SkimRecordCardState, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession, LectureCaseLearningState } from '@/types';
 import {
   appendLocalPendingSuggestion,
   appendLocalWitnessSession,
@@ -198,14 +202,7 @@ const upsertLectureHistory = (
   ]);
 };
 
-// #region agent log
-const _debugLog = (location: string, message: string, data: Record<string, unknown>) => {
-  const entry = { location, message, data, timestamp: Date.now() };
-  (window as unknown as { __debugLog?: unknown[] }).__debugLog = (window as unknown as { __debugLog?: unknown[] }).__debugLog || [];
-  (window as unknown as { __debugLog: unknown[] }).__debugLog.push(entry);
-  fetch('http://127.0.0.1:7242/ingest/f7788da6-7262-4420-bc72-576f23e0b7d4',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...entry,hypothesisId:'H1'})}).catch(()=>{});
-};
-// #endregion
+
 
 const normalizeGeneratedLineBreaks = (text: string): string => (
   text.replace(/<br\s*\/?>|&lt;br\s*\/?&gt;/gi, '\n')
@@ -250,7 +247,8 @@ interface SkimSession {
   /** Lecture 领读呈现方式；旧会话缺省为整段式。 */
   studyStyle?: SkimStudyStyle;
   /** 普通 Lecture 整段式/分段式领读的后续讲解深度；旧会话缺省为正常讲。 */
-  explanationDepth?: SkimExplanationDepth;
+  explanationDepth?: SkimExplanationDepth; // Legacy preference; saved messages keep their original depth.
+  explanationStyle?: SkimExplanationStyle;
   /** 整段式领读自己的 PDF 停留页，与分段停留页分开保存。 */
   continuousLastPage?: number;
   /** 分段式学习的分段路线、状态与独立对话。 */
@@ -280,6 +278,7 @@ const createEmptySkimSession = (seq = 1): SkimSession => ({
   readingRoute: null,
   studyStyle: 'continuous',
   explanationDepth: 'normal',
+  explanationStyle: 'standard',
   continuousLastPage: 1,
   recordDeck: null,
   caseLearning: null,
@@ -396,6 +395,11 @@ const buildSkimRecordDigest = (messages: ChatMessage[]) => {
 };
 
 const App: React.FC = () => {
+  const studySupport = useStudySupport();
+  const supportPaused = studySupport?.paused ?? false;
+  const supportPauseStarted = useRef<number | null>(null);
+  const supportPausedTotal = useRef(0);
+  const supportTimerWasRunning = useRef(false);
   const { language: appLanguage, setLanguage: setAppLanguage, text: uiText } = useAppLanguage();
   // --- STATE DECLARATIONS ---
   const [hasStarted, setHasStarted] = useState(false);
@@ -502,17 +506,36 @@ const App: React.FC = () => {
   // 原 SkimPanel 内部态（模块数 / 节奏 / 页码范围）提升到会话后的写入器（均为值式，与 SkimPanel 用法一致）
   const setSkimModuleCount = useCallback((count: number) => updateActiveSkimSession(s => ({ ...s, moduleCount: count })), [updateActiveSkimSession]);
   const setSkimPaceValue = useCallback((pace: 'module' | 'part') => updateActiveSkimSession(s => ({ ...s, skimPace: pace })), [updateActiveSkimSession]);
-  const setSkimContentType = useCallback((next: SkimContentType) => updateActiveSkimSession(s => ({
-    ...s,
-    contentType: next,
-    readingRoute: null,
-    ...(next === 'lecture' ? {} : { studyStyle: 'continuous' as const, recordDeck: null }),
-  })), [updateActiveSkimSession]);
+  const setSkimContentType = useCallback((next: SkimContentType) => {
+    if (skimActiveLoading || (activeSkim.contentType ?? 'lecture') === next) return;
+    // Changing an established reading's interpretation must not erase its conversations.
+    if (activeSkim.messages.length || activeSkim.recordDeck) {
+      if (skimSessions.length >= MAX_SKIM_SESSIONS) {
+        window.alert('当前领读数量已达上限，请先整理领读标签，再新建不同类型的领读。');
+        return;
+      }
+      const sequence = getNextDefaultSessionSequence(skimSessions.map(session => session.title), '领读');
+      const fresh: SkimSession = {
+        ...createEmptySkimSession(sequence), skipDiagnosis: true, contentType: next,
+        studyStyle: activeSkim.studyStyle === 'records' ? 'records' : 'continuous',
+        pageRangeStart: activeSkim.pageRangeStart, pageRangeEnd: activeSkim.pageRangeEnd,
+        skimPace: activeSkim.skimPace,
+      };
+      setSkimSessions(previous => [...previous, fresh]);
+      setActiveSkimIndex(skimSessions.length);
+      return;
+    }
+    updateActiveSkimSession(previous => ({
+      ...previous, contentType: next, readingRoute: null,
+      ...(next !== 'lecture' && previous.studyStyle === 'case' ? { studyStyle: 'continuous' as const } : {}),
+    }));
+  }, [activeSkim, skimActiveLoading, skimSessions, updateActiveSkimSession]);
   const setSkimAuxiliaryMaterial = useCallback((next: SkimAuxiliaryMaterial | null) => updateActiveSkimSession(s => ({ ...s, auxiliaryMaterial: next })), [updateActiveSkimSession]);
   const setSkimReadingRoute = useCallback((route: SkimReadingRoute | null) => updateActiveSkimSession(s => ({ ...s, readingRoute: route })), [updateActiveSkimSession]);
-  const setSkimExplanationDepth = useCallback((explanationDepth: SkimExplanationDepth) => updateActiveSkimSession(s => ({
+  const setSkimExplanationStyle = useCallback((explanationStyle: SkimExplanationStyle) => updateActiveSkimSession(s => ({
     ...s,
-    explanationDepth,
+    explanationStyle,
+    explanationDepth: 'normal',
   })), [updateActiveSkimSession]);
   const setSkimStudyStyle = useCallback((studyStyle: SkimStudyStyle) => {
     if (studyStyle === 'continuous') {
@@ -693,14 +716,14 @@ const App: React.FC = () => {
 
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileHash, setFileHash] = useState<string | null>(null);
-  const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null); 
-  
+  const [pdfDataUrl, setPdfDataUrl] = useState<string | null>(null);
+
   const [docType, setDocType] = useState<DocType>('STEM');
 
   const [isGalgameMode, setIsGalgameMode] = useState(false);
   const [galgameChatCache, setGalgameChatCache] = useState<ChatCache>({});
   const [isGalgameLoading, setIsGalgameLoading] = useState(false);
-  
+
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [customAvatarUrl, setCustomAvatarUrl] = useState<string | null>(null);
   const [customBackgroundUrl, setCustomBackgroundUrl] = useState<string | null>(null);
@@ -714,7 +737,7 @@ const App: React.FC = () => {
   const [fullPdfText, setFullPdfText] = useState<string | null>(null);
   const [pdfPageTexts, setPdfPageTexts] = useState<string[]>([]);
   const [isStudyMapLoading, setIsStudyMapLoading] = useState<boolean>(false);
-  
+
   const [isImmersive, setIsImmersive] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(60);
   const [isSidePanelCollapsed, setIsSidePanelCollapsed] = useState(false);
@@ -722,7 +745,7 @@ const App: React.FC = () => {
   const [notesPanelHeightPercent, setNotesPanelHeightPercent] = useState(25);
   /** 本页注释区域默认收起，需要记笔记时再展开 */
   const [notesPanelCollapsed, setNotesPanelCollapsed] = useState(true);
-  
+
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [historyItems, setHistoryItems] = useState<FileHistoryItem[]>([]);
   const [restoreHash, setRestoreHash] = useState<string | null>(null);
@@ -862,7 +885,7 @@ const App: React.FC = () => {
   /** P0：主界面 study vs 全屏备考工作台 */
   const [appMode, setAppMode] = useState<'study' | 'examWorkspace'>('study');
   const [selectedExamId, setActiveExamId] = useState<string | null>(null);
-  const [reviewWorkspaceMode, setReviewWorkspaceMode] = useState<'home' | 'lecture' | 'exam'>('home');
+  const [reviewWorkspaceMode, setReviewWorkspaceMode] = useState<'home' | 'lecture' | 'exam' | 'cram'>('home');
   const [reviewEntryPickLecture, setReviewEntryPickLecture] = useState(false);
   const [lectureReviewMaterial, setLectureReviewMaterial] = useState<ExamMaterialLink | null>(null);
   const standaloneMaterial = reviewWorkspaceMode === 'lecture' && lectureReviewMaterial?.userId === user?.uid ? lectureReviewMaterial : null;
@@ -1020,14 +1043,14 @@ const App: React.FC = () => {
   }, [trapList]);
 
   const [notebookData, setNotebookData] = useState<NotebookData>(() => {
-    try { 
+    try {
       const stored = localStorage.getItem('study_notebook_data');
-      return stored ? JSON.parse(stored) : {}; 
-    } catch { 
-      return {}; 
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
     }
   });
-  
+
   const [studyTime, setStudyTime] = useState<number>(0);
   const [isTimerRunning, setIsTimerRunning] = useState<boolean>(false);
 
@@ -1037,21 +1060,18 @@ const App: React.FC = () => {
   const [pomodoroPhase, setPomodoroPhase] = useState<'idle' | 'study' | 'break'>('idle');
   const [pomodoroRemainingSeconds, setPomodoroRemainingSeconds] = useState<number>(25 * 60);
   const [completedSegmentsCount, setCompletedSegmentsCount] = useState<number>(0);
-  
+
   const splitterRef = useRef<boolean>(false);
   const notesSplitterRef = useRef<boolean>(false);
   const pageEntryTime = useRef<number>(Date.now());
   const hasEncouragedOnPage = useRef<boolean>(false);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const hiddenFileInputRef = useRef<HTMLInputElement>(null);
   const pendingNavSegmentRef = useRef<DailySegment | null>(null);
   const applyDailySegRef = useRef<(seg: DailySegment) => void>(() => {});
   const pendingExamPredictionAfterHashRef = useRef<string | null>(null);
   const leftPanelRef = useRef<HTMLDivElement>(null);
-  
-  const [isPlayingAudio, setIsPlayingAudio] = useState(false);
-  const [audioVolume, setAudioVolume] = useState(0.5);
-  const [currentTrackName, setCurrentTrackName] = useState<string | null>(null);
+
+  const backgroundAudio = useBackgroundAudio();
   const [externalVideo, setExternalVideo] = useState<{ type: 'bilibili' | 'youtube', id: string } | null>(null);
   const [isEmbeddedDev, setIsEmbeddedDev] = useState(false);
   const [devBannerDismissed, setDevBannerDismissed] = useState(false);
@@ -1144,25 +1164,14 @@ const App: React.FC = () => {
       setWorkspaceEvidenceAnnotations([]);
     }
   }, [appMode, user?.uid, activeExamId, examWorkspaceMaterialsSorted]);
-  useEffect(() => { 
-    localStorage.setItem('study_notebook_data', JSON.stringify(notebookData)); 
+  useEffect(() => {
+    localStorage.setItem('study_notebook_data', JSON.stringify(notebookData));
   }, [notebookData]);
 
-  useEffect(() => {
-    audioRef.current = new Audio();
-    audioRef.current.loop = true;
-    audioRef.current.volume = audioVolume;
-    audioRef.current.onerror = (e) => {
-      if (!externalVideo) { setIsPlayingAudio(false); alert("无法播放该音频。"); }
-    };
-    return () => { if (audioRef.current) { audioRef.current.pause(); audioRef.current = null; } };
-  }, []); 
-
-  useEffect(() => { if (audioRef.current) audioRef.current.volume = audioVolume; }, [audioVolume]);
 
   useEffect(() => {
     let interval: number | undefined;
-    if (isTimerRunning) {
+    if (isTimerRunning && !supportPaused) {
       interval = window.setInterval(() => {
         setStudyTime(prev => prev + 1);
         const timeOnPage = Date.now() - pageEntryTime.current;
@@ -1172,15 +1181,15 @@ const App: React.FC = () => {
       }, 1000);
     }
     return () => { if (interval) clearInterval(interval); };
-  }, [isTimerRunning, slides.length]);
+  }, [isTimerRunning, slides.length, supportPaused]);
 
   useEffect(() => {
-    if (!activeStudyStartedAt) return;
+    if (!activeStudyStartedAt || supportPaused) return;
     const interval = window.setInterval(() => {
-      setActiveStudyElapsedMs(Date.now() - activeStudyStartedAt);
+      setActiveStudyElapsedMs(Date.now() - activeStudyStartedAt - supportPausedTotal.current);
     }, 1000);
     return () => window.clearInterval(interval);
-  }, [activeStudyStartedAt]);
+  }, [activeStudyStartedAt, supportPaused]);
 
   useEffect(() => {
     const draft = activeStudyDraftRef.current;
@@ -1201,7 +1210,7 @@ const App: React.FC = () => {
     };
     const markReturn = () => {
       const draft = activeStudyDraftRef.current;
-      if (!draft || draft.awayStartedAt === null) return;
+      if (!draft || draft.awayStartedAt === null || supportPauseStarted.current !== null) return;
       const now = Date.now();
       draft.awayEvents.push({
         startedAt: draft.awayStartedAt,
@@ -1241,7 +1250,7 @@ const App: React.FC = () => {
   const pomodoroPhaseRef = useRef(pomodoroPhase);
   pomodoroPhaseRef.current = pomodoroPhase;
   useEffect(() => {
-    if (pomodoroPhase !== 'study' && pomodoroPhase !== 'break') return;
+    if (supportPaused || (pomodoroPhase !== 'study' && pomodoroPhase !== 'break')) return;
     const interval = window.setInterval(() => {
       setPomodoroRemainingSeconds((prev) => {
         if (prev <= 0) {
@@ -1259,7 +1268,7 @@ const App: React.FC = () => {
       });
     }, 1000);
     return () => clearInterval(interval);
-  }, [pomodoroPhase, pomodoroSegmentSeconds, pomodoroBreakSeconds]);
+  }, [pomodoroPhase, pomodoroSegmentSeconds, pomodoroBreakSeconds, supportPaused]);
 
   // --- 海龟汤：从本地加载 ---
   useEffect(() => {
@@ -1419,71 +1428,77 @@ const App: React.FC = () => {
     setShellMode('dashboard');
   }, [user.uid]);
 
-  // --- AUTO-SAVE (IndexedDB & Cloud) logic omitted for brevity, same as previous ---
-  useEffect(() => {
+  // Share the current snapshot between autosave and explicit pauses.
+  const saveCurrentStudyProgress = useCallback(async () => {
     if (!fileHash || !fileName) return;
-    const saveTimeout = setTimeout(async () => {
-      try {
-        // 「读旧不毁旧」：仍是迁移产出的同一份内存列表（用户没动过略读）⇒ 这次不写新格式，只续写旧扁平字段。
-        const isUntouchedMigration = isUntouchedSkimMigration();
-        const item: FileHistoryItem = {
-          hash: fileHash,
-          name: fileName,
-          lastOpened: Date.now(),
-          state: {
-            explanations,
-            chatCache,
-            skimMessages,
-            annotations,
-            notebookData,
-            pageComments,
-            currentIndex,
-            // 问答是独立 viewMode、不属于任何文件：落盘时 'tutor' 归一为 'deep'，避免重开文件误入问答
-            viewMode: viewMode === 'tutor' ? 'deep' : viewMode,
-            skimTopHeight,
-            skimFocusMode,
-            studyMap,
-            skimStage,
-            quizData,
-            // 阶段二：新格式多会话列表 + 激活索引。迁移未触碰前不写（保护旧记录）。
-            ...(isUntouchedMigration ? {} : { skimSessions, activeSkimIndex }),
-            docType,
-            galgameBackgroundUrl: customBackgroundUrl,
-            customAvatarUrl: customAvatarUrl,
-            personaSettings: personaSettings,
-            reviewQuizRounds,
-            reviewFlashCards,
-            flashCardEstimate,
-            pageMarks,
-            studyGuide,
-            savedArtifacts,
-            ...(lsapContentMap?.sourceKey === examSummaryContentKey && lsapContentMap && lsapState
-              ? { lsapContentMap, lsapState }
-              : {})
-          }
-        };
-        await storageService.saveFileState(item);
-        setHistoryItems(await storageService.getAllHistory());
-      } catch (e) { console.warn('Auto-save failed:', e); }
-    }, 2000);
-    return () => clearTimeout(saveTimeout);
+
+    // 「读旧不毁旧」：仍是迁移产出的同一份内存列表（用户没动过略读）⇒ 这次不写新格式，只续写旧扁平字段。
+    const isUntouchedMigration = isUntouchedSkimMigration();
+    const item: FileHistoryItem = {
+      hash: fileHash,
+      name: fileName,
+      lastOpened: Date.now(),
+      state: {
+        explanations,
+        chatCache,
+        skimMessages,
+        annotations,
+        notebookData,
+        pageComments,
+        currentIndex,
+        // 问答是独立 viewMode、不属于任何文件：落盘时 'tutor' 归一为 'deep'，避免重开文件误入问答
+        viewMode: viewMode === 'tutor' ? 'deep' : viewMode,
+        skimTopHeight,
+        skimFocusMode,
+        studyMap,
+        skimStage,
+        quizData,
+        // 阶段二：新格式多会话列表 + 激活索引。迁移未触碰前不写（保护旧记录）。
+        ...(isUntouchedMigration ? {} : { skimSessions, activeSkimIndex }),
+        docType,
+        galgameBackgroundUrl: customBackgroundUrl,
+        customAvatarUrl: customAvatarUrl,
+        personaSettings: personaSettings,
+        reviewQuizRounds,
+        reviewFlashCards,
+        flashCardEstimate,
+        pageMarks,
+        studyGuide,
+        savedArtifacts,
+        ...(lsapContentMap?.sourceKey === examSummaryContentKey && lsapContentMap && lsapState
+          ? { lsapContentMap, lsapState }
+          : {})
+      }
+    };
+    await storageService.saveFileState(item);
+    setHistoryItems(await storageService.getAllHistory());
+
   }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState, examSummaryContentKey]);
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => { void saveCurrentStudyProgress().catch(error => console.warn('Auto-save failed:', error)); }, 2000);
+    return () => window.clearTimeout(timeout);
+  }, [saveCurrentStudyProgress]);
+
+  const saveWorkspaceProgress = useCallback(async () => {
     if (!currentSessionId || !user) return;
-    const cloudSaveTimeout = setTimeout(() => {
-      updateCloudSessionState(currentSessionId, {
+    await updateCloudSessionState(currentSessionId, {
         // 阶段三：把完整 skimSessions + activeSkimIndex 一并写云端（整包覆盖，冲突走「后写覆盖」策略 A）。
         // 「读旧不毁旧」复用本地同一套抑制：迁移未触碰前不写新字段、只续写旧扁平字段，不改写云端旧记录。
         ...(isUntouchedSkimMigration() ? {} : { skimSessions, activeSkimIndex }),
         explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode: viewMode === 'tutor' ? 'deep' : viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
-      }, true).then(() => setStorageError('')).catch((error) => {
+      }, true);
+  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
+  useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      void saveWorkspaceProgress().then(() => setStorageError('')).catch(error => {
         console.error('资料保存失败', error); setIsSyncing(false);
         setStorageError(isLocalUser(user) ? '本机保存未完成，请检查浏览器存储空间。当前内容仍在页面中。' : '云端保存未完成，请检查网络。当前内容仍在页面中。');
       });
     }, 3000);
-    return () => clearTimeout(cloudSaveTimeout);
-  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
+    return () => window.clearTimeout(timeout);
+  }, [saveWorkspaceProgress, user]);
+
 
 
   const addArtifact = useCallback((artifact: SavedArtifact) => {
@@ -1552,6 +1567,7 @@ const App: React.FC = () => {
 
   const clearActiveStudySession = () => {
     activeStudyDraftRef.current = null;
+    supportPausedTotal.current = 0;
     setActiveStudyStartedAt(null);
     setActiveStudyElapsedMs(0);
   };
@@ -1593,6 +1609,7 @@ const App: React.FC = () => {
       awayEvents: [],
       awayStartedAt: null,
     };
+    supportPausedTotal.current = 0;
     setActiveStudyStartedAt(now);
     setActiveStudyElapsedMs(0);
   };
@@ -1661,16 +1678,12 @@ const App: React.FC = () => {
   // --- CORE: FILE PROCESSING LOGIC (omitted for brevity, same as previous) ---
   const processFile = async (file: File, restoreData?: Partial<FilePersistedState>, restoredAvatar?: string | null, restoredBg?: string | null) => {
     try {
-      // #region agent log
-      _debugLog('App.tsx:processFile', 'entry', { type: file.type });
-      // #endregion
+
       const hash = await generateFileHash(file);
       setFileHash(hash);
       let images: string[] = []; let pdfText: string[] = []; let rawPdfData: string | null = null;
       if (file.type === 'application/pdf') { rawPdfData = await readFileAsDataURL(file); setPdfDataUrl(rawPdfData); images = await convertPdfToImages(file); pdfText = await extractPdfText(file); } else if (file.type.startsWith('image/')) { const image = await readFileAsDataURL(file); images = [image]; pdfText = ["Image Upload - No Text Layer"]; rawPdfData = image; setPdfDataUrl(image); }
-      // #region agent log
-      _debugLog('App.tsx:processFile', 'pdf parse done', { imagesLen: images.length });
-      // #endregion
+
       const newSlides: Slide[] = images.map((img, idx) => ({ id: `slide-${hash}-${idx}`, imageUrl: img, pageNumber: idx + 1 }));
       const fullText = pdfText.join('\n');
       setFileName(file.name); setSlides(newSlides); setFullPdfText(fullText); setPdfPageTexts(pdfText); setStudyTime(0); pageEntryTime.current = Date.now();
@@ -1685,6 +1698,7 @@ const App: React.FC = () => {
           const list: SkimSession[] = stateToRestore.skimSessions.map((s, index) => ({
             ...createEmptySkimSession(index + 1),
             ...s,
+            explanationStyle: s.explanationStyle ?? (s.explanationDepth === 'simple' ? 'interesting' : 'standard'),
             title: s.title?.trim() || `领读 ${index + 1}`,
           }));
           const rawIdx = stateToRestore.activeSkimIndex ?? 0;
@@ -1727,15 +1741,12 @@ const App: React.FC = () => {
       const diagTargetSkimId = activeIdRef.current;
       if (stateToRestore && !stateToRestore.skimSessions && !stateToRestore.studyMap) {
         setIsStudyMapLoading(true); const diagnosisContent = rawPdfData || fullText;
-        // #region agent log
-        _debugLog('App.tsx:processFile', 'before diagnosis (background)', {});
-        // #endregion
+
         const diagnosisPromise = Promise.all([performPreFlightDiagnosis(diagnosisContent, { moduleCount: 4 }), (!existingRecord && !restoreData) ? classifyDocument(diagnosisContent) : Promise.resolve(stateToRestore?.docType || 'STEM')]);
         const timeoutMs = 90000;
         const timeoutPromise = new Promise<[StudyMap | null, DocType]>((resolve) => setTimeout(() => resolve([null, 'STEM']), timeoutMs));
         Promise.race([diagnosisPromise, timeoutPromise])
           .then(([map, type]) => {
-            _debugLog('App.tsx:processFile', 'after Promise.all diagnosis', { hasMap: !!map });
             if (map) setSkimSessions(prev => prev.map(s => (s.id === diagTargetSkimId ? { ...s, studyMap: map, studyMapModuleCount: 4 } : s)));
             if (!existingRecord && !restoreData) setDocType(type);
           })
@@ -1757,9 +1768,7 @@ const App: React.FC = () => {
       // 文档加载后直接进入阅读，本页注释默认收起。
       setNotesPanelCollapsed(true);
     } catch (error) {
-      // #region agent log
-      _debugLog('App.tsx:processFile', 'catch', { err: String(error) });
-      // #endregion
+
       console.error("Error processing file:", error); alert("文件处理失败，请重试。"); setFileName(null); setIsTimerRunning(false); setIsStudyMapLoading(false); throw error;
     }
   };
@@ -1767,9 +1776,7 @@ const App: React.FC = () => {
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return; setIsProcessingFile(true);
     setIsOpeningStudyFile(true);
-    // #region agent log
-    _debugLog('App.tsx:handleFileUpload', 'upload started', { fileName: file?.name });
-    // #endregion
+
     try {
       const PROCESS_FILE_TIMEOUT_MS = 120000;
       await Promise.race([
@@ -1778,20 +1785,14 @@ const App: React.FC = () => {
       ]);
       setShellMode('study');
       setIsOpeningStudyFile(false);
-      // #region agent log
-      _debugLog('App.tsx:handleFileUpload', 'processFile resolved', {});
-      // #endregion
+
       if (user) { setIsSyncing(true); try { const downloadUrl = await uploadPDF(user, file); const sessionId = await createCloudSession(user, file.name, downloadUrl); setCurrentSessionId(sessionId); await reloadStudyCloudSessions(); } catch (e) { console.error("Cloud Sync Failed:", e); alert(isLocalUser(user) ? "本机保存失败，请检查浏览器存储空间。" : "云端同步失败，请检查网络。"); } finally { setIsSyncing(false); } }
     } catch (e) {
       console.error("Local Processing Failed", e);
-      // #region agent log
-      _debugLog('App.tsx:handleFileUpload', 'processFile rejected', { err: String(e) });
-      // #endregion
+
       if (String(e).includes('处理超时')) alert(String(e));
     } finally {
-      // #region agent log
-      _debugLog('App.tsx:handleFileUpload', 'setIsProcessingFile(false)', {});
-      // #endregion
+
       setIsOpeningStudyFile(false);
       setIsProcessingFile(false);
     }
@@ -3251,8 +3252,8 @@ const App: React.FC = () => {
   }, [activeSkim.contentType, activeSkim.moduleCount, activeSkim.pageRangeEnd, activeSkim.pageRangeStart, activeSkim.skimPace, skimMessages, skimStage, studyMap?.initialBriefing, studyMap?.topic]);
 
   const fetchExplanation = useCallback(async (index: number, currentSlides: Slide[], fullContext: string | null, mode: SlideExplanationMode = 'explain', forceRegenerate = false) => {
-    const slide = currentSlides[index]; 
-    if (!slide) return; 
+    const slide = currentSlides[index];
+    if (!slide) return;
     const cacheKey = getPageToolCacheKey(slide.id, mode);
     if (!forceRegenerate && getCachedPageToolExplanation(slide.id, mode)) {
       setExplanationErrors(prev => {
@@ -3263,39 +3264,39 @@ const App: React.FC = () => {
       });
       setIsGeneratingAI(false);
       return;
-    } 
-    
+    }
+
     setExplanationErrors(prev => {
       if (!prev[cacheKey]) return prev;
       const next = { ...prev };
       delete next[cacheKey];
       return next;
     });
-    setIsGeneratingAI(true); 
-    try { 
+    setIsGeneratingAI(true);
+    try {
         const explanation = await generateSlideExplanation(slide.imageUrl, fullContext || undefined, {
           mode,
           pageNumber: slide.pageNumber,
           guideContext: buildPageToolGuideContext(mode),
-        }); 
-        setExplanations(prev => ({ ...prev, [cacheKey]: explanation })); 
+        });
+        setExplanations(prev => ({ ...prev, [cacheKey]: explanation }));
         setExplanationErrors(prev => {
           if (!prev[cacheKey]) return prev;
           const next = { ...prev };
           delete next[cacheKey];
           return next;
         });
-    } catch (error) { 
-        console.error(error); 
+    } catch (error) {
+        console.error(error);
         setExplanationErrors(prev => ({ ...prev, [cacheKey]: '页面工具生成失败，请稍后重试。' }));
-    } finally { 
-        setIsGeneratingAI(false); 
+    } finally {
+        setIsGeneratingAI(false);
     }
   }, [buildPageToolGuideContext, getCachedPageToolExplanation]);
 
-  useEffect(() => { 
-    pageEntryTime.current = Date.now(); 
-    hasEncouragedOnPage.current = false; 
+  useEffect(() => {
+    pageEntryTime.current = Date.now();
+    hasEncouragedOnPage.current = false;
   }, [currentIndex]);
 
   const toggleImmersiveMode = async () => { if (!isImmersive) { setIsImmersive(true); try { if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen(); } catch (e) {} } else { setIsImmersive(false); try { if (document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen(); } catch (e) {} } };
@@ -3504,7 +3505,7 @@ const App: React.FC = () => {
       fetchExplanation(currentIndex, slides, fullPdfText, mode, false);
   }, [slides, currentIndex, fetchExplanation, fullPdfText]);
 
-  const handleRetryExplanation = useCallback(() => { 
+  const handleRetryExplanation = useCallback(() => {
       if (!slides.length || !slides[currentIndex]) return;
       const slideId = slides[currentIndex].id;
       const cacheKey = getPageToolCacheKey(slideId, activePageToolMode);
@@ -3519,7 +3520,7 @@ const App: React.FC = () => {
         delete newErrors[cacheKey];
         return newErrors;
       });
-      fetchExplanation(currentIndex, slides, fullPdfText, activePageToolMode, true); 
+      fetchExplanation(currentIndex, slides, fullPdfText, activePageToolMode, true);
   }, [slides, currentIndex, activePageToolMode, fetchExplanation, fullPdfText]);
 
   const handleSendChat = async (text: string, images?: string[]) => {
@@ -3560,9 +3561,18 @@ const App: React.FC = () => {
   const handleDeleteNote = (page: number, noteId: string) => { if (!fileName) return; setNotebookData(prev => { const fileNotes = prev[fileName]; if (!fileNotes) return prev; const pageNotes = fileNotes[page].filter(note => note.id !== noteId); return { ...prev, [fileName]: { ...fileNotes, [page]: pageNotes } }; }); };
 
   const handleToggleTimer = () => { setIsTimerRunning(!isTimerRunning); if (!isTimerRunning) pageEntryTime.current = Date.now(); };
-  const handleAudioPlayPause = () => { if (externalVideo) { setExternalVideo(null); return; } if (!audioRef.current || !audioRef.current.src) return; if (isPlayingAudio) audioRef.current.pause(); else audioRef.current.play().catch(e => setIsPlayingAudio(false)); setIsPlayingAudio(!isPlayingAudio); };
-  const handleAudioTrackChange = (url: string, name: string) => { setExternalVideo(null); if (!audioRef.current) return; if (audioRef.current.src === url && isPlayingAudio) return; setIsPlayingAudio(false); audioRef.current.src = url; audioRef.current.load(); audioRef.current.play().then(() => { setIsPlayingAudio(true); setCurrentTrackName(name); }); setCurrentTrackName(name); };
-  const handleVideoSelect = (type: 'bilibili' | 'youtube', id: string) => { if (audioRef.current) { audioRef.current.pause(); setIsPlayingAudio(false); } setExternalVideo({ type, id }); };
+  const handleAudioPlayPause = () => {
+    setExternalVideo(null);
+    backgroundAudio.toggle();
+  };
+  const handleAudioTrackChange = (url: string) => {
+    setExternalVideo(null);
+    backgroundAudio.selectTrack(url);
+  };
+  const handleVideoSelect = (type: 'bilibili' | 'youtube', id: string) => {
+    backgroundAudio.pause();
+    setExternalVideo({ type, id });
+  };
 
   const handleNext = () => { if (currentIndex < slides.length - 1) setCurrentIndex(prev => prev + 1); };
   const handlePrev = () => { if (currentIndex > 0) setCurrentIndex(prev => prev - 1); };
@@ -3612,35 +3622,38 @@ const App: React.FC = () => {
   };
 
   const commonHeader = (
-    <Header 
-      fileName={fileName} 
-      currentPage={slides.length > 0 ? currentIndex + 1 : 0} 
-      totalPages={slides.length} 
-      onUpload={handleFileUpload} 
-      onNext={handleNext} 
-      onPrev={handlePrev} 
-      isProcessing={isProcessingFile} 
-      studyTime={studyTime} 
-      isTimerRunning={isTimerRunning} 
-      onToggleTimer={handleToggleTimer} 
-      progressPercentage={slides.length > 0 ? (new Set(Object.keys(explanations).map(key => key.split('::')[0])).size / slides.length) * 100 : 0} 
-      isPlayingAudio={isPlayingAudio} 
-      currentTrackName={currentTrackName} 
-      volume={audioVolume} 
-      onAudioPlayPause={handleAudioPlayPause} 
-      onAudioTrackChange={handleAudioTrackChange} 
-      onVideoSelect={handleVideoSelect} 
-      onAudioVolumeChange={setAudioVolume} 
-      isImmersive={isImmersive} 
-      onToggleImmersive={toggleImmersiveMode} 
-      onLayoutPreset={setLeftPanelWidth} 
-      viewMode={viewMode} 
+    <Header
+      fileName={fileName}
+      currentPage={slides.length > 0 ? currentIndex + 1 : 0}
+      totalPages={slides.length}
+      onUpload={handleFileUpload}
+      onNext={handleNext}
+      onPrev={handlePrev}
+      isProcessing={isProcessingFile}
+      studyTime={studyTime}
+      isTimerRunning={isTimerRunning}
+      onToggleTimer={handleToggleTimer}
+      progressPercentage={slides.length > 0 ? (new Set(Object.keys(explanations).map(key => key.split('::')[0])).size / slides.length) * 100 : 0}
+      isPlayingAudio={backgroundAudio.status === 'playing'}
+      audioStatus={backgroundAudio.status}
+      audioError={backgroundAudio.error}
+      onAudioRetry={() => { setExternalVideo(null); backgroundAudio.retry(); }}
+      currentTrackName={backgroundAudio.track?.name ?? null}
+      volume={backgroundAudio.volume}
+      onAudioPlayPause={handleAudioPlayPause}
+      onAudioTrackChange={handleAudioTrackChange}
+      onVideoSelect={handleVideoSelect}
+      onAudioVolumeChange={backgroundAudio.setVolume}
+      isImmersive={isImmersive}
+      onToggleImmersive={toggleImmersiveMode}
+      onLayoutPreset={setLeftPanelWidth}
+      viewMode={viewMode}
       onToggleSkim={() => {
         setIsClassroomPanelVisible(false);
         setViewMode(prev => prev === 'skim' ? 'deep' : 'skim');
       }}
-      hasStudyMap={slides.length > 0} 
-      onOpenHistory={handleOpenHistory} 
+      hasStudyMap={slides.length > 0}
+      onOpenHistory={handleOpenHistory}
       onEnterGalgameMode={() => setIsGalgameMode(true)}
       user={authUser}
       localWorkspace={isLocalUser(user)}
@@ -3674,7 +3687,6 @@ const App: React.FC = () => {
         if (currentLectureReviewMaterial) startLectureReview(currentLectureReviewMaterial);
         else { setReviewWorkspaceMode('home'); setReviewEntryPickLecture(true); setAppMode('examWorkspace'); }
       }}
-      onOpenTurtleSoup={() => setTurtleSoupOpen(true)}
       pomodoroSegmentSeconds={pomodoroSegmentSeconds}
       pomodoroBreakSeconds={pomodoroBreakSeconds}
       onPomodoroSegmentChange={setPomodoroSegmentSeconds}
@@ -3686,22 +3698,22 @@ const App: React.FC = () => {
       onPomodoroStop={() => setPomodoroPhase('idle')}
     />
   );
-  
+
   const commonSlideViewer = (
-    <SlideViewer 
-      slide={currentSlide} 
-      annotations={currentSlide ? (annotations[currentSlide.id] || []) : []} 
-      onAddAnnotation={handleAddAnnotation} 
-      onUpdateAnnotation={handleUpdateAnnotation} 
-      onDeleteAnnotation={handleDeleteAnnotation} 
-      onExportPDF={handleExportPDF} 
+    <SlideViewer
+      slide={currentSlide}
+      annotations={currentSlide ? (annotations[currentSlide.id] || []) : []}
+      onAddAnnotation={handleAddAnnotation}
+      onUpdateAnnotation={handleUpdateAnnotation}
+      onDeleteAnnotation={handleDeleteAnnotation}
+      onExportPDF={handleExportPDF}
       isExporting={isExportingHandout}
-      onRequestUpload={() => hiddenFileInputRef.current?.click()} 
+      onRequestUpload={() => hiddenFileInputRef.current?.click()}
       isImmersive={isImmersive}
       leftPanelRef={leftPanelRef}
     />
   );
-  
+
   // 领读 + 问答共用的同一排标签栏（数据仍两套独立；点标签同时切 viewMode + 该套 activeIndex）。
   // 任一套生成中即锁全排，避免切走时打断在途生成。仅在 viewMode==='skim' / 'tutor' 两态渲染。
   const tabsLocked = skimActiveLoading || tutorActiveLoading;
@@ -3929,7 +3941,7 @@ const App: React.FC = () => {
       {sessionTabBar}
       <div className="flex-1 min-h-0">
         <SkimPanel
-          readingSessionKey={JSON.stringify([fileHash, currentSessionId, activeSkim.id, activeRecordCard?.id ?? 'continuous'])}
+          readingSessionKey={JSON.stringify([user.uid, fileHash, currentSessionId, activeSkim.id, activeRecordCard?.id ?? 'continuous'])}
           studyMap={studyMap}
           isLoading={isStudyMapLoading}
           onSwitchToDeep={() => setViewMode('deep')}
@@ -3962,8 +3974,8 @@ const App: React.FC = () => {
           onReadingRouteChange={setSkimReadingRoute}
           studyStyle={activeSkim.studyStyle ?? 'continuous'}
           onStudyStyleChange={setSkimStudyStyle}
-          explanationDepth={activeSkim.explanationDepth ?? 'normal'}
-          onExplanationDepthChange={setSkimExplanationDepth}
+          explanationStyle={activeSkim.explanationStyle ?? (activeSkim.explanationDepth === 'simple' ? 'interesting' : 'standard')}
+          onExplanationStyleChange={setSkimExplanationStyle}
           recordDeck={activeSkim.recordDeck ?? null}
           onRecordDeckChange={setSkimRecordDeck}
           activeRecordCard={activeRecordCard}
@@ -3996,6 +4008,7 @@ const App: React.FC = () => {
       <div className="flex-1 min-h-0">
         {activeTutor && (
           <TutorChat
+            draftKey={`${user.uid}:${activeTutor.id}`}
             messages={activeTutor.messages}
             setMessages={setTutorMessages}
             docType={activeTutor.docType}
@@ -4009,21 +4022,21 @@ const App: React.FC = () => {
     </div>
   ) : (
     <ExplanationPanel
-      explanation={currentPageToolExplanation} 
+      explanation={currentPageToolExplanation}
       explanationError={currentPageToolError}
-      isLoadingExplanation={isGeneratingAI} 
-      onRetryExplanation={handleRetryExplanation} 
+      isLoadingExplanation={isGeneratingAI}
+      onRetryExplanation={handleRetryExplanation}
       activeToolMode={activePageToolMode}
       onRunPageTool={handleRunPageTool}
       onSaveExplanation={handleSavePageToolResult}
       onBackToGuidedReading={() => setViewMode('skim')}
-      chatMessages={currentSlide ? (chatCache[currentSlide.id] || []) : []} 
-      onSendChat={handleSendChat} 
-      isChatLoading={isChatLoading} 
+      chatMessages={currentSlide ? (chatCache[currentSlide.id] || []) : []}
+      onSendChat={handleSendChat}
+      isChatLoading={isChatLoading}
       onNotebookAdd={handleAddNote}
-      isImmersive={isImmersive} 
-      isCollapsed={isSidePanelCollapsed} 
-      onToggleCollapse={() => setIsSidePanelCollapsed(!isSidePanelCollapsed)} 
+      isImmersive={isImmersive}
+      isCollapsed={isSidePanelCollapsed}
+      onToggleCollapse={() => setIsSidePanelCollapsed(!isSidePanelCollapsed)}
     />
   );
 
@@ -4109,7 +4122,43 @@ const App: React.FC = () => {
     && !studioExpandedId
     && !isRecordShelfVisible
     && !(viewMode === 'skim' && activeSkim.studyStyle === 'case');
-  
+
+  const companionVisible = hasStarted && !authLoading && !isClassroomMode
+    && (appMode === 'examWorkspace' || (shellMode === 'study' && !!fileName && slides.length > 0));
+  useSupportSurface({
+    scope: `reader:${user.uid}:${fileHash ?? ''}`, priority: 0, boundary: String(currentIndex), actions: [],
+    pause: async () => {
+      if (supportPauseStarted.current === null) {
+        const now = Date.now();
+        flushActiveStudyPageSegment(now);
+        const draft = activeStudyDraftRef.current;
+        if (draft && draft.awayStartedAt === null) draft.awayStartedAt = now;
+        supportPauseStarted.current = now;
+        supportTimerWasRunning.current = isTimerRunning;
+        setIsTimerRunning(false);
+        if (activeStudyStartedAt) setActiveStudyElapsedMs(now - activeStudyStartedAt - supportPausedTotal.current);
+      }
+      const saves = await Promise.allSettled([
+        saveCurrentStudyProgress(), saveWorkspaceProgress(),
+        ...(activeTutor ? [storageService.saveTutorSession(activeTutor), saveTutorSessionToCloud(user, activeTutor)] : []),
+      ]);
+      if (saves.some(result => result.status === 'rejected')) throw new Error('Some study progress could not be saved');
+    },
+    resume: () => {
+      const now = Date.now();
+      if (supportPauseStarted.current !== null) supportPausedTotal.current += now - supportPauseStarted.current;
+      supportPauseStarted.current = null;
+      const draft = activeStudyDraftRef.current;
+      if (draft && draft.awayStartedAt !== null) {
+        draft.awayEvents.push({ startedAt: draft.awayStartedAt, endedAt: now, durationMs: now - draft.awayStartedAt });
+        draft.awayStartedAt = null;
+        draft.pageEnteredAt = now;
+      }
+      pageEntryTime.current = now;
+      if (supportTimerWasRunning.current) setIsTimerRunning(true);
+    },
+  }, companionVisible);
+
   if (!hasStarted) {
     return <WelcomeScreen onStart={() => { setHasStarted(true); setDashboardInitialTab('library'); setShellMode('dashboard'); }} />;
   }
@@ -4128,6 +4177,11 @@ const App: React.FC = () => {
       <div className="min-h-screen bg-[#f7f8f6] font-sans">
         <LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
         <DashboardScreen
+          onLibraryFileDeleted={id => {
+            setStudyCloudSessions(previous => previous.filter(session => session.id !== id));
+            if (currentSessionId === id) { setCurrentSessionId(null); setIsSyncing(false); }
+          }}
+          onLibraryFileRenamed={(id, name) => setStudyCloudSessions(previous => previous.map(session => session.id === id ? { ...session, customTitle: name } : session))}
           user={user}
           cloudUser={isCloudUser(authUser) ? authUser : null}
           onSwitchStorage={() => setUseLocalWorkspace(value => !value)}
@@ -4160,6 +4214,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-screen bg-[#FFFBF7] font-sans">
+      {companionVisible && <StudyCompanion key={`${user.uid}:${fileHash ?? ''}:${appMode}:${reviewWorkspaceMode}`} />}
       {isCombinedReviewLoading && (
         <div className="fixed inset-0 z-[180] bg-black/40 flex items-center justify-center">
           <div className="bg-white rounded-2xl shadow-xl px-8 py-6 flex flex-col items-center gap-3">
@@ -4305,7 +4360,7 @@ const App: React.FC = () => {
         />
       )}
 
-      <HistoryModal 
+      <HistoryModal
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
         history={historyItems}
@@ -4363,7 +4418,7 @@ const App: React.FC = () => {
         />
       )}
 
-      <GalgameSettings 
+      <GalgameSettings
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
         user={user}
@@ -4373,7 +4428,7 @@ const App: React.FC = () => {
         onSavePersona={setPersonaSettings}
       />
 
-      <GalgameOverlay 
+      <GalgameOverlay
         isVisible={isGalgameMode}
         onClose={() => setIsGalgameMode(false)}
         slide={currentSlide}
@@ -4385,8 +4440,8 @@ const App: React.FC = () => {
         isLoading={isGalgameLoading}
         fullText={fullPdfText}
         customAvatarUrl={customAvatarUrl}
-        customBackgroundUrl={customBackgroundUrl} 
-        personaSettings={personaSettings} 
+        customBackgroundUrl={customBackgroundUrl}
+        personaSettings={personaSettings}
       />
 
       {reviewCacheWarning && <div role="status" className="fixed bottom-4 left-4 z-[400] max-w-md rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-900">{reviewCacheWarning}</div>}
@@ -4749,10 +4804,15 @@ const App: React.FC = () => {
 
       {appMode === 'examWorkspace' && user ? (reviewWorkspaceMode === 'home' ? (
         <ReviewWorkspaceEntry user={user} currentMaterial={currentLectureReviewMaterial} initialPick={reviewEntryPickLecture}
-          onLecture={startLectureReview} onExam={() => setReviewWorkspaceMode('exam')}
+          onLecture={startLectureReview} onExam={() => setReviewWorkspaceMode('exam')} onCram={() => setReviewWorkspaceMode('cram')}
           onBack={() => setAppMode('study')}
           onLibrary={() => { setAppMode('study'); setShellMode('dashboard'); setDashboardInitialTab('library'); }}
         />
+      ) : reviewWorkspaceMode === 'cram' ? (
+        <CramWorkspace key={user.uid} user={user} currentMaterial={currentLectureReviewMaterial}
+          currentContentMap={lsapContentMap} resolvePdf={resolveExamMaterialPdf}
+          onBack={() => setReviewWorkspaceMode('home')}
+          onLibrary={() => { setAppMode('study'); setShellMode('dashboard'); setDashboardInitialTab('library'); }} />
       ) : (
         <ExamWorkspacePage
           key={`${user.uid}:${reviewWorkspaceMode}:${standaloneMaterial?.id ?? 'exam'}`}
@@ -4809,7 +4869,7 @@ const App: React.FC = () => {
               <div className="reading-study-status">
                 <span className={`reading-study-dot ${activeStudyStartedAt ? 'is-recording' : ''}`} aria-hidden="true" />
                 <span>本次学习</span>
-                <span className="reading-study-state">{activeStudyStartedAt ? '记录中' : '未开始记录'}</span>
+                <span className="reading-study-state">{supportPaused ? '已暂停' : activeStudyStartedAt ? '记录中' : '未开始记录'}</span>
                 {activeStudyStartedAt && <span className="reading-study-elapsed">{formatDurationShort(activeStudyElapsedMs)}</span>}
                 <details className="reading-study-help">
                   <summary aria-label="学习记录说明" title="学习记录说明"><Info className="h-3.5 w-3.5" /></summary>
@@ -4828,7 +4888,7 @@ const App: React.FC = () => {
             </div>
           </div>
         )}
-        
+
         {false && fileName && !isImmersive && (
             <button
                 onClick={() => setIsSettingsOpen(true)}
@@ -4854,12 +4914,12 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
-          
+
           <div className={`reading-page-sidebar ${isSidebarOpen ? 'is-open' : ''}`}>
-          <Sidebar 
+          <Sidebar
             isOpen={isSidebarOpen}
-            totalPages={slides.length} 
-            currentPage={currentIndex + 1} 
+            totalPages={slides.length}
+            currentPage={currentIndex + 1}
             onJumpToPage={handleJumpToPage}
             pageThumbnails={pageThumbnails}
             hasPdfLoaded={!!fileName && slides.length > 0}
@@ -4876,7 +4936,7 @@ const App: React.FC = () => {
             onDeleteSession={handleDeleteSession}
           />
           </div>
-          
+
           <div
             ref={leftPanelRef}
             className={`craft-reader-canvas relative flex min-w-0 flex-col border-r border-stone-200 transition-[width] duration-0 ease-linear h-full ${isImmersive ? '' : 'flex-1'}`}
@@ -4941,8 +5001,8 @@ const App: React.FC = () => {
 
           {isImmersive && !isSidePanelCollapsed && (
             <div
-              onMouseDown={handleDragSplitterStart} 
-              className="w-1.5 bg-stone-200 hover:bg-indigo-400 cursor-col-resize z-50 flex items-center justify-center transition-colors shadow-sm relative -ml-[3px]" 
+              onMouseDown={handleDragSplitterStart}
+              className="w-1.5 bg-stone-200 hover:bg-indigo-400 cursor-col-resize z-50 flex items-center justify-center transition-colors shadow-sm relative -ml-[3px]"
               title="左右拖动调整宽度"
             ></div>
           )}

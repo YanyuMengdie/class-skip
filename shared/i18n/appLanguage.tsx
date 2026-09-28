@@ -1,6 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { AppLanguage, AppPreferences } from '@/types';
-import { installLegacyUiLocalization } from '@/shared/i18n/uiCatalog';
+import { installLegacyUiLocalization, translateKnownUiText } from '@/shared/i18n/uiCatalog';
 
 const APP_PREFERENCES_STORAGE_KEY = 'classSkip_appPreferences_v1';
 
@@ -106,3 +106,12 @@ export const localizeText = (
   english: string,
   language: AppLanguage = runtimeLanguage,
 ): string => (language === 'en' ? english : chinese);
+
+/** Translate fixed UI copy at render time. Never pass source text or user content here. */
+export const localizeUiText = (value: string): string => {
+  if (runtimeLanguage !== 'en') return value;
+  const key = value.trim().replace(/\s+/g, ' ');
+  const translated = translateKnownUiText(key, runtimeLanguage);
+  if (translated === key) return value;
+  return `${value.match(/^\s*/)?.[0] ?? ''}${translated}${value.match(/\s*$/)?.[0] ?? ''}`;
+};

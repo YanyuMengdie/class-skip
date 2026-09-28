@@ -1,3 +1,4 @@
+import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
 import React, { useEffect, useRef, useState } from 'react';
 import { localGet, localPut } from '@/services/localWorkspace';
 import { CanvasBriefReportView } from './CanvasWeeklyBrief';
@@ -10,6 +11,7 @@ import type { CourseBriefReport, BriefSource } from './types';
 // Namespaces local evidence without representing an actual Canvas connection.
 const LOCAL_ORIGIN = 'https://local.classskip.invalid';
 export function LocalSyllabusBrief({ ownerId }: { ownerId: string }) {
+  useAppLanguage();
   const [report, setReport] = useState<CourseBriefReport | null>(null);
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -73,21 +75,21 @@ export function LocalSyllabusBrief({ ownerId }: { ownerId: string }) {
     finally { running.current = false; if (alive.current) setBusy(false); }
   };
   return <section className="cb-shell space-y-5">
-    <h2 className="text-2xl font-bold text-[#294B3B]">从本地大纲整理周报</h2>
-    <p>无需连接 Canvas。添加 syllabus 后按课程整理，原文和结果保存在当前浏览器；不包含老师之后发布的改期或提交状态。</p>
+    <h2 className="text-2xl font-bold text-[#294B3B]">{localizeUiText("从本地大纲整理周报")}</h2>
+    <p>{localizeUiText("无需连接 Canvas。添加 syllabus 后按课程整理，原文和结果保存在当前浏览器；不包含老师之后发布的改期或提交状态。")}</p>
     <div className="flex flex-wrap gap-3 items-center">
-      <input aria-label="课程名称" placeholder="课程名称（可选）" value={courseName} onChange={e => setCourseName(e.target.value)} disabled={busy} className="border rounded-lg p-2" />
-      <label className="cb-button-primary">添加 syllabus PDF<input type="file" accept=".pdf,application/pdf" disabled={!ready || busy} className="hidden" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void read(file); }} /></label>
-      <label>查看周次 <input type="date" value={week} disabled={busy} onChange={e => {
+      <input aria-label={localizeUiText("课程名称")} placeholder={localizeUiText("课程名称（可选）")} value={courseName} onChange={e => setCourseName(e.target.value)} disabled={busy} className="border rounded-lg p-2" />
+      <label className="cb-button-primary">{localizeUiText("添加 syllabus PDF")}<input type="file" accept=".pdf,application/pdf" disabled={!ready || busy} className="hidden" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void read(file); }} /></label>
+      <label>{localizeUiText("查看周次 ")}<input type="date" value={week} disabled={busy} onChange={e => {
         if (!e.target.value) return;
         const day = e.target.value; const weekday = new Date(`${day}T12:00:00Z`).getUTCDay();
         setWeek(addDays(day, -((weekday + 6) % 7)));
       }} /></label>
-      {busy && <button type="button" onClick={() => abort.current?.abort()}>取消</button>}
+      {busy && <button type="button" onClick={() => abort.current?.abort()}>{localizeUiText("取消")}</button>}
     </div>
     {message && <p role="status">{message}</p>}
     {report?.courses.map(course => <div key={course.id} className="flex gap-3 items-center border-b py-3">
-      <span>{course.name}</span><button className="cb-text-link" disabled={busy} onClick={() => void organize(course.id)}>{report.syllabusSchedules?.some(s => s.courseId === course.id) ? '重新整理这门课' : '整理这门课'}</button>
+      <span>{course.name}</span><button className="cb-text-link" disabled={busy} onClick={() => void organize(course.id)}>{report.syllabusSchedules?.some(s => s.courseId === course.id) ? localizeUiText("重新整理这门课") : localizeUiText("整理这门课")}</button>
     </div>)}
     {report && <CanvasBriefReportView report={updateSavedBrief({ ...report, weekStart: week })} />}
   </section>;

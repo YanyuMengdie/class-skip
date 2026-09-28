@@ -1,3 +1,7 @@
+import { assertLectureCaseGenerationEnabled } from '@/features/reader/skim/lectureCaseRetirement';
+import { READING_MEDIA_INSTRUCTION, readingMediaSchema, parseReadingMedia } from '@/features/reader/skim/readingAids';
+import { STUDY_TERMS_INSTRUCTION, studyTermsSchema } from '@/features/reluctant/studyTerms';
+import { prepareUnderstandingSource } from '@/features/reader/understanding/understandingSource';
 
 import { Type, type GenerateContentParameters } from "@google/genai";
 import { generateReadingContent } from "@/services/readingAstraClient";
@@ -31,6 +35,7 @@ import type {
 import { getAIOutputLanguageInstruction, getCurrentAppLanguage, localizeText } from '@/shared/i18n/appLanguage';
 import { buildUnderstandingPrompt, normalizeUnderstandingResult, READING_UNDERSTANDING_RULES, type UnderstandingAction, type UnderstandingSession, type UnderstandingResult } from '@/features/reader/understanding/readingUnderstanding';
 import type { AppLanguage } from '@/types';
+import { STUDY_VISUAL_INSTRUCTION, studyVisualSchema } from '@/features/reluctant/studyVisuals';
 import {
   type OverviewExplanation,
   type OverviewOutline,
@@ -77,7 +82,7 @@ export const withCurrentOutputLanguage = (params: GenerateContentParameters): Ge
 /** All model requests use the local Astra server; credentials never enter the browser. */
 const ai = {
   models: {
-    generateContent: (params: GenerateContentParameters): Promise<{ text: string }> => (
+    generateContent: (params: GenerateContentParameters): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number } }> => (
       generateReadingContent(withCurrentOutputLanguage({ ...params, model: 'gemini-3.8-flash' }))
     ),
   },
@@ -1360,7 +1365,8 @@ const getChatHugSystemPrompt = (mode: 'emotional' | 'casual' | 'mindfulness' | '
 export const runChatHugAgent = async (
   history: ChatMessage[], 
   newMessage: string, 
-  mode: 'emotional' | 'casual' | 'mindfulness' | 'coax'
+  mode: 'emotional' | 'casual' | 'mindfulness' | 'coax',
+  options?: { throwOnError?: boolean }
 ): Promise<string> => {
   try {
     // 验证模式
@@ -1404,12 +1410,14 @@ export const runChatHugAgent = async (
     
     // 如果回复为空或太短，返回友好的提示
     if (!responseText || responseText.length < 2) {
+      if (options?.throwOnError) throw new Error('Empty companion response');
       return "抱歉，我现在有点卡住了，能再说一遍吗？";
     }
 
     return responseText;
   } catch (error) {
     console.error("ChatHug Error:", error);
+    if (options?.throwOnError) throw error;
     
     // 根据错误类型返回不同的友好提示
     if (error instanceof Error) {
@@ -2228,7 +2236,7 @@ const assertOverviewRequestLanguage = (language?: AppLanguage): void => {
 /** Full-document fact extraction shared by both low-effort overview styles. */
 export const generateReluctantOverviewOutline = async (
   docContent: string,
-  options: { fileName: string; pageCount: number; language?: AppLanguage },
+  options: { fileName: string; pageCount: number; language?: AppLanguage; signal?: AbortSignal; onUsage?: (usage?: { inputTokens: number; outputTokens: number }) => void },
 ): Promise<OverviewOutline> => {
   assertOverviewRequestLanguage(options.language);
   validateOverviewPageCount(options.pageCount);
@@ -2243,6 +2251,7 @@ export const generateReluctantOverviewOutline = async (
     model: 'gemini-3.8-flash',
     contents: [{ role: 'user', parts: [contentPart, { text: buildOverviewOutlinePrompt(options.fileName, options.pageCount) }] }],
     config: {
+      abortSignal: options.signal,
       systemInstruction: OVERVIEW_SOURCE_INSTRUCTION,
       responseMimeType: 'application/json',
       maxOutputTokens: 16384,
@@ -2273,6 +2282,7 @@ export const generateReluctantOverviewOutline = async (
   });
   // The Astra transport already rejects incomplete or refused responses; no
   // Gemini finish metadata is synthesized here. Keep local content checks.
+  options.onUsage?.(response.usage);
   assertOverviewResponseComplete(response.text);
   return parseOverviewOutline(response.text, options.pageCount);
 };
@@ -2281,22 +2291,26 @@ export const generateReluctantOverviewOutline = async (
 export const generateReluctantOverviewExplanation = async (
   outline: OverviewOutline,
   style: OverviewStyle,
-  options: { language?: AppLanguage } = {},
+  options: { language?: AppLanguage; signal?: AbortSignal; onUsage?: (usage?: { inputTokens: number; outputTokens: number }) => void; lightweightVisuals?: boolean; clickableTerms?: boolean } = {},
 ): Promise<OverviewExplanation> => {
   assertOverviewRequestLanguage(options.language);
   const validatedOutline = parseOverviewOutline(outline, outline.pageCount);
   const response = await readingAI.models.generateContent({
     model: 'gemini-3.8-flash',
-    contents: [{ role: 'user', parts: [{ text: buildOverviewExplanationPrompt(validatedOutline, style) }] }],
+    contents: [{ role: 'user', parts: [{ text: buildOverviewExplanationPrompt(validatedOutline, style)
+      + (options.clickableTerms ? `\n${STUDY_TERMS_INSTRUCTION}` : '')
+      + (options.lightweightVisuals ? `\n${STUDY_VISUAL_INSTRUCTION}\nAcross the WHOLE lecture, use at most 3 sections[].visual objects, one per chosen section. Each visual uses only that section's pointIds. Most sections can remain prose. Do not add an extra introduction or repeat the full prose in a diagram.` : '') }] }],
     config: {
+      abortSignal: options.signal,
       systemInstruction: OVERVIEW_SOURCE_INSTRUCTION,
       responseMimeType: 'application/json',
       maxOutputTokens: 16384,
       responseSchema: {
         type: Type.OBJECT,
-        required: ['title', 'sections'],
+        required: ['title', 'sections', ...(options.clickableTerms ? ['terms'] : [])],
         properties: {
           title: { type: Type.STRING },
+          ...(options.clickableTerms ? { terms: studyTermsSchema } : {}),
           sections: {
             type: Type.ARRAY,
             items: {
@@ -2305,6 +2319,7 @@ export const generateReluctantOverviewExplanation = async (
               properties: {
                 text: { type: Type.STRING },
                 pointIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+                ...(options.lightweightVisuals ? { visual: studyVisualSchema } : {}),
               },
             },
           },
@@ -2314,6 +2329,7 @@ export const generateReluctantOverviewExplanation = async (
   });
   // The Astra transport already rejects incomplete or refused responses; no
   // Gemini finish metadata is synthesized here. Keep local content checks.
+  options.onUsage?.(response.usage);
   assertOverviewResponseComplete(response.text);
   return parseOverviewExplanation(response.text, validatedOutline);
 };
@@ -3690,6 +3706,8 @@ export async function chatWithSkimAdaptiveTutor(
   mode: 'tutoring' | 'reading',
   docType: DocType = 'STEM',
   readingOptions?: {
+    visualAids?: boolean;
+    readingScope?: { pageStart: number; pageEnd: number; cropped: boolean };
     skimGranularity?: 'fine' | 'standard' | 'coarse';
     studyMapBriefing?: string;
     moduleCount?: number;
@@ -3723,11 +3741,24 @@ export async function chatWithSkimAdaptiveTutor(
       active: '积极关联',
     };
     const contents: Array<{ role: 'user' | 'model'; parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> }> = [];
-    const systemInstruction =
+    const baseSystemInstruction =
       contentType === 'paper' ? PAPER_COMPANION_PROMPT
       : contentType === 'article' ? ARTICLE_COMPANION_PROMPT
       : docType === 'HUMANITIES' ? HUMANITIES_SYSTEM_PROMPT
       : STEM_SYSTEM_PROMPT;
+
+    const companion = contentType === 'paper' || contentType === 'article';
+    const scope = companion ? readingOptions?.readingScope : undefined;
+    const scopeInstruction = scope ? `
+【用户选择的阅读范围；仅调整范围，不改变解读方法】
+本次只读应用内第 ${scope.pageStart}-${scope.pageEnd} 页${readingOptions?.recordScope ? `，独立分段「${readingOptions.recordScope.title}」` : ''}。
+上述陪读规则中的“全文、整篇、从头、第一节”均指本次选定范围；开场给本范围梗概，之后仍顺原文讲透一节/自然部分后等待用户继续。保留原话译文与解释分离、内容先行、忠于作者和完整讲透的要求，不改成 Lecture 模板，不因分段而压缩解释。
+${scope.cropped ? `附件为裁剪后的 PDF：附件第 1 页对应应用内第 ${scope.pageStart} 页，引用时必须换算为应用内页码（附件页码 + ${scope.pageStart - 1}）。` : '逐页文本使用应用内页码标注，引用沿用该编号。'}
+只陈述本范围内可见的内容，不声称已读未提供的页面。若理解需要范围外的方法、定义或背景，明确指出缺少什么，并询问是否补充；不能臆测缺失内容或自行扩大阅读范围。
+到所选范围末尾停下，告诉用户这一部分已讲完，返回目录或由用户决定下一步，不自动进入下一分段。
+` : '';
+    const withMedia = mode === 'reading' && readingOptions?.visualAids === true;
+    const systemInstruction = baseSystemInstruction + scopeInstruction + (withMedia ? READING_MEDIA_INSTRUCTION : '');
 
     contents.push({
       role: 'user',
@@ -3744,7 +3775,9 @@ export async function chatWithSkimAdaptiveTutor(
           getContentPart(readingOptions.auxiliaryMaterial.content),
         ] : []),
         ...(readingOptions?.recordScope ? [{
-          text: `【分段学习上下文】当前会话是独立分段对话，范围为应用内第 ${readingOptions.recordScope.pageStart}-${readingOptions.recordScope.pageEnd} 页。整份主材料只提供全局视野；除非用户明确提出跨范围比较或联系，不得主动讲解范围外内容，也不得延续其他分段的聊天。`
+          text: companion
+            ? `【分段学习上下文】当前独立分段：${readingOptions.recordScope.title}。范围为应用内第 ${readingOptions.recordScope.pageStart}-${readingOptions.recordScope.pageEnd} 页。分段概要仅供定位，事实以附件原文为准；不延续其他分段的聊天，也不自动进入下一段。`
+            : `【分段学习上下文】当前会话是独立分段对话，范围为应用内第 ${readingOptions.recordScope.pageStart}-${readingOptions.recordScope.pageEnd} 页。整份主材料只提供全局视野；除非用户明确提出跨范围比较或联系，不得主动讲解范围外内容，也不得延续其他分段的聊天。`
         }] : []),
         { text: `Current Mode: ${mode === 'tutoring' ? 'Recursive Tutoring' : 'Deep Lead-Reading (Phase 1/2)'}` }
       ]
@@ -3765,7 +3798,7 @@ export async function chatWithSkimAdaptiveTutor(
     });
 
     let finalMessage = newMessage;
-    if (mode === 'reading' && readingOptions) {
+    if (mode === 'reading' && readingOptions && !companion) {
       finalMessage = appendReadingModeUserMessageSuffix(newMessage, readingOptions);
     } else if (mode === 'tutoring') {
       finalMessage += buildTutorContextTurnSuffix(history, newMessage, tutorContext);
@@ -3785,6 +3818,7 @@ export async function chatWithSkimAdaptiveTutor(
       contents,
       config: {
         systemInstruction,
+        ...(withMedia ? {responseMimeType: 'application/json', responseSchema: {type: Type.OBJECT, properties: {messageMarkdown:{type:Type.STRING}, ...readingMediaSchema}, required:['messageMarkdown']}} : {}),
         ...(abortSignal ? { abortSignal } : {})
       }
     });
@@ -3822,6 +3856,7 @@ export interface GenerateContinuousLectureTurnInput {
   docType: DocType;
   readingOptions?: ContinuousLectureReadingOptions;
   depth: SkimExplanationDepth;
+  style?: SkimExplanationStyle;
   pageStart: number;
   pageEnd: number;
   turnIntent?: 'standard' | 'knowledge-extraction-feedback';
@@ -3854,6 +3889,7 @@ export interface GenerateLegacyRecordExplanationVariantInput {
 const SKIM_EXPLANATION_RESPONSE_SCHEMA = {
   type: Type.OBJECT,
   properties: {
+    ...readingMediaSchema,
     responseKind: { type: Type.STRING, enum: ['explanation', 'transition'] },
     messageMarkdown: { type: Type.STRING },
     spineItems: {
@@ -3881,6 +3917,7 @@ const SKIM_EXPLANATION_RESPONSE_SCHEMA = {
 const SKIM_EXPLANATION_VARIANT_SCHEMA = {
   type: Type.OBJECT,
   properties: {
+    ...readingMediaSchema,
     messageMarkdown: { type: Type.STRING },
     coveredSpineItemIds: { type: Type.ARRAY, items: { type: Type.STRING } },
     deferredSpineItemIds: { type: Type.ARRAY, items: { type: Type.STRING } },
@@ -3917,7 +3954,7 @@ const normalizeSkimExplanationSpine = (value: unknown): SkimExplanationSpineItem
   });
 };
 
-const parseContinuousLectureTurnDraft = (raw: string): SkimExplanationTurnDraft => {
+const parseContinuousLectureTurnDraft = (raw: string, start = 1, end = Number.MAX_SAFE_INTEGER, figures = false): SkimExplanationTurnDraft => {
   let parsed: Record<string, unknown> = {};
   try {
     parsed = parseJsonObject(raw);
@@ -3925,6 +3962,7 @@ const parseContinuousLectureTurnDraft = (raw: string): SkimExplanationTurnDraft 
     // 返回可校验的空草稿，让调用方携带错误反馈自动修复一次。
   }
   return {
+    readingMedia: parseReadingMedia(parsed, typeof parsed.messageMarkdown === 'string' ? parsed.messageMarkdown.trim() : '', start, end, figures),
     responseKind: parsed.responseKind === 'transition' ? 'transition' : 'explanation',
     messageMarkdown: typeof parsed.messageMarkdown === 'string' ? parsed.messageMarkdown.trim() : '',
     spineItems: normalizeSkimExplanationSpine(parsed.spineItems),
@@ -3934,7 +3972,7 @@ const parseContinuousLectureTurnDraft = (raw: string): SkimExplanationTurnDraft 
   };
 };
 
-const parseContinuousLectureVariantDraft = (raw: string): SkimExplanationVariantDraft => {
+const parseContinuousLectureVariantDraft = (raw: string, start = 1, end = Number.MAX_SAFE_INTEGER, figures = false): SkimExplanationVariantDraft => {
   let parsed: Record<string, unknown> = {};
   try {
     parsed = parseJsonObject(raw);
@@ -3942,6 +3980,7 @@ const parseContinuousLectureVariantDraft = (raw: string): SkimExplanationVariant
     // 同上：结构失败进入一次修复，不覆盖已有版本。
   }
   return {
+    readingMedia: parseReadingMedia(parsed, typeof parsed.messageMarkdown === 'string' ? parsed.messageMarkdown.trim() : '', start, end, figures),
     messageMarkdown: typeof parsed.messageMarkdown === 'string' ? parsed.messageMarkdown.trim() : '',
     coveredSpineItemIds: asStringArray(parsed.coveredSpineItemIds),
     deferredSpineItemIds: asStringArray(parsed.deferredSpineItemIds),
@@ -3956,6 +3995,7 @@ const buildContinuousLectureDepthDirective = (
   turnIntent: GenerateContinuousLectureTurnInput['turnIntent'] = 'standard',
   recordScope?: SkimReadingRecordScope,
   validationFeedback?: string,
+  style: SkimExplanationStyle = 'standard',
 ): string => {
   const modeLabel = recordScope ? '分段式' : '整段式';
   if (turnIntent === 'knowledge-extraction-feedback') {
@@ -3982,7 +4022,9 @@ ${validationFeedback}
 
 【普通 Lecture ${modeLabel}领读·连接式讲解协议】
 当前应用内页码范围：第 ${pageStart}-${pageEnd} 页。页码只能使用这个范围内的整数。
-本轮讲解深度：${depth === 'simple' ? '简单讲' : '正常讲'}。
+本轮讲解深度：${depth === 'simple' ? '简单讲（兼容旧调用）' : '完整讲解'}。
+本轮讲解方式：${style === 'interesting' ? '有意思地讲' : '正常讲'}。
+${style === 'interesting' ? '- 用原材料中的反直觉结果、问题、具体场景或贴切类比组织讲解，让读者容易跟上。类比要明确标注，并对应回正式概念、机制、证据与原文页码；说明必要的类比边界，不编造外部研究或事实。表达生动不等于压缩内容，不能省略难点、必要术语、证据或限制。' : '- 讲解清楚直接，按原材料的逻辑展开，保留必要的正式术语、机制、证据和限制。'}
 ${recordScope ? `当前分段：${recordScope.title}。上述页码就是这一分段的硬边界；骨架、讲解、例子和页码都不得越过它，不得自动开始下一分段。` : ''}
 
 请返回结构化 JSON，不要把 JSON 说明写入 messageMarkdown。
@@ -4045,6 +4087,7 @@ export const generateContinuousLectureTurn = async (
         input.turnIntent,
         recordScope,
         validationFeedback,
+        input.style,
       );
     const currentParts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: finalMessage }];
     (input.userImagesBase64 ?? []).forEach((image) => {
@@ -4058,13 +4101,13 @@ export const generateContinuousLectureTurn = async (
       model: 'gemini-3.8-flash',
       contents,
       config: {
-        systemInstruction: input.docType === 'HUMANITIES' ? HUMANITIES_SYSTEM_PROMPT : STEM_SYSTEM_PROMPT,
+        systemInstruction: (input.docType === 'HUMANITIES' ? HUMANITIES_SYSTEM_PROMPT : STEM_SYSTEM_PROMPT) + READING_MEDIA_INSTRUCTION,
         responseMimeType: 'application/json',
         responseSchema: SKIM_EXPLANATION_RESPONSE_SCHEMA,
         ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       },
     });
-    return parseContinuousLectureTurnDraft(response.text || '');
+    return parseContinuousLectureTurnDraft(response.text || '', input.pageStart, input.pageEnd, input.docContent.startsWith('data:application/pdf'));
   };
 
   let draft = await run();
@@ -4117,13 +4160,13 @@ ${validationFeedback}
         parts: [getContentPart(input.docContent), { text: prompt }],
       }],
       config: {
-        systemInstruction: '你负责为普通 Lecture 的旧分段讲解补建连接式版本。必须保留原结论，严格遵守当前分段范围。',
+        systemInstruction: '你负责为普通 Lecture 的旧分段讲解补建连接式版本。必须保留原结论，严格遵守当前分段范围。' + READING_MEDIA_INSTRUCTION,
         responseMimeType: 'application/json',
         responseSchema: SKIM_EXPLANATION_RESPONSE_SCHEMA,
         ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       },
     });
-    return parseContinuousLectureTurnDraft(response.text || '');
+    return parseContinuousLectureTurnDraft(response.text || '', input.pageStart, input.pageEnd, input.docContent.startsWith('data:application/pdf'));
   };
 
   let draft = await run();
@@ -4195,13 +4238,13 @@ export const generateContinuousLectureVariant = async (
         parts: [getContentPart(input.docContent), { text: buildVariantDirective(input, validationFeedback) }],
       }],
       config: {
-        systemInstruction: '你是普通 Lecture 领读的讲解改写器。忠实性、当前范围和同一内容骨架优先于文风变化。',
+        systemInstruction: '你是普通 Lecture 领读的讲解改写器。忠实性、当前范围和同一内容骨架优先于文风变化。' + READING_MEDIA_INSTRUCTION,
         responseMimeType: 'application/json',
         responseSchema: SKIM_EXPLANATION_VARIANT_SCHEMA,
         ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       },
     });
-    return parseContinuousLectureVariantDraft(response.text || '');
+    return parseContinuousLectureVariantDraft(response.text || '', input.pageStart, input.pageEnd, input.docContent.startsWith('data:application/pdf'));
   };
 
   let draft = await run();
@@ -4331,6 +4374,8 @@ const buildSkimRoutePrompt = (options: {
   contentType: SkimContentType;
   moduleCount?: number;
   skimPace?: 'module' | 'part';
+  pageStart?: number;
+  pageEnd?: number;
   pageRangeLabel?: string;
   studyMapBriefing?: string;
   strictPageRanges?: boolean;
@@ -4358,14 +4403,14 @@ const buildSkimRoutePrompt = (options: {
   const paperInstruction = `
 你正在为一篇论文 / paper 生成"可导航领读路线"。
 - 顶层是论文真实 Section 或功能段,例如 Abstract、Introduction、Methods、Results、Discussion、Conclusion。
-- 不要套 lecture 的 Module 模板。
+- 分组沿用原文章节和论证功能，不改变论文解读方法；界面用 Module/Part 表示导航层级，不强制套实证论文格式。理论论文跟随作者论证。
 - 长 section 可以拆成 1-4 个 Natural Part;短 section 可以没有 children。
 - 标题要体现作者结构和论证功能。`;
 
   const articleInstruction = `
 你正在为一篇文章 / 书章生成"可导航领读路线"。
 - 顶层是作者推进思路的 Stage,不是论文 section,也不是 lecture module。
-- 每个 Stage 可拆成若干 Paragraph Group / 小段落组。
+- 每个 Stage 可拆成若干 Paragraph Group / 小段落组。分组沿用章节、主题与作者推进顺序，不平均切页，也不改变文章解读方法。
 - 标题要体现这一段在作者思路里做了什么,比如提出问题、举例推进、转折反驳、收束结论。`;
 
   return `
@@ -4375,10 +4420,10 @@ const buildSkimRoutePrompt = (options: {
 - 这份路线用于右侧目录跳转,所以必须按材料出现顺序排列。
 - 只记录正式主线结构,不要记录用户插队提问、追问、重讲请求。
 - ${strictPageRanges
-    ? '页码是创建分段的硬数据，必须使用下面“逐页原文”标注的应用内页码，禁止估算、使用幻灯片印刷页码或跳过空白页。顶层 Module 必须无缺页、无重叠地连续覆盖整个指定范围；有 Part 时，Part 也必须无缺页、无重叠地连续覆盖所属 Module。'
+    ? '页码是创建分段的硬数据，必须使用下面“逐页原文”标注的应用内页码，禁止估算、使用幻灯片印刷页码或跳过空白页。顶层分段必须无缺页、无重叠地连续覆盖整个指定范围；有子段时，子段也必须连续覆盖所属分段。一页包含多个小节时把它们归入同一分段，避免重复覆盖；不要为凑数量切断同页论证。'
     : '页码尽量准确;不确定时允许近似,但不要编造不存在的页码。'}
 - title 用中文优先,必要时保留英文术语。
-- summary ${strictPageRanges ? '写两句简短梗概：第一句说明本段讲什么，第二句说明它在整份 Lecture 中的作用。' : '只写一句短说明,不要长篇解释。'}
+- summary ${strictPageRanges ? '写两句简短梗概：第一句说明本段讲什么，第二句说明它在本次选定材料中的作用。' : '只写一句短说明,不要长篇解释。'}
 - 输出必须是 JSON object,形如:
 {
   "title": "整份材料标题",
@@ -4400,7 +4445,8 @@ const buildSkimRoutePrompt = (options: {
 
 当前材料类型: ${contentType}
 当前页码范围: ${pageRangeLabel || '整份材料'}
-${contentType === 'lecture' ? `当前领读节奏: ${skimPace === 'part' ? '一次一个 part' : '一次一个 module'}` : ''}
+${options.pageStart && options.pageEnd ? `本次附件已按所选范围提供。附件第 1 页对应应用内第 ${options.pageStart} 页；最终范围必须为应用内第 ${options.pageStart}-${options.pageEnd} 页（原 PDF 页码，非书内印刷页码）。` : ''}
+目录粒度: ${skimPace === 'part' ? '较细；较长的章节/主题下补出有明确页码的自然小段' : '较粗；优先呈现完整章节/主题'}。短材料可只有一个分段，不为凑数切碎内容。
 ${contentType === 'lecture' ? lectureInstruction : contentType === 'paper' ? paperInstruction : articleInstruction}
 
 ${studyMapBriefing?.trim() ? `可参考的旧学习地图如下,但请输出结构化 JSON:\n${studyMapBriefing.trim().slice(0, 8000)}` : ''}
@@ -4416,7 +4462,9 @@ export const generateSkimReadingRoute = async (
     docType: DocType;
     moduleCount?: number;
     skimPace?: 'module' | 'part';
-    pageRangeLabel?: string;
+    pageStart?: number;
+  pageEnd?: number;
+  pageRangeLabel?: string;
     studyMapBriefing?: string;
     strictPageRanges?: boolean;
     pageIndexedText?: string;
@@ -4492,7 +4540,6 @@ export const generateSkimReadingRoute = async (
     if (!parsed?.nodes?.length) return null;
 
     const nodes = parsed.nodes
-      .slice(0, 16)
       .map((node, index) => normalizeSkimRouteNode(node, options.contentType, index + 1));
     if (nodes.length === 0) return null;
 
@@ -5621,23 +5668,23 @@ export const generateReadingUnderstandingTurn = async (input: {
   pageTexts?: string[];
   abortSignal?: AbortSignal;
 }): Promise<UnderstandingResult> => {
-  if (!input.documentContent.trim() && !input.pageTexts?.some(text => text.trim())) {
-    throw new Error('原文还没有准备好，请稍后再试。');
+  // Old saved discussions must be upgraded at the message entry, never sent with broad context.
+  if (input.session.scopePolicy !== 'message-topic-v1') {
+    throw new Error('请返回领读，重新选择这条消息里的知识点。旧对话仍会保留。');
   }
-  const hasScopedText = input.session.pageRefs.length > 0
-    && input.session.pageRefs.every(page => (input.pageTexts?.[page - 1]?.trim().length ?? 0) > 20);
-  const scopedText = hasScopedText
-    ? input.session.pageRefs.map(page => `[应用内第 ${page} 页]\n${input.pageTexts![page - 1]}`).join('\n\n')
-    : '';
-  // Extracted text can omit the actual chart/diagram despite containing its title.
-  const hasPdf = input.documentContent.startsWith('data:application/pdf;');
-  const source = hasPdf ? input.documentContent : scopedText || input.documentContent;
+  const strictSource = await prepareUnderstandingSource({
+    sessionId: input.session.id, documentContent: input.documentContent,
+    pageTexts: input.pageTexts, pageRefs: input.session.pageRefs,
+  });
+  input.abortSignal?.throwIfAborted();
+  const sourceParts = [
+    { text: strictSource.instruction },
+    ...(strictSource.source ? [getContentPartWithMaxChars(strictSource.source, 120_000)] : []),
+  ];
   const response = await readingAI.models.generateContent({
     model: 'gemini-3.8-flash',
     contents: [{ role: 'user', parts: [
-      { text: `以下是用于核对的原文。只围绕当前讲解范围 ${input.session.pageRefs.join('、')} 页，页码始终使用应用内编号。当前讲解可能有误，以原文核对；如果原文不足以支持结论就明确说明。` },
-      getContentPartWithMaxChars(source, 120_000),
-      ...(hasPdf && scopedText ? [{ text: `【辅助定位文字，图表仍以 PDF 为准】\n${scopedText.slice(0, 60_000)}` }] : []),
+      ...sourceParts,
       { text: buildUnderstandingPrompt(input) },
     ] }],
     config: {
@@ -5807,6 +5854,7 @@ ${chunk.text}
 export const analyzeLectureCaseFit = async (
     input: AnalyzeLectureCaseFitInput,
 ): Promise<LectureCaseAnalysisResult> => {
+    assertLectureCaseGenerationEnabled();
     const chunks = buildLectureCaseChunks(input.pageTexts, input.pageStart, input.pageEnd);
     if (chunks.length === 0) throw new Error('所选范围没有可分析页面。');
 
@@ -5914,6 +5962,7 @@ ${compactManifest}
 export const buildLectureCasePlan = async (
     input: BuildLectureCasePlanInput,
 ): Promise<LectureCasePlan> => {
+    assertLectureCaseGenerationEnabled();
     const prompt = `
 根据经过适配判断的 Lecture 内容账本，生成一份忠实的推演式领读计划。
 
@@ -6001,6 +6050,7 @@ ${JSON.stringify(input.manifest)}
 export const advanceLectureCase = async (
     input: AdvanceLectureCaseInput,
 ): Promise<LectureCaseTurnResult> => {
+    assertLectureCaseGenerationEnabled();
     const allowedUnits = new Set(input.episode.unitIds);
     const episodeUnits = input.episode.unitIds.map((unitId) => ({ unitId, progress: input.progress.units[unitId] ?? { level: 'unseen' } }));
     const pageSource = input.episode.pageRefs

@@ -1,4 +1,6 @@
-export type UnderstandingAction = 'start' | 'answer' | 'hint' | 'explain' | 'foundation' | 'revisit';
+import type { UnderstandingPlan } from './understandingPlan';
+
+export type UnderstandingAction = 'start' | 'answer' | 'hint' | 'explain' | 'foundation' | 'revisit' | 'reason';
 export type UnderstandingPhase = 'question' | 'explanation' | 'check' | 'complete';
 export type UnderstandingMode = 'acquisition' | 'restructuring';
 
@@ -27,6 +29,11 @@ export interface UnderstandingResult {
 }
 
 export interface UnderstandingSession {
+  teachingFlow?: 'guided-step-v1';
+  entryPath?: 'whole' | 'specific';
+  focusQuestion?: string;
+  guidedDiscussions?: UnderstandingSession[];
+  scopePolicy?: 'message-topic-v1';
   version: 1;
   id: string;
   topic: string;
@@ -37,6 +44,11 @@ export interface UnderstandingSession {
   phase: UnderstandingPhase;
   reflection?: UnderstandingReflection;
   reviewRequested?: boolean;
+  explained?: boolean;
+  plan?: UnderstandingPlan;
+  /** Old scopes remain viewable but are never included in a new topic's AI context. */
+  archivedSessions?: UnderstandingSession[];
+  focus?: { title: string; summary: string; scopeTitle: string; path: 'selected' | 'essentials'; roundTopicCount?: number };
   createdAt: number;
 }
 
@@ -56,6 +68,7 @@ export const READING_UNDERSTANDING_RULES = `
 `.trim();
 
 const actionInstructions: Record<UnderstandingAction, string> = {
+  reason: '用户主动愿意尝试推理：只用此前已讲明白的前提，留一个小判断或预测给用户。一次最多一个问题；不要同时要求比较、解释和迁移，不新增术语门槛。phase=question。',
   start: '开始围绕当前内容帮用户理解。先按概念/词汇及已有基础分流；不要假设用户带着一个错误模型。若缺少基础，先简短解释，再最多邀请一次自己的表达或预测。',
   answer: '先回应用户这次实际给出的判断和理由，再选最小下一步。若刚形成新理解，可以只给一个换情境检验，phase=check；若正在回答上一轮 check 且理由成立，可 phase=complete，简短确认即可，不再追加问题。',
   hint: '用户主动要提示：立即给一条能让他继续的最小提示，不先反问，不要求先完成题目。不要认定本次已经完成理解检验。',
@@ -113,6 +126,9 @@ export function buildUnderstandingPrompt(input: {
     : 5;
   const context = {
     topic: session.topic,
+    selectedFocus: session.focus,
+    entryPath: session.entryPath,
+    focusQuestion: session.focusQuestion,
     mode: session.mode,
     phase: session.phase,
     allowedPageRefs: [...new Set(session.pageRefs.filter(validPage))],
@@ -126,9 +142,28 @@ export function buildUnderstandingPrompt(input: {
   return `${READING_UNDERSTANDING_RULES}
 
 【本次安排】
-时间预算：${minutes} 分钟。这是用户可调整的覆盖/深度偏好，不是计时完成判据。预算较短时只处理最关键的一处理解，不机械跑完整流程，不为赶时间宣称掌握。
+${session.scopePolicy ? `【严格的消息与知识点边界】
+sourceText 是用户点击的那条领读消息中选中的具体段落，也是本轮唯一教学范围。selectedFocus.summary 不得扩展它。提供的 PDF 页仅用于核对，不意味着页内其余内容也是本轮知识点。
+当前选择是一组完整内容：同一主要标题下的小点、例子和引文共同解释这一个问题。先串清这一组的关系，不把每个编号拆成新的课程或逐项考问；用户追问某一句时再局部展开。不要自动进入其他未选标题。
+只讲这段已出现的概念和关系。不要从整篇文章、整份讲义或整个 Module 引入其他主张、结论或后文案例。必要基础最多简短说明；需要展开新知识点时先询问用户，不自行扩展。
+此前回合仅用于接续当前知识点的问答，不定义教学范围；若此前模型已经讲偏，忽略越界内容并回到 sourceText，不沿着错误范围继续。不得因为历史回合提过某内容，就把它当作本次已选知识点。
+用户选“整体没懂”仅指点击的那条消息；3 分钟、5 分钟、慢慢想只改变当前知识点的解释深度，不扩大内容范围。
+如果没有核对原文，明确说当前依据领读段落解释、原文尚未核对，不把领读内容当作已经证实的原文。不猜页码。不因背景知识相关就引用后文。` : ''}
+时间预算：${minutes} 分钟。这是用户可调整的覆盖/深度偏好，不是计时完成判据。预算较短时简洁解释当前选中的知识点，不擅自换题或跳过必要前提，不为赶时间宣称掌握。
+${session.focus ? `本次范围：${session.focus.scopeTitle}。当前只处理用户选定的「${session.focus.title}」。${session.scopePolicy ? 'selectedFocus.summary 与 sourceText 共同限定所选段落；有原文时用其核对，无原文时说明核对缺口。' : 'selectedFocus.summary 用于确定问题，sourceText 是背景，事实必须核对原文。'}
+${session.focus.path === 'essentials' ? '用户表示整体没懂：本轮是重点入门，先补必要基础、核心关系和一个具体例子；“重点”只指理解主线，不是考试预测。' : '用户选择了具体疑惑：围绕这一点解释，其他内容只作必要背景。'}
+这一轮共选 ${session.focus.roundTopicCount ?? 1} 个知识点，${minutes} 分钟是整轮节奏参考，每个知识点只占其中一部分；慢慢想可以更深入。用户追问时按需要继续，不用时间强行结束。
+start 时先把这一点简短讲清楚，phase=explanation，可在结尾邀请一次具体提问；不要一开场就考试。程序负责其他知识点的队列，不要宣称整个 Module/Part 已覆盖或学会，也不要自动讲下一点。` : ''}
 本轮动作：${action}
-${actionInstructions[action]}
+${session.focus && action === 'start' ? '按上述当前知识点范围直接开始讲解，phase=explanation；不先要求答题。' : actionInstructions[action]}
+${session.teachingFlow === 'guided-step-v1' ? `【本次按需推演的教学顺序，优先于默认探查与迁移建议】
+用户因领读未理解而主动求助；不要考试化，不设计完整案件，不自动扩展到整个 Module，不生成知识点队列。whole 是当前点击消息整体没进脑子，不是整份课件；specific 聚焦 focusQuestion 或所选段落。
+start：先用几句大白话建立最少必要背景，解释每个必要术语，保留中英文。再由你示范一步因果推理。到这里就停，phase=explanation，绝对不要在开场给用户出题；由界面的“带我想一步”邀请用户主动开始。
+reason：仅使用已经讲清的背景，让用户往前想一步；最多一个简单问题，明确假设例子不是实验事实。若此前没有足够背景，先补背景，phase=explanation，不勉强提问。
+answer：先接住真实想法，明确正确部分，补清一个缺口，再把关系接回原讲解；默认 phase=explanation。不自动追加迁移测试或连续追问，不替用户宣称掌握。用户说不知道或没懂时，直接进一步拆解并示范，禁止换一种措辞再次追问。
+foundation：用户不知道或背景仍不清楚，降低术语密度，用更具体的小例子示范，phase=explanation，禁止结尾再问问题。
+explain：用户选择“你接着讲”，直接把推理和原文的关系讲完，phase=explanation，无答题门槛。
+随时允许返回领读，不要求获得 complete；接受示范不等于通过检验。` : ''}
 本轮是否具备返回 complete 的交互前提：${canComplete(session, action, userText) ? '是，但仍须核对本次理由是否成立' : '否，禁止返回 complete'}。
 
 【结构化输出】
@@ -188,6 +223,12 @@ export function normalizeUnderstandingResult(
   const pageRefs = [...new Set(requestedPages.filter((page): page is number => validPage(page) && allowedPages.has(page)))];
   if (requestedPages.some(page => !validPage(page) || !allowedPages.has(page))) {
     throw new Error('这次回复含有不在当前材料范围内的页码，请重试。');
+  }
+
+  if (input.session.teachingFlow === 'guided-step-v1'
+    && ['start', 'foundation', 'explain'].includes(input.action)
+    && raw.phase !== 'explanation') {
+    throw new Error('这一步应先解释背景，不能直接要求答题，请重试。');
   }
 
   const mode = input.action === 'foundation'

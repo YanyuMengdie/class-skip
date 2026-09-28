@@ -1,3 +1,4 @@
+import { useAppLanguage, localizeUiText, localizeText, getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
 import React, { useEffect, useRef, useState } from 'react';
 import { BookOpen, ChevronDown, FileText, Loader2, Upload } from 'lucide-react';
 import type { CanvasCourse } from '@/services/canvas';
@@ -10,9 +11,25 @@ const STATUS_LABELS: Record<BriefSyllabusStatus['status'], string> = {
 };
 
 export const syllabusStatusLabel = (status?: BriefSyllabusStatus, hasReport = false): string =>
-  status ? STATUS_LABELS[status.status] : hasReport ? '旧简报未记录大纲读取情况' : '尚未读取大纲';
+  localizeUiText(status ? STATUS_LABELS[status.status] : hasReport ? '旧简报未记录大纲读取情况' : '尚未读取大纲');
 
 export const syllabusMissingArrangement = (status: BriefSyllabusStatus | undefined, missing: string): string => {
+  if (getCurrentAppLanguage() === 'en') {
+    const subject = missing === '讲次和阅读清单' ? 'lectures and readings' : missing === '讲次' ? 'lectures' : 'readings';
+    if (!status) return `This saved brief does not record whether the syllabus was read. Sync to check this week's ${subject}.`;
+    const messages: Record<BriefSyllabusStatus['status'], string> = {
+      not_found: `The syllabus has not been found, so this week's ${subject} are unconfirmed. Select or upload a syllabus above.`,
+      needs_selection: `Several possible syllabi were found. Select one above before syncing this week's ${subject}.`,
+      read_failed: `The syllabus was found, but its text could not be read. This week's ${subject} are unconfirmed. Reload the syllabus or upload a local PDF.`,
+      read_partial: `Some syllabus pages could not be read. This week's ${subject} may be incomplete; confirmed arrangements remain visible.`,
+      schedule_partial: `Some arrangements have source references, but this week's ${subject} are not fully confirmed. Expand the schedule and sources to review them.`,
+      schedule_pending: 'The syllabus text was read, but no AI extraction request was sent for this course. You can process this course separately without downloading it again.',
+      read: `The syllabus text was read, but the schedule has not been extracted. This week's ${subject} are not yet confirmed.`,
+      schedule_failed: `The syllabus text was read, but no usable schedule was extracted. This week's ${subject} are not yet confirmed.`,
+      ready: `The semester schedule was processed, but no ${subject} could be assigned to this week. This does not mean there are none.`,
+    };
+    return messages[status.status];
+  }
   if (!status) return `这份简报没有记录大纲是否读过；重新同步后再确认本周${missing}。`;
   if (status.status === 'not_found') return `尚未找到课程大纲，本周${missing}还未核实。可在上方指定或上传大纲。`;
   if (status.status === 'needs_selection') return `发现多份可能的大纲，先在上方指定一份，再同步本周${missing}。`;
@@ -25,15 +42,16 @@ export const syllabusMissingArrangement = (status: BriefSyllabusStatus | undefin
 };
 
 export function SyllabusReportStatus({ status, hasReport = true }: { status?: BriefSyllabusStatus; hasReport?: boolean }) {
+  useAppLanguage();
   return <div className={`cb-syllabus-status ${status?.status === 'ready' ? 'is-ready' : ''}`}>
     <BookOpen size={13} /><span>{syllabusStatusLabel(status, hasReport)}</span>
-    {status?.title && <small>{status.title}{status.pageCount ? ` · 共 ${status.pageCount} 页，已读 ${status.sourceIds.length} 页` : ''}</small>}
-    {status?.processing && <small>已保存 {status.processing.learningDated} 项有日期的讲次或阅读{status.processing.learningUnresolved ? ` · ${status.processing.learningUnresolved} 项日期待对应` : ''}</small>}
-    {status?.status === 'read_failed' && <p className="cb-syllabus-status-detail" role="status">{status.detail || '这份旧记录没有保存具体失败原因，可仅重新读取本课大纲。'}</p>}
-    {status && (status.detail || status.processing?.problems.length) && <details className="cb-syllabus-status-detail"><summary><ChevronDown size={12} />读取范围与其他学期信息</summary>
-      <p>{status.detail}</p>
-      {status.processing?.analyzedSourceIds && <p>已提取正文 {status.sourceIds.length} 页；实际交给 AI {status.processing.analyzedSourceIds.length} 页；未交给 AI {status.processing.omittedSourceIds?.length || 0} 页。</p>}
-      {!!status.processing?.problems.length && <ul>{status.processing.problems.map((problem, index) => <li key={index}>{problem.message}</li>)}</ul>}
+    {status?.title && <small>{status.title}{status.pageCount ? localizeText(` · 共 ${status.pageCount} 页，已读 ${status.sourceIds.length} 页`, ` · ${status.pageCount} pages, ${status.sourceIds.length} read`) : ''}</small>}
+    {status?.processing && <small>{localizeUiText("已保存 ")}{status.processing.learningDated}{localizeUiText(" 项有日期的讲次或阅读")}{status.processing.learningUnresolved ? localizeText(` · ${status.processing.learningUnresolved} 项日期待对应`, ` · ${status.processing.learningUnresolved} dates unresolved`) : ''}</small>}
+    {status?.status === 'read_failed' && <p className="cb-syllabus-status-detail" role="status">{(status.detail && localizeUiText(status.detail)) || localizeUiText("这份旧记录没有保存具体失败原因，可仅重新读取本课大纲。")}</p>}
+    {status && (status.detail || status.processing?.problems.length) && <details className="cb-syllabus-status-detail"><summary><ChevronDown size={12} />{localizeUiText("读取范围与其他学期信息")}</summary>
+      <p>{localizeUiText(status.detail || '')}</p>
+      {status.processing?.analyzedSourceIds && <p>{localizeUiText("已提取正文 ")}{status.sourceIds.length}{localizeUiText(" 页；实际交给 AI ")}{status.processing.analyzedSourceIds.length}{localizeUiText(" 页；未交给 AI ")}{status.processing.omittedSourceIds?.length || 0}{localizeUiText(" 页。")}</p>}
+      {!!status.processing?.problems.length && <ul>{status.processing.problems.map((problem, index) => <li key={index}>{localizeUiText(problem.message)}</li>)}</ul>}
     </details>}
   </div>;
 }
@@ -49,6 +67,7 @@ export function SyllabusSources({ courses, report, selections, disabled, onChang
   onOrganize?: (courseId: number) => void;
   onRead?: (courseId: number) => void;
 }) {
+  useAppLanguage();
   const [uploadingId, setUploadingId] = useState<number | null>(null);
   const [uploadError, setUploadError] = useState<{ courseId: number; message: string } | null>(null);
   const alive = useRef(true);
@@ -79,8 +98,8 @@ export function SyllabusSources({ courses, report, selections, disabled, onChang
   if (!courses.length) return null;
   const readyCount = courses.filter((course) => report?.syllabi?.some((status) => status.courseId === course.id && status.status === 'ready')).length;
   return <details className="cb-syllabus-sources" open={!report || courses.some((course) => report.syllabi?.some((status) => status.courseId === course.id && status.status === 'needs_selection'))}>
-    <summary><BookOpen size={17} /><strong>课程大纲</strong><span>{report ? `${readyCount} / ${courses.length} 门课已整理课表` : '先确认每门课的依据'}<ChevronDown size={15} /></span></summary>
-    <div className="cb-syllabus-body"><p className="cb-section-intro">先读大纲、整理整学期课表，再结合公告和 Calendar 更新本周安排。更换来源后，点击「同步并生成本周简报」才会重新整理。</p>
+    <summary><BookOpen size={17} /><strong>{localizeUiText("课程大纲")}</strong><span>{report ? localizeText(`${readyCount} / ${courses.length} 门课已整理课表`, `${readyCount} / ${courses.length} course schedules processed`) : localizeUiText("先确认每门课的依据")}<ChevronDown size={15} /></span></summary>
+    <div className="cb-syllabus-body"><p className="cb-section-intro">{localizeUiText("先读大纲、整理整学期课表，再结合公告和 Calendar 更新本周安排。更换来源后，点击「同步并生成本周简报」才会重新整理。")}</p>
       {courses.map((course) => {
         const status = report?.syllabi?.find((entry) => entry.courseId === course.id);
         const schedule = report?.syllabusSchedules?.find((entry) => entry.courseId === course.id);
@@ -96,31 +115,31 @@ export function SyllabusSources({ courses, report, selections, disabled, onChang
         const busy = disabled || uploadingId != null;
         return <article className="cb-syllabus-course" key={course.id}>
           <div className="cb-syllabus-course-heading"><strong>{course.course_code || course.name}</strong><SyllabusReportStatus status={status} hasReport={!!report?.courses.some((entry) => entry.id === course.id)} /></div>
-          {selection && <p className="cb-syllabus-choice"><FileText size={13} /><span>指定来源：{selection.title}{selection.kind === 'upload' ? `（本地 PDF，${selection.pages.length} 页）` : ''}</span></p>}
+          {selection && <p className="cb-syllabus-choice"><FileText size={13} /><span>{localizeUiText("指定来源：")}{selection.title}{selection.kind === 'upload' ? localizeText(`（本地 PDF，${selection.pages.length} 页）`, ` (local PDF, ${selection.pages.length} pages)`) : ''}</span></p>}
           <div className="cb-syllabus-actions">
-            {candidates.size > 0 && <label><span>指定 Canvas 大纲</span><select aria-label={`${course.course_code || course.name}的大纲`} disabled={busy} value={selection?.kind === 'canvas' ? String(selection.fileId) : ''} onChange={(event) => { const candidate = candidates.get(Number(event.target.value)); if (candidate) { onChange(course.id, { courseId: course.id, kind: 'canvas', fileId: candidate.fileId, title: candidate.title }); setUploadError(null); } }}><option value="" disabled>选择课程大纲 PDF</option>{[...candidates.values()].map((candidate) => <option key={candidate.fileId} value={candidate.fileId}>{candidate.title}</option>)}</select></label>}
-            <label className={`cb-syllabus-upload ${busy ? 'is-disabled' : ''}`}>{uploadingId === course.id ? <Loader2 size={14} className="cb-spin" /> : <Upload size={14} />}{uploadingId === course.id ? '正在读取 PDF…' : '上传本地大纲'}<input type="file" accept="application/pdf,.pdf" aria-label={`${course.course_code || course.name}上传本地大纲`} disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void upload(course.id, file); }} /></label>
-            {selection && <button type="button" className="cb-text-link" disabled={busy} onClick={() => { onChange(course.id, null); setUploadError(null); }}>恢复自动寻找</button>}
-            {report?.pipelineVersion === 2 && onRetry && <button type="button" className="cb-text-link" disabled={busy} onClick={() => onRetry(course.id)}>下次重新整理这门课</button>}
-            {!!status?.fileId && onRead && <button type="button" className="cb-text-link" disabled={busy} onClick={() => onRead(course.id)}>仅重新读取本课大纲（不调用 AI）</button>}
-            {!!status?.sourceIds.length && onOrganize && <button type="button" className="cb-text-link" disabled={busy} onClick={() => onOrganize(course.id)}>重新提取本课已读课表（最多 1 次 AI 请求）</button>}
+            {candidates.size > 0 && <label><span>{localizeUiText("指定 Canvas 大纲")}</span><select aria-label={localizeText(`${course.course_code || course.name}的大纲`, `Syllabus for ${course.course_code || course.name}`)} disabled={busy} value={selection?.kind === 'canvas' ? String(selection.fileId) : ''} onChange={(event) => { const candidate = candidates.get(Number(event.target.value)); if (candidate) { onChange(course.id, { courseId: course.id, kind: 'canvas', fileId: candidate.fileId, title: candidate.title }); setUploadError(null); } }}><option value="" disabled>{localizeUiText("选择课程大纲 PDF")}</option>{[...candidates.values()].map((candidate) => <option key={candidate.fileId} value={candidate.fileId}>{candidate.title}</option>)}</select></label>}
+            <label className={`cb-syllabus-upload ${busy ? 'is-disabled' : ''}`}>{uploadingId === course.id ? <Loader2 size={14} className="cb-spin" /> : <Upload size={14} />}{uploadingId === course.id ? localizeUiText("正在读取 PDF…") : localizeUiText("上传本地大纲")}<input type="file" accept="application/pdf,.pdf" aria-label={localizeText(`${course.course_code || course.name}上传本地大纲`, `Upload a local syllabus for ${course.course_code || course.name}`)} disabled={busy} onChange={(event) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void upload(course.id, file); }} /></label>
+            {selection && <button type="button" className="cb-text-link" disabled={busy} onClick={() => { onChange(course.id, null); setUploadError(null); }}>{localizeUiText("恢复自动寻找")}</button>}
+            {report?.pipelineVersion === 2 && onRetry && <button type="button" className="cb-text-link" disabled={busy} onClick={() => onRetry(course.id)}>{localizeUiText("下次重新整理这门课")}</button>}
+            {!!status?.fileId && onRead && <button type="button" className="cb-text-link" disabled={busy} onClick={() => onRead(course.id)}>{localizeUiText("仅重新读取本课大纲（不调用 AI）")}</button>}
+            {!!status?.sourceIds.length && onOrganize && <button type="button" className="cb-text-link" disabled={busy} onClick={() => onOrganize(course.id)}>{localizeUiText("重新提取本课已读课表（最多 1 次 AI 请求）")}</button>}
           </div>
-          {uploadError?.courseId === course.id && <p className="cb-syllabus-error" role="alert">{uploadError.message}</p>}
-          {status && <details className="cb-syllabus-detail"><summary>上次读取的依据 <ChevronDown size={12} /></summary><p>{status.detail}</p>{status.processing?.analyzedSourceIds && <p>实际整理页码：{status.processing.analyzedSourceIds.map(id => report?.sources.find(source => source.id === id)?.page || '页面正文').join('、')}。未整理页码：{status.processing.omittedSourceIds?.map(id => report?.sources.find(source => source.id === id)?.page || '页面正文').join('、') || '无'}。</p>}{status.sourceIds.length > 0 && <ul>{status.sourceIds.map((id) => report?.sources.find((source) => source.id === id && source.courseId === course.id)).filter((source) => !!source).map((source) => <li key={source!.id}><details><summary>{source!.title} · 查看已读文字</summary><pre className="cb-syllabus-raw">{source!.text}</pre></details></li>)}</ul>}</details>}
-          {!!schedule?.items.length && <details className="cb-syllabus-detail"><summary>课程安排表 · {schedule.items.length} 项 <ChevronDown size={12} /></summary><div className="cb-plan-table-wrap"><table className="cb-plan-table"><thead><tr><th>日期</th><th>内容</th><th>原文</th></tr></thead><tbody>{[...schedule.items].sort((a, b) => (a.date?.value || a.weekStart || 'z').localeCompare(b.date?.value || b.weekStart || 'z')).map(item => <tr key={item.id}><td>{item.date?.value.slice(0, 10) || item.weekStart || item.dateText || '未明确'}{item.dateStatus === 'conflict' ? '（冲突）' : ''}</td><td>{item.title}{item.requirement === 'optional' ? ' · 选读 / 选做' : ''}</td><td><details><summary>查看</summary>{item.evidence.map((e, index) => <p key={index}>{report?.sources.find(s => s.id === e.sourceId)?.title}<br />{e.quote}</p>)}</details></td></tr>)}</tbody></table></div></details>}
-          {!!schedule?.pages?.length && <details className="cb-syllabus-detail"><summary>逐页整理结果 <ChevronDown size={12} /></summary>
+          {uploadError?.courseId === course.id && <p className="cb-syllabus-error" role="alert">{localizeUiText(uploadError.message)}</p>}
+          {status && <details className="cb-syllabus-detail"><summary>{localizeUiText("上次读取的依据 ")}<ChevronDown size={12} /></summary><p>{localizeUiText(status.detail || '')}</p>{status.processing?.analyzedSourceIds && <p>{localizeUiText("实际整理页码：")}{status.processing.analyzedSourceIds.map(id => report?.sources.find(source => source.id === id)?.page || localizeUiText("页面正文")).join('、')}{localizeUiText("。未整理页码：")}{status.processing.omittedSourceIds?.map(id => report?.sources.find(source => source.id === id)?.page || localizeUiText("页面正文")).join('、') || localizeUiText("无")}。</p>}{status.sourceIds.length > 0 && <ul>{status.sourceIds.map((id) => report?.sources.find((source) => source.id === id && source.courseId === course.id)).filter((source) => !!source).map((source) => <li key={source!.id}><details><summary>{source!.title}{localizeUiText(" · 查看已读文字")}</summary><pre className="cb-syllabus-raw" data-preserve-language="true">{source!.text}</pre></details></li>)}</ul>}</details>}
+          {!!schedule?.items.length && <details className="cb-syllabus-detail"><summary>{localizeUiText("课程安排表 · ")}{schedule.items.length}{localizeUiText(" 项 ")}<ChevronDown size={12} /></summary><div className="cb-plan-table-wrap"><table className="cb-plan-table"><thead><tr><th>{localizeUiText("日期")}</th><th>{localizeUiText("内容")}</th><th>{localizeUiText("原文")}</th></tr></thead><tbody>{[...schedule.items].sort((a, b) => (a.date?.value || a.weekStart || 'z').localeCompare(b.date?.value || b.weekStart || 'z')).map(item => <tr key={item.id}><td>{item.date?.value.slice(0, 10) || item.weekStart || item.dateText || localizeUiText("未明确")}{item.dateStatus === 'conflict' ? localizeUiText("（冲突）") : ''}</td><td>{item.title}{item.requirement === 'optional' ? localizeUiText(" · 选读 / 选做") : ''}</td><td><details><summary>{localizeUiText("查看")}</summary>{item.evidence.map((e, index) => <p key={index}>{report?.sources.find(s => s.id === e.sourceId)?.title}<br />{e.quote}</p>)}</details></td></tr>)}</tbody></table></div></details>}
+          {!!schedule?.pages?.length && <details className="cb-syllabus-detail"><summary>{localizeUiText("逐页整理结果 ")}<ChevronDown size={12} /></summary>
             {schedule.pages.map(page => {
               const source = report?.sources.find(source => source.id === page.sourceId && source.courseId === course.id);
               return <div className="cb-syllabus-page-result" key={page.sourceId}>
-                <strong>{source?.page ? `第 ${source.page} 页` : source?.title || '大纲页面'}{page.result.retryable ? ' · 尚未完成，可继续同步' : ' · 已处理'}</strong>
-                <p>{page.result.trace?.detail || `已核对 ${page.result.items.length} 项安排。`}</p>
+                <strong>{source?.page ? localizeText(`第 ${source.page} 页`, `Page ${source.page}`) : source?.title || localizeUiText("大纲页面")}{page.result.retryable ? localizeUiText(" · 尚未完成，可继续同步") : localizeUiText(" · 已处理")}</strong>
+                <p>{page.result.trace?.detail || localizeText(`已核对 ${page.result.items.length} 项安排。`, `${page.result.items.length} arrangements checked.`)}</p>
                 {!!page.result.issues.length && <ul>{page.result.issues.map((issue, index) => <li key={index}>{issue}</li>)}</ul>}
               </div>;
             })}
           </details>}
         </article>;
       })}
-      <p className="cb-syllabus-footnote">大纲选择按当前账号与课程分别保存在本机。上传只用于整理课程简报，不会修改学校 Canvas；同步时会将大纲文字交给 AI 整理。</p>
+      <p className="cb-syllabus-footnote">{localizeUiText("大纲选择按当前账号与课程分别保存在本机。上传只用于整理课程简报，不会修改学校 Canvas；同步时会将大纲文字交给 AI 整理。")}</p>
     </div>
   </details>;
 }

@@ -1,3 +1,9 @@
+import { useAppLanguage } from '@/shared/i18n/appLanguage';
+import { ReadingMessage } from './ReadingMessage';
+import { parseReadingResponse, type ReadingMedia } from './readingAids';
+import { useStudyDraft } from '@/features/studySupport/useStudyDraft';
+import { localizeText } from '@/shared/i18n/appLanguage';
+import { useSupportSurface } from '@/features/studySupport/StudySupportContext';
 
 import React, {
   useState,
@@ -20,7 +26,7 @@ import { readingFailureMessage } from '@/services/readingAstraClient';
 import { fetchFileFromUrl, readFileAsDataURL, extractPdfPageRange } from '@/lib/pdf/pdfUtils';
 import { getMessageImages } from '@/lib/chat/messageUtils';
 import { buildSkimRecordDeck, getNextSkimRecordCard, validateSkimReadingRoute } from './recordDeck';
-import { LectureCaseModeCard, LectureCaseWorkspace } from './LectureCaseLearning';
+import { LectureCaseArchive } from './LectureCaseArchive';
 import {
   createSkimExplanationState,
   createSkimExplanationStateFromLegacyMessage,
@@ -38,6 +44,7 @@ import { useReadingBookmark } from '@/features/reader/motion/useReadingBookmark'
 import './readingConversation.css';
 import { UnderstandingPanel } from '@/features/reader/understanding/UnderstandingPanel';
 import type { UnderstandingSession } from '@/features/reader/understanding/readingUnderstanding';
+import { prepareMessageUnderstanding } from '@/features/reader/understanding/understandingScope';
 
 interface SkimPanelProps {
   readingSessionKey?: string;
@@ -103,8 +110,8 @@ interface SkimPanelProps {
   onStartTutorMode?: () => void;
   studyStyle: SkimStudyStyle;
   onStudyStyleChange: (next: SkimStudyStyle) => void;
-  explanationDepth: SkimExplanationDepth;
-  onExplanationDepthChange: (next: SkimExplanationDepth) => void;
+  explanationStyle: SkimExplanationStyle;
+  onExplanationStyleChange: (next: SkimExplanationStyle) => void;
   recordDeck?: SkimRecordDeck | null;
   onRecordDeckChange?: (next: SkimRecordDeck | null) => void;
   activeRecordCard?: SkimRecordCardState | null;
@@ -186,12 +193,14 @@ const PageRangeInput: React.FC<{
         />
         <span className="text-xs text-stone-400">页</span>
       </div>
+      <p className="text-xs text-stone-500">使用阅读器显示的 PDF 页码，不是书内印刷页码。</p>
       {error && <p className="text-xs text-rose-500">{error}</p>}
     </div>
   );
 };
 
 type SkimReadingOptions = {
+  readingScope?: { pageStart: number; pageEnd: number; cropped: boolean };
   skimGranularity?: 'fine' | 'standard' | 'coarse';
   studyMapBriefing?: string;
   moduleCount?: number;
@@ -240,8 +249,8 @@ const normalizeGeneratedLineBreaks = (text: string): string => (
 const SKIM_VARIANT_LABELS: Record<SkimExplanationVariantKey, string> = {
   'simple-standard': '简单版',
   'simple-interesting': '简单·有意思',
-  'normal-standard': '正常版',
-  'normal-interesting': '正常·有意思',
+  'normal-standard': '正常讲',
+  'normal-interesting': '有意思地讲',
 };
 
 const formatSkimPageRefs = (pages: number[]): string => {
@@ -894,8 +903,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   onStartTutorMode,
   studyStyle,
   onStudyStyleChange,
-  explanationDepth,
-  onExplanationDepthChange,
+  explanationStyle,
+  onExplanationStyleChange,
   recordDeck = null,
   onRecordDeckChange,
   activeRecordCard = null,
@@ -912,7 +921,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   readingSessionKey = caseSourceId,
   understandingGenerateTurn,
 }) => {
-  const [input, setInput] = useState('');
+  const { language } = useAppLanguage();
+  const [input, setInput, saveInputDraft] = useStudyDraft(`skim:${readingSessionKey}:${studyStyle}:${activeRecordCard?.id ?? ''}`);
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [variantLoadingMessageId, setVariantLoadingMessageId] = useState<string | null>(null);
   const [variantErrors, setVariantErrors] = useState<Record<string, string>>({});
@@ -1078,7 +1088,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       </div>
     </div>
   );
-  const studyStyleSelector = skimContentType === 'lecture' ? (
+  const studyStyleSelector = (
     <div className="flex flex-col gap-2">
       <label className="text-xs text-stone-500">学习方式</label>
       <div className="grid grid-cols-2 gap-2 rounded-xl bg-stone-100 p-1">
@@ -1105,22 +1115,32 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           <span className="mt-0.5 block text-[10px] leading-4 opacity-80">先选 Module / Part，再进入学习</span>
         </button>
       </div>
-      {onCaseLearningChange && configuredRangeEnd >= configuredRangeStart && (
-        <LectureCaseModeCard
-          state={caseLearning}
-          setState={onCaseLearningChange}
-          sourceId={caseSourceId}
-          pageStart={configuredRangeStart}
-          pageEnd={configuredRangeEnd}
-          pageTexts={pdfPageTexts}
-          pdfDataUrl={pdfDataUrl}
-          pageRangeError={pageRangeError}
-          onStudyStyleChange={onStudyStyleChange}
-          onLoadingChange={onLoadingChange}
-        />
-      )}
+      {caseLearning && <button type="button" onClick={() => onStudyStyleChange('case')} className="reluctant-back text-sm">
+        查看已有案例式领读 · 仅供回看
+      </button>}
+
     </div>
-  ) : null;
+  );
+  const readingScopeSelector = (idPrefix: string) => (
+    <div className="flex flex-col gap-3">
+      {(skimContentType === 'lecture' || studyStyle === 'records') && <>
+        {skimContentType === 'lecture' ? <>
+          <label htmlFor={`${idPrefix}-modules`} className="text-xs text-stone-500">用几个模块解读本文（2～7）</label>
+          <select id={`${idPrefix}-modules`} value={selectedModuleCount} onChange={event => setSelectedModuleCount(Number(event.target.value))} className="w-full rounded-xl border-2 border-stone-200 bg-white px-4 py-2.5 text-sm text-slate-700">
+            {MODULE_OPTIONS.map(n => <option key={n} value={n}>{n} 个模块</option>)}
+          </select>
+        </> : <p className="text-xs leading-5 text-stone-500">按原文章节或作者思路自动分组，解读方法不变。</p>}
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-2 text-xs text-stone-500">分段大小</legend>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 text-sm text-slate-700"><input type="radio" name={`${idPrefix}-pace`} checked={skimPace === 'module'} onChange={() => setSkimPace('module')} className="accent-indigo-600" />{skimContentType === 'lecture' ? '一次一个 module' : '大段 / Module'}</label>
+            <label className="flex items-center gap-2 text-sm text-slate-700"><input type="radio" name={`${idPrefix}-pace`} checked={skimPace === 'part'} onChange={() => setSkimPace('part')} className="accent-indigo-600" />{skimContentType === 'lecture' ? '一次一个 part' : '小段 / Part'}</label>
+          </div>
+        </fieldset>
+      </>}
+      <PageRangeInput start={pageRangeStart} end={pageRangeEnd} onStartChange={setPageRangeStart} onEndChange={setPageRangeEnd} totalPages={totalPages} idPrefix={idPrefix} />
+    </div>
+  );
   const auxiliaryMaterialSelector = (
     <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -1226,7 +1246,6 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     };
   };
   const buildLectureReadingOptions = (effectiveMap: StudyMap | null = studyMap): SkimReadingOptions | undefined => {
-    if (skimContentType !== 'lecture') return undefined;
     if (studyStyle === 'records' && activeRecordCard) {
       const otherRecordDigests = recordDeck
         ? recordDeck.orderedCardIds
@@ -1256,6 +1275,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         },
       };
     }
+    if (skimContentType !== 'lecture') return { auxiliaryMaterial: buildAuxiliaryReadingOption() };
     return {
       moduleCount: selectedModuleCount,
       studyMapBriefing: effectiveMap?.initialBriefing,
@@ -1265,8 +1285,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   };
   const routeMatchesCurrentSetup = (route: SkimReadingRoute | null | undefined): boolean => {
     if (!route || route.kind !== skimContentType) return false;
-    if (route.pageRangeLabel && route.pageRangeLabel !== pageRangeLabel) return false;
-    if (skimContentType !== 'lecture') return true;
+    if ((route.pageRangeLabel || '整份资料') !== pageRangeLabel) return false;
+    if (skimContentType !== 'lecture') return route.skimPace === skimPace;
     return route.moduleCount === selectedModuleCount && route.skimPace === skimPace;
   };
   const recordRangeStart = pageRangeStart ?? 1;
@@ -1281,7 +1301,6 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   };
   const buildPageRangeContentOverride = async (): Promise<string | undefined> => {
     if (
-      skimContentType === 'lecture' &&
       pageRangeStart != null &&
       pageRangeEnd != null &&
       !pageRangeError &&
@@ -1295,6 +1314,28 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     }
     return undefined;
   };
+  const companionSourceCache = useRef<{ source: string; ranges: globalThis.Map<string, Promise<string>> }>({ source: '', ranges: new globalThis.Map<string, Promise<string>>() });
+  const prepareCompanionSource = async (start: number, end: number): Promise<string> => {
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end < start || end > configuredRangeEnd) {
+      throw new Error('本次页码范围无效，请先检查设置。');
+    }
+    if (pdfDataUrl?.startsWith('data:application/pdf')) {
+      if (companionSourceCache.current.source !== pdfDataUrl) companionSourceCache.current = { source: pdfDataUrl, ranges: new globalThis.Map<string, Promise<string>>() };
+      const key = `${start}-${end}`;
+      let pending = companionSourceCache.current.ranges.get(key);
+      if (!pending) {
+        pending = start === 1 && end === totalPages ? Promise.resolve(pdfDataUrl) : extractPdfPageRange(pdfDataUrl, start, end);
+        companionSourceCache.current.ranges.set(key, pending);
+        const cache = companionSourceCache.current.ranges;
+        void pending.catch(() => cache.delete(key));
+      }
+      return pending;
+    }
+    const pages = pdfPageTexts.slice(start - 1, end);
+    if (pages.length !== end - start + 1 || pages.some(page => !page?.trim())) throw new Error('所选范围的原文还未准备好，请等 PDF 加载后再试。');
+    return pages.map((text, index) => `[应用内第 ${start + index} 页]\n${text}`).join('\n\n');
+  };
+
   const ensureSkimReadingRoute = async (
     contentOverride?: string,
     effectiveMap: StudyMap | null = studyMap,
@@ -1306,7 +1347,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       if (readingRoute) {
         const validation = validateSkimReadingRoute(readingRoute, recordRangeStart, recordRangeEnd);
         if (validation.valid) {
-          if (!recordDeck && onRecordDeckChange) {
+          if ((!recordDeck || recordDeck.routeId !== readingRoute.id) && onRecordDeckChange) {
             onRecordDeckChange(buildSkimRecordDeck(readingRoute, skimPace));
           }
           return readingRoute;
@@ -1327,9 +1368,10 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         contentType: skimContentType,
         docType,
         moduleCount: skimContentType === 'lecture' ? selectedModuleCount : undefined,
-        skimPace: skimContentType === 'lecture' ? skimPace : undefined,
+        skimPace,
+        ...(skimContentType !== 'lecture' ? { pageStart: recordRangeStart, pageEnd: recordRangeEnd } : {}),
         pageRangeLabel,
-        studyMapBriefing: effectiveMap?.initialBriefing,
+        studyMapBriefing: skimContentType === 'lecture' ? effectiveMap?.initialBriefing : undefined,
         ...(studyStyle === 'records' ? {
           strictPageRanges: true,
           pageIndexedText: buildPageIndexedText(),
@@ -1340,7 +1382,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         let validation = route
           ? validateSkimReadingRoute(route, recordRangeStart, recordRangeEnd)
           : { valid: false, errors: ['模型没有返回路线。'] };
-        if (!validation.valid) {
+        if (!validation.valid && skimContentType === 'lecture') {
           route = await generateSkimReadingRoute(content, {
             ...routeOptions,
             validationFeedback: validation.errors.join('\n'),
@@ -1381,8 +1423,10 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       && !window.confirm('重新规划会删除当前分段的学习状态、独立对话、停留位置和学习摘要。PDF 便签、注释、页面评论、整段式领读和导出记录不会受影响。确定继续吗？')
     ) return;
     setRouteOutlineOpen(true);
-    const contentOverride = await buildPageRangeContentOverride();
-    await ensureSkimReadingRoute(contentOverride, studyMap, true);
+    try {
+      const contentOverride = skimContentType === 'lecture' ? await buildPageRangeContentOverride() : await prepareCompanionSource(configuredRangeStart, configuredRangeEnd);
+      await ensureSkimReadingRoute(contentOverride, skimContentType === 'lecture' ? studyMap : null, true);
+    } catch (error) { setRouteError(readingFailureMessage(error, '所选范围没有准备好，原目录已保留。')); }
   };
   const routeNeedsRefresh = !!readingRoute && !routeMatchesCurrentSetup(readingRoute);
   const routeStatusHint = isGeneratingRoute
@@ -1468,17 +1512,10 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     cancelReadingBookmark();
     setSelectionRect(null);
     const messageId = getStableMessageId(message, index);
-    if (!message.skimUnderstanding) {
-      const bounds = resolveSkimExplanationPageBounds(configuredRangeStart, configuredRangeEnd, studyStyle === 'records' ? activeRecordCard : null);
-      const variant = getActiveSkimExplanationVariant(message);
-      const explicitRefs = variant?.pageRefs ?? message.skimExplanation?.sourcePageRefs ?? [];
-      const inRange = explicitRefs.filter(page => Number.isInteger(page) && page >= bounds.pageStart && page <= bounds.pageEnd);
-      const pageRefs = inRange.length > 0 ? [...new Set(inRange)] : Array.from({ length: Math.max(0, bounds.pageEnd - bounds.pageStart + 1) }, (_, offset) => bounds.pageStart + offset);
-      const firstCovered = message.skimExplanation?.spineItems.find(item => !variant || variant.coveredSpineItemIds.includes(item.id));
-      const session: UnderstandingSession = {
-        version: 1, id: crypto.randomUUID(), topic: firstCovered?.titleZh || '刚才这一段',
-        sourceText: getDisplayedSkimMessageText(message), pageRefs, turns: [], mode: 'acquisition', phase: 'question', createdAt: Date.now(),
-      };
+    const bounds = resolveSkimExplanationPageBounds(configuredRangeStart, configuredRangeEnd, studyStyle === 'records' ? activeRecordCard : null);
+    const session = prepareMessageUnderstanding(message, getDisplayedSkimMessageText(message),
+      Array.from({ length: Math.max(0, bounds.pageEnd - bounds.pageStart + 1) }, (_, offset) => bounds.pageStart + offset));
+    if (session !== message.skimUnderstanding) {
       setMessages(previous => previous.map((item, itemIndex) => getStableMessageId(item, itemIndex) === messageId ? { ...item, skimUnderstanding: session } : item));
     }
     setUnderstandingSelection({ scope: understandingScope, messageId });
@@ -1698,33 +1735,31 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
   const needRegenerate = onRegenerateStudyMap && (studyMapModuleCount == null || studyMapModuleCount !== selectedModuleCount);
 
-  /**
-   * 阶段4b：paper/文章「顺序陪读」开场。跳过 studyMap（不调 onRegenerateStudyMap）、不裁页码、不传 lecture readingOptions；
-   * 仅切到 reading 阶段并发一条中性开场，由 PAPER/ARTICLE_COMPANION_PROMPT 的开场规则驱动「先讲整篇梗概再停下等继续」。
-   */
+  // Paper/article retain their existing companion prompts; only scope and navigation change.
   const startCompanionReading = async () => {
-      setStage('reading');
-      const routePromise = ensureSkimReadingRoute(pdfDataUrl || fullText || undefined, null);
-      await handleSend(
-          '请开始陪我顺序读懂这篇材料。',
-          'reading',
-          undefined,   // 不传 lecture readingOptions（无 module 数/节奏/briefing 后缀）
-          undefined,
-          undefined,   // 不裁页码，整篇喂入
-      );
-      await routePromise;
+      if (pageRangeError || isExplanationBusy || isGeneratingRoute || isRegeneratingMap) return;
+      setCompanionGuardNotice(null);
+      setIsRegeneratingMap(true);
+      try {
+          const content = await prepareCompanionSource(configuredRangeStart, configuredRangeEnd);
+          if (studyStyle === 'records') {
+              if (recordDeck && !routeMatchesCurrentSetup(readingRoute) && !window.confirm('新的范围或分段设置会替换当前分段目录与对话。需要保留它们时，请取消并新建一段领读。继续吗？')) return;
+              const route = await ensureSkimReadingRoute(content, null);
+              if (route) { setStage('reading'); setShowGranularityModal(false); }
+              return;
+          }
+          setStage('reading');
+          setShowGranularityModal(false);
+          // Release the preparation overlay before the normal companion request.
+          setIsRegeneratingMap(false);
+          await handleSend('请开始陪我顺序读懂本次选定范围。先给这部分的梗概，然后停下等我继续。', 'reading', buildLectureReadingOptions(), undefined, content);
+      } catch (error) {
+          setCompanionGuardNotice(readingFailureMessage(error, '所选范围没有准备好，原记录已保留，请重试。'));
+      } finally { setIsRegeneratingMap(false); }
   };
 
   const handleStartWithModuleCount = async () => {
-      // 阶段4b：paper/文章 → 守住「完整原文」防线 + 跳过 studyMap，直达顺序陪读
       if (skimContentType !== 'lecture') {
-          // 防线：pdfDataUrl 为空时只能退回截断的 fullText → 不开讲，提示稍后重试（不关 modal、不进 reading）
-          if (!pdfDataUrl) {
-              setCompanionGuardNotice('📄 原文还在加载中，请稍候片刻再开始陪读');
-              return;
-          }
-          setCompanionGuardNotice(null);
-          setShowGranularityModal(false);
           await startCompanionReading();
           return;
       }
@@ -1878,7 +1913,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       const raw = textOverride ?? input;
       const trimmed = raw.trim();
       // CRITICAL: Prioritize PDF Vision Data over Text to avoid hallucination on scanned docs
-      const content = contentOverride ?? (pdfDataUrl || fullText);
+      let content = contentOverride ?? (pdfDataUrl || fullText);
 
       if ((!trimmed && pendingImages.length === 0) || !content || isExplanationBusy) return;
 
@@ -1943,16 +1978,23 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       setExplanationGenerationError(null);
 
       try {
-          const skimReadingOpts =
+          let skimReadingOpts =
             forceMode === 'reading' && readingOptions != null
               ? readingOptions
               : modeToUse === 'reading'
                 ? buildLectureReadingOptions()
                 : undefined;
+          if (skimContentType !== 'lecture') {
+            const { pageStart, pageEnd } = explanationPageBounds;
+            content = await prepareCompanionSource(pageStart, pageEnd);
+            if (abortController.signal.aborted) return;
+            skimReadingOpts = { ...skimReadingOpts, readingScope: { pageStart, pageEnd, cropped: content.startsWith('data:application/pdf') } };
+          }
           const displayedHistory = usesConnectedLectureExplanation
             ? messages.map((message) => ({ ...message, text: getDisplayedSkimMessageText(message) }))
             : messages;
           let response: string;
+          let readingMedia: ReadingMedia | undefined;
           let explanationDraft: Awaited<ReturnType<typeof generateContinuousLectureTurn>> | null = null;
           if (usesConnectedLectureExplanation) {
             explanationDraft = await generateContinuousLectureTurn({
@@ -1962,7 +2004,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
               newMessage: payloadForTutor,
               docType,
               readingOptions: skimReadingOpts,
-              depth: explanationDepth,
+              depth: 'normal',
+              style: explanationStyle,
               pageStart: explanationPageBounds.pageStart,
               pageEnd: explanationPageBounds.pageEnd,
               turnIntent: isKnowledgeExtractionAnswer ? 'knowledge-extraction-feedback' : 'standard',
@@ -1970,19 +2013,24 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
               userImagesBase64: imagesToSend,
             });
             response = explanationDraft.messageMarkdown;
+            readingMedia = explanationDraft.readingMedia;
           } else {
-            // paper/article 与辅导继续走原服务，不接入 Lecture 讲解深度协议。
+            // 保留 paper/article 的解读方法，仅为 reading 添加可选图解元数据。
             response = await chatWithSkimAdaptiveTutor(
               content,
               displayedHistory,
               payloadForTutor,
               modeToUse,
               docType,
-              skimReadingOpts,
+              { ...skimReadingOpts, ...(modeToUse === 'reading' ? { visualAids: true } : {}) },
               abortController.signal,
               imagesToSend,
               skimContentType
             );
+            if (modeToUse === 'reading') {
+              const parsed = parseReadingResponse(response, explanationPageBounds.pageStart, explanationPageBounds.pageEnd, content.startsWith('data:application/pdf'));
+              response = parsed.text; readingMedia = parsed.media;
+            }
           }
           if (abortController.signal.aborted || skimGenerationCancelledRef.current) return;
           const normalizedResponse = normalizeGeneratedLineBreaks(response);
@@ -2005,6 +2053,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
               id: messageId,
               role: 'model',
               text: normalizedResponse,
+              ...(readingMedia ? { readingMedia } : {}),
               timestamp: Date.now(),
               ...(isFormalReadingAdvance ? {
                   skimReadingFormal: true,
@@ -2013,7 +2062,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
               ...(explanationDraft?.responseKind === 'explanation' ? {
                 skimExplanation: createSkimExplanationState(
                   { ...explanationDraft, messageMarkdown: normalizedResponse },
-                  explanationDepth,
+                  'normal',
+                  explanationStyle,
                 ),
               } : {}),
               ...(isKnowledgeExtractionAnswer ? { skimKnowledgeExtractionFeedback: true } : {}),
@@ -2202,6 +2252,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 depth: targetDepth,
                 style: targetStyle,
                 messageMarkdown: normalizedMarkdown,
+                ...(draft.readingMedia ? { readingMedia: draft.readingMedia } : {}),
                 coveredSpineItemIds: draft.coveredSpineItemIds,
                 deferredSpineItemIds: draft.deferredSpineItemIds,
                 pageRefs,
@@ -2245,7 +2296,9 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         ? `Module ${activeRecordCard.moduleIndex}`
         : `Module ${activeRecordCard.moduleIndex} 的 Part ${activeRecordCard.partIndex}`;
       void handleSend(
-        `请开始这一分段的正式领读。当前范围是${levelLabel}「${activeRecordCard.title}」，应用内第 ${activeRecordCard.pageStart}-${activeRecordCard.pageEnd} 页。先说明这段在整份 Lecture 中的位置，再开始讲当前分段；不要越过本分段范围，也不要一次讲下一分段。`,
+        skimContentType === 'lecture'
+          ? `请开始这一分段的正式领读。当前范围是${levelLabel}「${activeRecordCard.title}」，应用内第 ${activeRecordCard.pageStart}-${activeRecordCard.pageEnd} 页。先说明这段在整份 Lecture 中的位置，再开始讲当前分段；不要越过本分段范围，也不要一次讲下一分段。`
+          : `请开始这一分段「${activeRecordCard.title}」的顺序陪读，范围为应用内第 ${activeRecordCard.pageStart}-${activeRecordCard.pageEnd} 页。沿用当前材料的解读方法，先给本段梗概，然后停下等我继续；不要越过本分段范围，也不要一次讲下一分段。`,
         'reading',
         buildLectureReadingOptions(),
         { appendUserWhenOverride: false }
@@ -2386,6 +2439,17 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       setTakeawaysDrafts((prev) => ({ ...prev, [id]: '' }));
   };
 
+  useSupportSurface({
+    scope: `skim:${understandingScope}`, priority: 10, busy: isExplanationBusy,
+    boundary: String(messages.filter(message => message.role === 'model').length),
+    actions: (stage === 'reading' || stage === 'tutoring') ? [
+      { id: 'hint', label: localizeText('给我一点提示', 'A small hint'), run: () => { void handleSend('刚才这部分我还没看懂。请结合原文给我一点提示，先不要直接给完整答案。', undefined, undefined, { appendUserWhenOverride: true }); } },
+      { id: 'example', label: localizeText('换个例子讲讲', 'Explain with an example'), run: () => { void handleSend('请用一个简单的例子解释刚才这部分，区分原文事实和你举的例子。', undefined, undefined, { appendUserWhenOverride: true }); } },
+      { id: 'question', label: localizeText('我想说说哪里没懂', 'Let me describe the tricky part'), run: () => { requestAnimationFrame(() => chatInputRef.current?.focus()); } },
+    ] : [],
+    pause: () => { if (isChatLoading) handleStopSkimChat(); saveInputDraft(); },
+  }, studyStyle !== 'case' && !isLoading && Boolean(pdfDataUrl || fullText) && !activeUnderstanding);
+
   if (isLoading) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-8 bg-white border-l border-stone-100">
@@ -2398,21 +2462,9 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     );
   }
 
-  if (studyStyle === 'case' && caseLearning?.status === 'suitable' && onCaseLearningChange) {
-    return (
-      <LectureCaseWorkspace
-        key={readingSessionKey}
-        state={caseLearning}
-        setState={onCaseLearningChange}
-        pageTexts={pdfPageTexts}
-        onJumpToPage={onJumpToPage}
-        onExitToConfig={() => {
-          onStudyStyleChange('continuous');
-          setStage('diagnosis');
-        }}
-        onLoadingChange={onLoadingChange}
-      />
-    );
+  if (studyStyle === 'case') {
+    return <LectureCaseArchive key={readingSessionKey} state={caseLearning} onJumpToPage={onJumpToPage}
+      onExit={() => { onStudyStyleChange('continuous'); setStage('diagnosis'); }} />;
   }
 
   if (studyStyle === 'records' && recordDeck?.view === 'shelf') {
@@ -2427,7 +2479,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
               <Library className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-sm font-black text-slate-800">Lecture 分段目录</h2>
+              <h2 className="text-sm font-black text-slate-800">分段目录</h2>
               <p className="mt-0.5 text-[11px] font-medium text-slate-400">选一段再进入原来的 PDF 与领读界面</p>
             </div>
           </div>
@@ -2527,7 +2579,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                         stage === 'tutoring' ? 'bg-rose-50 text-rose-600' :
                         stage === 'quiz' ? 'bg-violet-50 text-violet-600' : 'bg-emerald-50 text-emerald-600'
                       }`}>
-                          {stage === 'diagnosis' && (skipDiagnosis && !studyMap ? "待配置" : "全书扫描中...")}
+                          {stage === 'diagnosis' && ((skimContentType !== 'lecture' || (skipDiagnosis && !studyMap)) ? "待配置" : "全书扫描中...")}
                           {stage === 'tutoring' && "AI 补习中"}
                           {stage === 'quiz' && "知识点确认"}
                       </span>
@@ -2546,7 +2598,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             )}
             {/* STAGE: DIAGNOSIS — 方案 A：新建段（skipDiagnosis 且尚无 studyMap）跳过诊断，直接进配置区。
                 map 留到点「开始领读」时由 handleStartWithModuleCount→onRegenerateStudyMap 按所选范围生成。 */}
-            {stage === 'diagnosis' && !studyMap && skipDiagnosis && onRegenerateStudyMap && (
+            {stage === 'diagnosis' && (skimContentType !== 'lecture' || (!studyMap && skipDiagnosis)) && onRegenerateStudyMap && (
                 <div className="animate-in fade-in slide-in-from-top-4 duration-500">
                     <div className="bg-white rounded-2xl border border-stone-100 p-5 shadow-sm space-y-4">
                         <div className="flex items-start space-x-3">
@@ -2556,7 +2608,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                 <p className="text-xs text-slate-400 mt-0.5">
                                     {skimContentType === 'lecture'
                                         ? '选模块数、节奏与页码范围，点「开始领读」即按所选范围生成本段学习地图并开始。'
-                                        : '将从头开始顺序陪读整篇，点「开始领读」即可（AI 会先讲整篇梗概再停下等你说「继续」）。'}
+                                        : '选择本次页码与连续或分段学习。解读方式不变：先讲所选内容的梗概，再由你决定是否继续。'}
                                 </p>
                             </div>
                         </div>
@@ -2564,56 +2616,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             {contentTypeSelector}
                             {studyStyleSelector}
                             {auxiliaryMaterialSelector}
-                            {/* 阶段4b：module 数/节奏/页码范围仅 lecture 模式显示；paper/文章走顺序陪读，无这些概念 */}
-                            {skimContentType === 'lecture' && (
-                              <>
-                            <label className="text-xs text-stone-500 mb-1">用几个模块解读本文（2～7）</label>
-                            <select
-                                value={selectedModuleCount}
-                                onChange={(e) => setSelectedModuleCount(Number(e.target.value))}
-                                className="w-full py-2.5 rounded-xl border-2 border-stone-200 focus:border-indigo-300 px-4 text-slate-700 text-sm font-medium bg-white"
-                            >
-                                {MODULE_OPTIONS.map((n) => (
-                                    <option key={n} value={n}>{n} 个模块</option>
-                                ))}
-                            </select>
-                            <div className="flex flex-col gap-2">
-                                <label className="text-xs text-stone-500">节奏</label>
-                                <div className="flex gap-4">
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            name="skim-pace-fresh"
-                                            value="module"
-                                            checked={skimPace === 'module'}
-                                            onChange={() => setSkimPace('module')}
-                                            className="accent-indigo-600"
-                                        />
-                                        <span className="text-sm text-slate-700">一次一个 module</span>
-                                    </label>
-                                    <label className="flex items-center gap-2 cursor-pointer">
-                                        <input
-                                            type="radio"
-                                            name="skim-pace-fresh"
-                                            value="part"
-                                            checked={skimPace === 'part'}
-                                            onChange={() => setSkimPace('part')}
-                                            className="accent-indigo-600"
-                                        />
-                                        <span className="text-sm text-slate-700">一次一个 part</span>
-                                    </label>
-                                </div>
-                            </div>
-                            <PageRangeInput
-                                start={pageRangeStart}
-                                end={pageRangeEnd}
-                                onStartChange={setPageRangeStart}
-                                onEndChange={setPageRangeEnd}
-                                totalPages={totalPages}
-                                idPrefix="skim-fresh"
-                            />
-                              </>
-                            )}
+                            {readingScopeSelector("skim-fresh")}
+                            {routeError && <p role="alert" className="text-xs text-rose-600">{routeError}</p>}
                             {skimContentType !== 'lecture' && companionGuardNotice && (
                                 <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                                     {companionGuardNotice}
@@ -2621,7 +2625,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             )}
                             <button
                                 onClick={handleStartWithModuleCount}
-                                disabled={skimContentType === 'lecture' && !!pageRangeError}
+                                disabled={!!pageRangeError || isExplanationBusy || isGeneratingRoute || isRegeneratingMap}
                                 className="w-full py-3 mt-1 bg-slate-800 text-white rounded-xl font-bold hover:bg-slate-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 开始领读
@@ -2643,7 +2647,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             )}
 
             {/* STAGE: DIAGNOSIS (Checklist) */}
-            {stage === 'diagnosis' && studyMap && (
+            {stage === 'diagnosis' && studyMap && skimContentType === 'lecture' && (
                 <div className="animate-in fade-in slide-in-from-top-4 duration-500">
                     <div className="mb-4">
                         <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">主题领域 (Topic)</h3>
@@ -2929,7 +2933,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     </span>
                     {stage === 'reading' && (
                         <p className="reader-context-subtitle">
-                          {skimContentType === 'paper' ? '论文 · 顺序领读' : skimContentType === 'article' ? '文章 · 顺序领读' : `Lecture · ${studyStyle === 'records' ? '分段式领读' : '整段式领读'}`}
+                          {skimContentType === 'paper' ? (studyStyle === 'records' ? '论文 · 分段领读' : '论文 · 顺序领读') : skimContentType === 'article' ? (studyStyle === 'records' ? '文章 · 分段领读' : '文章 · 顺序领读') : `Lecture · ${studyStyle === 'records' ? '分段式领读' : '整段式领读'}`}
                         </p>
                     )}
                 </div>
@@ -2937,22 +2941,22 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             {stage === 'reading' && (
               <div className="reader-context-actions">
                 {(studyStyle === 'continuous' || (studyStyle === 'records' && activeRecordCard)) && skimContentType === 'lecture' && (
-                  <div className="flex items-center gap-1 rounded-xl border border-indigo-100 bg-indigo-50/60 p-1" aria-label="讲解深度">
-                    <span className="hidden px-1 text-[10px] font-bold text-indigo-500 xl:inline">讲解深度</span>
-                    {(['simple', 'normal'] as const).map((depth) => (
+                  <div className="flex items-center gap-1 rounded-xl border border-indigo-100 bg-indigo-50/60 p-1" aria-label="讲解方式">
+                    <span className="hidden px-1 text-[10px] font-bold text-indigo-500 xl:inline">讲解方式</span>
+                    {(['standard', 'interesting'] as const).map((style) => (
                       <button
-                        key={depth}
+                        key={style}
                         type="button"
-                        onClick={() => onExplanationDepthChange(depth)}
+                        onClick={() => onExplanationStyleChange(style)}
                         disabled={isExplanationBusy}
-                        aria-pressed={explanationDepth === depth}
+                        aria-pressed={explanationStyle === style}
                         title="只影响之后新生成的讲解，已有消息不会自动改变"
-                        className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${explanationDepth === depth
+                        className={`rounded-lg px-2 py-1 text-[11px] font-bold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${explanationStyle === style
                           ? 'bg-white text-indigo-700 shadow-sm ring-1 ring-indigo-100'
                           : 'text-slate-500 hover:bg-white/70 hover:text-indigo-600'
                         }`}
                       >
-                        {depth === 'simple' ? '简单讲' : '正常讲'}
+                        {style === 'interesting' ? '有意思地讲' : '正常讲'}
                       </button>
                     ))}
                   </div>
@@ -2995,6 +2999,12 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
               </div>
             )}
         </div>
+
+        {stage === 'reading' && skimContentType !== 'lecture' && studyStyle === 'continuous' && (
+          <div className="reader-route-overview px-5 py-2 text-xs text-stone-500">
+            本次范围：PDF {configuredRangeStart}–{configuredRangeEnd} · {pageRangeLabel}
+          </div>
+        )}
 
         {stage === 'reading' && !focusMode && studyStyle === 'continuous' && studyMap && skimContentType === 'lecture' && (
           <section className="reader-route-overview">
@@ -3265,14 +3275,17 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                               </div>
                             )}
                             <div className="reader-message-body" data-preserve-language="true">
-                              <ReactMarkdown
+                              {msg.role === 'model' && (activeExplanationVariant?.readingMedia || (!activeExplanationVariant && msg.readingMedia)) ? <ReadingMessage
+                                text={normalizeGeneratedLineBreaks(displayedText)} media={activeExplanationVariant ? activeExplanationVariant.readingMedia : msg.readingMedia}
+                                components={MarkdownComponents} pdfDataUrl={pdfDataUrl} onPage={onJumpToPage} language={language}
+                              /> : <ReactMarkdown
                                   components={MarkdownComponents}
                                   remarkPlugins={[remarkMath, remarkGfm]}
                                   rehypePlugins={[rehypeKatex]}
                                   className={msg.role === 'user' ? 'prose-invert' : ''}
                               >
                                   {normalizeGeneratedLineBreaks(displayedText)}
-                              </ReactMarkdown>
+                              </ReactMarkdown>}
                             </div>
                             {explanationState && activeExplanationVariant && deferredItems.length > 0 && (
                               <details className="mt-3 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2">
@@ -3308,26 +3321,14 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                     type="button"
                                     onClick={() => handleGenerateExplanationVariant(
                                       messageId,
-                                      activeExplanationVariant.depth === 'simple' ? 'normal' : 'simple',
-                                      activeExplanationVariant.style,
-                                    )}
-                                    disabled={isExplanationBusy}
-                                    className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    {activeExplanationVariant.depth === 'simple' ? '展开成正常难度' : '压缩成简单版'}
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleGenerateExplanationVariant(
-                                      messageId,
-                                      activeExplanationVariant.depth,
+                                      'normal',
                                       activeExplanationVariant.style === 'standard' ? 'interesting' : 'standard',
                                     )}
                                     disabled={isExplanationBusy}
                                     className="inline-flex items-center gap-1 rounded-lg border border-violet-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-violet-700 hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
                                     <Lightbulb className="h-3 w-3" />
-                                    {activeExplanationVariant.style === 'standard' ? '换个有意思的讲法' : '回到标准讲法'}
+                                    {activeExplanationVariant.style === 'standard' ? '换个有意思的讲法' : '回到正常讲法'}
                                   </button>
                                   {explanationState.sourcePageRefs.length > 0 && (
                                     <button
@@ -3353,14 +3354,6 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             {isLegacyRecordExplanation && activeRecordCard && (
                               <div className="mt-3 border-t border-stone-200 pt-2">
                                 <div className="flex flex-wrap items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    onClick={() => void handleBootstrapLegacyRecordExplanation(messageId, 'simple', 'standard')}
-                                    disabled={isExplanationBusy}
-                                    className="rounded-lg border border-indigo-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    压缩成简单版
-                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => void handleBootstrapLegacyRecordExplanation(messageId, 'normal', 'interesting')}
@@ -3392,9 +3385,9 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             {stage === 'reading' && msg.role === 'model' && !msg.isQuiz && !msg.skimKnowledgeExtraction && !msg.skimKnowledgeExtractionFeedback && displayedText.trim().length > 30 && (
                               <div className="reader-understanding-entry">
                                 <button type="button" disabled={isExplanationBusy || !(pdfDataUrl || fullText)} onClick={event => openUnderstanding(msg, idx, event.currentTarget)}>
-                                  <Lightbulb className="h-3.5 w-3.5" />{msg.skimUnderstanding ? '接着想这一点' : '陪我想通这个'}
+                                  <Lightbulb className="h-3.5 w-3.5" />陪我想通这个
                                 </button>
-                                <span>{msg.skimUnderstanding?.reviewRequested ? '已留着以后再试' : '只想一个点，随时回到领读'}</span>
+                                <span>读过了但没进脑子？一起拆开想</span>
                               </div>
                             )}
                         </div>
@@ -3796,8 +3789,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           >
             <div className="flex shrink-0 items-start justify-between gap-3 border-b border-stone-100 px-5 py-4">
               <div className="min-w-0">
-                <h3 className="text-sm font-bold text-slate-800">{skimContentType === 'lecture' ? '配置这段领读' : '开始顺序陪读'}</h3>
-                <p className="mt-1 text-xs leading-5 text-stone-500">{skimContentType === 'lecture' ? '先确认主要设置，需要时再展开其他选项。' : '将从头开始顺序陪读整篇。'}</p>
+                <h3 className="text-sm font-bold text-slate-800">配置这段领读</h3>
+                <p className="mt-1 text-xs leading-5 text-stone-500">{skimContentType === 'lecture' ? '先确认主要设置，需要时再展开其他选项。' : '选择本次页码与连续或分段学习，保持原有解读方式。'}</p>
               </div>
               <button
                 type="button"
@@ -3823,66 +3816,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 </summary>
                 <div className="border-t border-indigo-100 p-2">{auxiliaryMaterialSelector}</div>
               </details>
-              {/* 阶段4b：module 数/节奏/页码范围仅 lecture 模式显示 */}
-              {skimContentType === 'lecture' && (
-                <>
-              <details className="group rounded-xl border border-stone-200 bg-white">
-                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-3 text-xs font-bold text-slate-700 marker:content-none">
-                  <span>分段设置</span>
-                  <span className="flex items-center gap-2 text-[11px] font-medium text-slate-400">
-                    {selectedModuleCount} 个模块 · 一次一个 {skimPace}
-                    <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" />
-                  </span>
-                </summary>
-                <div className="space-y-3 border-t border-stone-100 p-3">
-                  <select
-                    value={selectedModuleCount}
-                    onChange={(e) => setSelectedModuleCount(Number(e.target.value))}
-                    className="w-full rounded-xl border-2 border-stone-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 focus:border-indigo-300"
-                  >
-                    {MODULE_OPTIONS.map((n) => (
-                      <option key={n} value={n}>{n} 个模块</option>
-                    ))}
-                  </select>
-                  <div className="flex flex-col gap-2">
-                    <label className="text-xs text-stone-500">节奏</label>
-                    <div className="flex flex-wrap gap-x-4 gap-y-2">
-                      <label className="flex cursor-pointer items-center gap-2">
-                        <input
-                          type="radio"
-                          name="skim-pace-modal"
-                          value="module"
-                          checked={skimPace === 'module'}
-                          onChange={() => setSkimPace('module')}
-                          className="accent-indigo-600"
-                        />
-                        <span className="text-sm text-slate-700">一次一个 module</span>
-                      </label>
-                      <label className="flex cursor-pointer items-center gap-2">
-                        <input
-                          type="radio"
-                          name="skim-pace-modal"
-                          value="part"
-                          checked={skimPace === 'part'}
-                          onChange={() => setSkimPace('part')}
-                          className="accent-indigo-600"
-                        />
-                        <span className="text-sm text-slate-700">一次一个 part</span>
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </details>
-              <PageRangeInput
-                start={pageRangeStart}
-                end={pageRangeEnd}
-                onStartChange={setPageRangeStart}
-                onEndChange={setPageRangeEnd}
-                totalPages={totalPages}
-                idPrefix="skim-modal"
-              />
-                </>
-              )}
+              {readingScopeSelector("skim-modal")}
+              {routeError && <p role="alert" className="text-xs text-rose-600">{routeError}</p>}
               {skimContentType !== 'lecture' && companionGuardNotice && (
                 <p className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     {companionGuardNotice}
@@ -3894,7 +3829,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             <div className="shrink-0 border-t border-stone-100 bg-white px-5 py-4 shadow-[0_-8px_20px_rgba(15,23,42,0.04)]">
               <button
                   onClick={handleStartWithModuleCount}
-                  disabled={skimContentType === 'lecture' && !!pageRangeError}
+                  disabled={!!pageRangeError || isExplanationBusy || isGeneratingRoute || isRegeneratingMap}
                   className="w-full rounded-xl bg-slate-800 py-3 font-bold text-white transition-all hover:bg-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {skimContentType !== 'lecture' ? '开始领读' : needRegenerate ? '按当前设置重新生成并开始' : '开始领读'}

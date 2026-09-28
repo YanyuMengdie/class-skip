@@ -1,10 +1,10 @@
-import { readRequestPayload } from '../../server/productionApi';
-import { ExamAstraError } from '../../server/examAstra';
-import { ProductionAuthError } from '../../server/productionAuth';
+import { readRequestPayload } from '../../server/productionApi.js';
+import { ExamAstraError } from '../../server/examAstra.js';
+import { ProductionAuthError } from '../../server/productionAuth.js';
 import {
   ElevenLabsTranscriptionError,
   transcribeWithElevenLabs,
-} from '../../server/elevenlabsTranscription';
+} from '../../server/elevenlabsTranscription.js';
 
 export const config = {
   api: {

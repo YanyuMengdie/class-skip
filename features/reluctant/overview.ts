@@ -1,3 +1,6 @@
+import { parseStudyTerms, type StudyTerm } from './studyTerms';
+import { parseStudyVisual, type StudyVisual } from './studyVisuals';
+
 export type OverviewStyle = 'plain' | 'story';
 
 export interface OverviewOutline {
@@ -14,8 +17,9 @@ export interface OverviewOutline {
 }
 
 export interface OverviewExplanation {
+  terms?: StudyTerm[];
   title: string;
-  sections: Array<{ text: string; pointIds: string[] }>;
+  sections: Array<{ text: string; pointIds: string[]; visual?: StudyVisual }>;
 }
 
 export const OVERVIEW_VERSION = '2';
@@ -99,6 +103,7 @@ export const parseOverviewExplanation = (value: unknown, sourceOutline: Overview
   if (!Array.isArray(object.sections) || object.sections.length === 0) return invalid('no explanation sections');
   const pointsById = new Map(outline.points.map((point) => [point.id, point]));
   const seenIds = new Set<string>();
+  let visualCount = 0;
   const sections = object.sections.map((value) => {
     const section = asObject(value);
     const text = requiredText(section.text, 'section text');
@@ -117,10 +122,13 @@ export const parseOverviewExplanation = (value: unknown, sourceOutline: Overview
       }
       return id;
     });
-    return { text, pointIds };
+    const visual = visualCount < 3 ? parseStudyVisual(section.visual) : undefined;
+    if (visual) visualCount++;
+    return { text, pointIds, ...(visual ? { visual } : {}) };
   });
   if (seenIds.size !== pointsById.size) return invalid('explanation omitted core points');
-  return { title, sections };
+  const terms = parseStudyTerms(object.terms);
+  return { title, sections, ...(terms ? { terms } : {}) };
 };
 
 export const isOverviewOutline = (value: unknown): value is OverviewOutline => {
@@ -201,7 +209,14 @@ export const buildOverviewExplanationPrompt = (outline: OverviewOutline, style: 
 - 每个非空 caveat 都是已写成白话的关键限定句，必须在对应 point 的 section.text 中逐字保留，不能只藏在 id 或标题里；将它自然接在相关解释后。必要时用前后过渡句衔接。
 - 正文使用轻松、直接、连贯的短段落，优先让读者少补背景、少猜关系，不要求读者预测、作答、做练习或证明自己理解。不要反复提问、制造悬念或用“下一节揭晓”吊胃口。
 - 中文正文通常约 600～1000 字；英文通常约 400～650 词。尽量使用约 6～9 个短段，每段只讲清眼前一件事。短资料不注水，长资料保留主线和重要限定，优先压缩人名、术语与重复的研究细节，避免每段都长成一堵文字墙。
-- title 简短自然。sections[].text 直接写正文，可以有自然段，不输出代码块、知识列表或 Markdown 标题；不要夸大掌握程度，不加入考点、任务和打卡话术。
+- title 简短自然。sections[].text 保持连贯讲解，但用少量 Markdown 给读者视觉上的落脚点。第一节可以直接开讲；后续在换话题时以 ### 加一句短小标题，可用自然问题（如“为什么答对多，不一定记得好？”），不连续设问。不要把所有段落写成卡片或知识清单，不加入考点、任务和打卡话术。
+- 每个自然段只讲一个意思，中文通常 80～140 字、英文 45～80 词；按语义自然换段，不能为了行数拆断一句话。一个 section 可以包含多个短段落，pointIds 的关联规则不变。
+- 关键概念用 **加粗**，每段通常 1～3 处、每处尽量短；不要整段加粗。确有一句核心结论时，可以用 ==原句== 标记淡黄色重点，每个 section 最多一句；必须连同“可能、部分、通常”等限定一起保留，不把局部发现写成普遍结论，不为了标记而重复正文。
+- 原文中的例子或实验过程确实帮助理解时，可以用引用块，第一行写 > **举个例子**（英文 **Example**），随后用 > 写简短说明；假想例子必须标为 **举个假想例子** / **Hypothetical example**，不能冒充材料事实。
+- 容易误解的条件可以用 > **注意** / **Note** 引用块呈现；只在有实际限制时使用。非空 caveat 仍必须逐字保留，不要在 caveat 句子内部插入任何 Markdown 标记或硬换行，可把整句放在引用块的一行里。不要重复同一个限定句。
+- 一小节确有值得收住的结论时，可用 > **记住这个** / **Takeaway** 加一句短总结；不必每节都有，避免与黄色重点重复，不能引入骨架以外的新事实。
+- 只有真正的操作或推理步骤才用简短编号列表或“学习 → 间隔 → 测试”这样的流程；箭头不得把时间先后或相关误写成因果。两个概念在相同维度上比较时可以用简短 Markdown 表格，表格中的每项事实必须来自骨架。其余保持自然段，不强套流程或表格。不输出 HTML 或代码围栏。
+- 上述标签和小标题均使用应用输出语言；颜色和图标由界面负责，不要输出颜色名称、装饰 emoji 或伪造页码。
 - 若补充了假想例子，明确标注；事实只能来自骨架，不添加骨架没有的研究结论。
 - 不能为了生动改变实验操作或范围：没有告知某项信息不等于偷偷实施某个操作，某类神经反馈被切断也不等于所有神经联系都被切断。骨架未说的操作细节不要补写。
 - 输出前默默核对：全部 point id 恰好覆盖一次；所有 caveat 在对应段落原样保留；最后一句完整结束；两种写法事实范围保持相同。

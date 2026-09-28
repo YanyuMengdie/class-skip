@@ -1,3 +1,4 @@
+import type { ReadingMedia } from '@/features/reader/skim/readingAids';
 import type { UnderstandingSession } from '@/features/reader/understanding/readingUnderstanding';
 /** 全局应用语言。只控制固定界面与未来生成内容，不改写任何既有学习数据。 */
 export type AppLanguage = 'zh-CN' | 'en';
@@ -70,6 +71,7 @@ export interface SkimExplanationSpineItem {
 }
 
 export interface SkimExplanationVariant {
+  readingMedia?: ReadingMedia;
   key: SkimExplanationVariantKey;
   depth: SkimExplanationDepth;
   style: SkimExplanationStyle;
@@ -127,6 +129,7 @@ export interface ChatMessage {
   casePageRefs?: number[];
   /** 普通 Lecture 整段式/分段式领读：同一卡片内的连接式讲解版本。 */
   skimExplanation?: SkimExplanationState;
+  readingMedia?: ReadingMedia;
   /** 绑定当前讲解的可选理解对话；独立于主线消息、目录和学习进度。 */
   skimUnderstanding?: UnderstandingSession;
   /** 普通领读“看要点”触发的一次性提取题；仅用于避免把题面再次当成学习内容。 */
@@ -935,6 +938,8 @@ export interface PersistedSkimSession {
   studyStyle?: SkimStudyStyle;
   /** 普通 Lecture 整段式/分段式领读的后续讲解深度；旧数据缺省为 normal。 */
   explanationDepth?: SkimExplanationDepth;
+  /** 后续 Lecture 讲解的表达方式；不改变旧消息或知识点覆盖。 */
+  explanationStyle?: SkimExplanationStyle;
   /** 整段式领读独立保存的 PDF 停留页；旧数据缺省为第 1 页。 */
   continuousLastPage?: number;
   /** 分段式路线、状态和各分段轻量元数据。 */

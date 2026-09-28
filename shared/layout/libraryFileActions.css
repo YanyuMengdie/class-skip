@@ -43,3 +43,27 @@
 @keyframes library-file-spin { to { transform: rotate(360deg); } }
 @media (max-width: 500px) { .library-move-content { padding: 20px; } .library-move-notice { flex-wrap: wrap; } }
 @media (prefers-reduced-motion: reduce) { .library-file-actions-trigger { transition: none; } .library-file-spin { animation: none; } }
+
+.library-file-menu > .library-file-delete { color: #a14e3c; border-top: 1px solid #e4e7dd; border-radius: 0 0 7px 7px; margin-top: 4px; }
+.library-file-menu > .library-file-delete:hover { background: #f9eee8; }
+.library-move-content footer .library-delete-confirm { background: #a14e3c; border-color: #a14e3c; color: #fffefa; }
+.library-rename-label { display: grid; gap: 8px; margin-top: 20px; font-size: 14px; }
+.library-rename-label input { width: 100%; box-sizing: border-box; min-width: 0; padding: 12px; border: 1px solid #bac9b6; border-radius: 8px; background: #fffefa; color: #293c30; font: inherit; }
+.library-rename-label input:focus-visible { outline: 2px solid #6f9278; outline-offset: 2px; }
+
+.library-bulk-bar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 16px 0; padding: 12px 0; color: #345541; }
+.library-bulk-bar:has([aria-pressed="true"]) { padding: 16px; background: #edf2e8; border: 1px solid #d5dfce; border-radius: 12px; }
+.library-bulk-bar button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 1px solid #cbd5c5; border-radius: 8px; background: #fffefa; padding: 10px 14px; font-size: 14px; color: #345541; }
+.library-bulk-bar button:disabled { opacity: .45; cursor: not-allowed; }
+.library-bulk-bar button:focus-visible { outline: 2px solid #6f9278; outline-offset: 3px; }
+.library-bulk-bar strong { font-size: 14px; }
+.library-bulk-bar .library-bulk-delete { color: #a14e3c; }
+.library-bulk-spacer { flex: 1; }
+.library-bulk-bar small { width: 100%; color: #72816f; font-size: 12px; line-height: 1.6; }
+.library-bulk-files { max-height: 180px; overflow: auto; padding: 12px 12px 12px 30px; background: #f4f5ef; border-radius: 8px; font-size: 14px; line-height: 1.7; margin: 16px 0; }
+.library-bulk-files li { overflow-wrap: anywhere; margin: 5px 0; }
+.library-selection-check { position: absolute; z-index: 2; top: 12px; right: 12px; width: 32px; height: 32px; display: grid; place-items: center; background: #fffefa; border: 2px solid #9eb299; border-radius: 8px; color: white; }
+.library-card-shell.is-selected .library-selection-check { background: #345b47; border-color: #345b47; }
+.library-card-shell.is-selected > .craft-library-card { outline: 3px solid #6f9278; outline-offset: 1px; }
+.library-card-shell.is-selecting > .craft-library-card { cursor: pointer; }
+@media (max-width: 500px) { .library-bulk-spacer { display: none; } .library-bulk-bar { gap: 8px; } .library-bulk-bar button { min-height: 44px; padding: 9px 11px; } }

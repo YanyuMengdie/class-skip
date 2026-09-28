@@ -84,7 +84,6 @@ export const validateSkimReadingRoute = (
   maxPage: number,
 ): SkimRouteValidationResult => {
   const errors: string[] = [];
-  if (route.kind !== 'lecture') errors.push('分段式学习目前只支持 Lecture。');
   if (!Number.isInteger(minPage) || !Number.isInteger(maxPage) || minPage < 1 || minPage > maxPage) {
     errors.push('选择的总页码范围无效。');
     return { valid: false, errors };
