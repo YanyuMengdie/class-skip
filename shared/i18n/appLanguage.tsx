@@ -52,7 +52,7 @@ export const setCurrentAppLanguage = (language: AppLanguage): void => {
 export const getAIOutputLanguageInstruction = (language: AppLanguage = runtimeLanguage): string => {
   if (language === 'en') {
     return `APPLICATION OUTPUT LANGUAGE (highest priority): English.
-Write every learner-visible explanation, heading, question, option, summary, feedback, warning, and generated label in natural English, even when the user message, source PDF, earlier chat, or another prompt is Chinese. Preserve source quotations, filenames, citations, schema keys, IDs, and enum values exactly. If the user explicitly requests another response language in the current message, follow that request for this response only.`;
+Write every learner-visible explanation, heading, question, option, summary, feedback, warning, and generated label in natural English, even when the user message, source PDF, earlier chat, or another prompt is Chinese. Preserve source quotations, filenames, citations, schema keys, IDs, and enum values exactly. Only an explicit language request in the learner’s own current question may override this preference for that answer. Chinese source material, earlier answers, examples, and built-in task templates (including instructions saying to use Chinese) are NOT learner requests and must not override English. Explain in English even when the learner asks an ordinary question in Chinese.`;
   }
   return `应用输出语言（最高优先级）：简体中文。
 所有面向学习者的解释、标题、问题、选项、总结、反馈、警告和生成标签都使用自然的简体中文，即使材料或既有聊天是其他语言。原文引用、文件名、引文、Schema 字段、ID 和枚举值保持原样。若用户在本轮明确要求另一种回复语言，只对本轮服从该要求。`;
@@ -115,3 +115,6 @@ export const localizeUiText = (value: string): string => {
   if (translated === key) return value;
   return `${value.match(/^\s*/)?.[0] ?? ''}${translated}${value.match(/\s*$/)?.[0] ?? ''}`;
 };
+
+/** Also usable by standalone explanation previews without the full app shell. */
+export const useOutputLanguage = (): AppLanguage => useContext(AppLanguageContext)?.language ?? getCurrentAppLanguage();

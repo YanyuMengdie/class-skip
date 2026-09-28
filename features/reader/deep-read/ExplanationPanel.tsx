@@ -1,6 +1,8 @@
+import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown, { Components } from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
+import type { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
@@ -692,7 +694,7 @@ export const ExplanationPanel: React.FC<ExplanationPanelProps> = ({
                             {getMessageImages(msg).map((img, imgIdx) => (
                                 <img key={imgIdx} src={img} alt="User upload" className="max-w-full h-auto rounded-xl mb-2 border-2 border-white/20" />
                             ))}
-                            <ReactMarkdown 
+                            <ReactMarkdown enabled={msg.role !== 'user'} userRequest={previousLearnerRequest(chatMessages, idx)}
                                 className="prose prose-sm max-w-none prose-invert:text-white prose-p:my-0"
                                 remarkPlugins={[remarkMath, remarkGfm]}
                                 rehypePlugins={[rehypeKatex]}

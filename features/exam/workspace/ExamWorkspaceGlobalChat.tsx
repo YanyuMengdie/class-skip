@@ -1,3 +1,4 @@
+import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceUser as User } from '@/services/workspaceUser';
 import {
@@ -563,7 +564,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
             </div>
           </div>
         ) : (
-          chatState.turns.map((turn) => {
+          chatState.turns.map((turn, turnIndex) => {
             if (turn.role === 'user') {
               return <div key={turn.id} className="ml-auto max-w-[88%] rounded-2xl rounded-br-md bg-violet-600 px-4 py-3 text-sm leading-relaxed text-white shadow-sm">{turn.text}</div>;
             }
@@ -575,7 +576,7 @@ export const ExamWorkspaceGlobalChat: React.FC<ExamWorkspaceGlobalChatProps> = (
             }));
             return (
               <div key={turn.id} className="max-w-[96%] rounded-2xl rounded-bl-md border border-stone-200 bg-stone-50/80 px-4 py-3 shadow-sm">
-                <ExamWorkspaceAssistantMarkdown
+                <ExamWorkspaceAssistantMarkdown userRequest={previousLearnerRequest(chatState.turns, turnIndex)}
                   displayText={turn.text}
                   citations={citations}
                   materials={turnMaterials}

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
-import ReactMarkdown, { type Components } from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Lightbulb, Info, Bookmark } from 'lucide-react';
 import type { Element, RootContent } from 'hast';
@@ -45,7 +46,7 @@ export function OverviewProse({ value, caveats, language }: { value: string; cav
     },
   }), [en]);
   return <div className="overview-prose" data-preserve-language="true">
-    <ReactMarkdown skipHtml remarkPlugins={[remarkGfm, [remarkOverviewReading, options], [remarkStudyTerms, terms]]}
+    <ReactMarkdown language={language} skipHtml remarkPlugins={[remarkGfm, [remarkOverviewReading, options], [remarkStudyTerms, terms]]}
       allowedElements={['span', 'p', 'strong', 'em', 'mark', 'br', 'ul', 'ol', 'li', 'blockquote', 'h2', 'h3', 'h4', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'code', 'pre']}
       unwrapDisallowed components={components}>{value}</ReactMarkdown>
   </div>;

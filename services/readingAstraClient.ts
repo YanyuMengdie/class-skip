@@ -1,6 +1,7 @@
 import { authenticatedApiFetch, ApiPayloadSizeError } from '@/services/authenticatedApi';
 import type { GenerateContentParameters } from '@google/genai';
-import { getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
+import type { AppLanguage } from '@/types';
+import { getAIOutputLanguageInstruction, getCurrentAppLanguage } from '@/shared/i18n/appLanguage';
 
 type ReadingPart = { text: string } | { inlineData: { mimeType: string; data: string } };
 type ReadingMessage = { role: 'user' | 'assistant'; parts: ReadingPart[] };
@@ -88,9 +89,10 @@ function safeError(code: string, english: boolean): Error {
 }
 
 /** The local server handles PDFs, images, schemas and model access. No provider fallback. */
-export async function generateReadingContent(params: GenerateContentParameters, options: { profile?: 'course-brief' } = {}): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number } }> {
+export async function generateReadingContent(params: GenerateContentParameters, options: { profile?: 'course-brief'; outputLanguage?: AppLanguage } = {}): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number } }> {
   const english = getCurrentAppLanguage() === 'en';
-  const body = { ...buildReadingAstraRequest(params), ...(options.profile ? { profile: options.profile } : {}) };
+  const request = buildReadingAstraRequest(params);
+  const body = { ...request, instructions: `${request.instructions}\n\n${getAIOutputLanguageInstruction(options.outputLanguage ?? getCurrentAppLanguage())}`, ...(options.profile ? { profile: options.profile } : {}) };
   const externalSignal = params.config?.abortSignal;
   if (externalSignal?.aborted) throw abortError();
   const controller = new AbortController();

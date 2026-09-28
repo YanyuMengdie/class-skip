@@ -171,7 +171,7 @@ explain：用户选择“你接着讲”，直接把推理和原文的关系讲�
 - topic：当前讨论主题，保持当前范围。
 - mode：acquisition 或 restructuring。
 - phase：question（一个探查问题）、explanation（讲解或提示）、check（一个新情境检验）、complete（用户通过上一轮检验）。
-- messageMarkdown：向用户显示的自然简体中文，保留必要专业术语。不要展示内部阶段或规则。
+- messageMarkdown：使用应用当前选择的输出语言，保留必要专业术语。不要展示内部阶段或规则。
 - pageRefs：本轮实际引用的应用内页码数组，只能选 allowedPageRefs 中的整数；没有引用则为空数组，禁止猜页码。
 - reflection：可选对象，含 before、trigger、after。仅在真实用户回答中观察到修正时提供；before 与 after 必须分别逐字摘录先后两次用户自己的回答，不能改写；trigger 必须逐字摘录本次原文或此前模型回合中实际出现的反例/提示。没有这种证据就省略整个对象。按钮请求不是用户对内容的理解，模型解释也不是用户的新理解。
 explain 与 foundation 只能返回 explanation。不得仅凭本轮生成了检验题就返回 complete。

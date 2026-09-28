@@ -1,5 +1,7 @@
+import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import React, { useState, useRef, useEffect } from 'react';
-import ReactMarkdown, { Components } from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -149,7 +151,7 @@ export const MultiDocQAPanel: React.FC<MultiDocQAPanelProps> = ({
                 >
                   {msg.role === 'model' ? (
                     <div className="prose prose-sm max-w-none text-inherit">
-                      <ReactMarkdown
+                      <ReactMarkdown userRequest={previousLearnerRequest(messages, i)}
                         components={MarkdownComponents}
                         remarkPlugins={[remarkGfm, remarkMath]}
                         rehypePlugins={[rehypeKatex]}

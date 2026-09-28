@@ -44,6 +44,6 @@ export function buildDialogueTeachingSystemPrompt(disciplineBand: DisciplineBand
     getDisciplinePromptSnippet(disciplineBand),
     '',
     '【输出约束】',
-    '使用简体中文。数学公式用 LaTeX：行内 $...$，独立 $$...$$。可用 Markdown 标题与列表；避免无根据的页码引用。',
+    '遵循应用当前选择的输出语言。数学公式用 LaTeX：行内 $...$，独立 $$...$$。可用 Markdown 标题与列表；避免无根据的页码引用。',
   ].join('\n');
 }

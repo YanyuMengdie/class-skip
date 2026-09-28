@@ -83,7 +83,7 @@ export async function translateRecordLabels(source: RecordLabel[], language: App
         },
       },
       contents: [{ role: 'user', parts: [{ text: JSON.stringify({ entries: source }) }] }],
-    });
+    }, { outputLanguage: language });
     const labels = validateRecordLabels(JSON.parse(result.text), source, language);
     remember(key, labels);
     try {

@@ -1,8 +1,9 @@
+import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import { LocalSyllabusBrief } from '@/features/canvas/brief/LocalSyllabusBrief';
 import { isLocalUser, isCloudUser } from '@/services/workspaceUser';
 import { syncLocalWorkspace } from '@/services/syncLocalWorkspace';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
 import {
   ArrowRight,
   BookOpen,
@@ -2076,7 +2077,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                                 }`}
                               >
                                 {msg.role === 'model' ? (
-                                  <ReactMarkdown
+                                  <ReactMarkdown userRequest={previousLearnerRequest(guideMessages, index)}
                                     components={{
                                       p: ({ node, ...props }) => <p className="my-2 leading-7" {...props} />,
                                       ul: ({ node, ...props }) => <ul className="my-2 list-disc space-y-1 pl-5 leading-7" {...props} />,

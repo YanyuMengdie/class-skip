@@ -1,3 +1,4 @@
+import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import { useRecordLabels } from './useRecordLabels';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { ReadingMessage } from './ReadingMessage';
@@ -16,7 +17,8 @@ import React, {
   type ErrorInfo,
   type ReactNode,
 } from 'react';
-import ReactMarkdown, { Components } from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
+import type { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
@@ -3301,8 +3303,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             <div className="reader-message-body" data-preserve-language="true">
                               {msg.role === 'model' && displayedMedia ? <ReadingMessage
                                 text={normalizeGeneratedLineBreaks(displayedText)} media={displayedMedia}
-                                components={MarkdownComponents} pdfDataUrl={pdfDataUrl} onPage={onJumpToPage} language={language}
-                              /> : <ReactMarkdown
+                                components={MarkdownComponents} pdfDataUrl={pdfDataUrl} onPage={onJumpToPage} language={language} userRequest={previousLearnerRequest(messages, idx)}
+                              /> : <ReactMarkdown enabled={msg.role !== 'user'} userRequest={previousLearnerRequest(messages, idx)}
                                   components={MarkdownComponents}
                                   remarkPlugins={[remarkMath, remarkGfm]}
                                   rehypePlugins={[rehypeKatex]}

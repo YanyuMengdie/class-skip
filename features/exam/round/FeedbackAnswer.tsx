@@ -1,5 +1,6 @@
+import { ExplanationText } from '@/shared/i18n/ExplanationMarkdown';
 import React from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
 import { AlertCircle } from 'lucide-react';
 import { feedbackContractValid } from './feedbackContract';
 import type { RoundAttempt, RoundCitation, RoundEvaluation, RoundLanguage } from './roundTypes';
@@ -39,11 +40,11 @@ export function FeedbackAnswer({ attempt, evaluation, language, renderSources }:
     const label = status === 'met' ? t('已回应', 'Addressed') : status === 'partial' ? t('部分回应', 'Partly addressed')
       : status === 'missing' ? t('尚未回应', 'Not addressed') : t('需要核对', 'Needs review');
     return <section key={criterion.id} className="study-round-criterion">
-      <div className="study-round-criterion-heading"><h4>{criterion.requirement}</h4><span data-status={status}>{label}</span></div>
+      <div className="study-round-criterion-heading"><h4><ExplanationText>{criterion.requirement}</ExplanationText></h4><span data-status={status}>{label}</span></div>
       {result?.answerQuote ? <blockquote><small>{t('你的原话', 'Your words')}</small>{result.answerQuote}</blockquote>
         : <p className="study-round-muted">{t('这条记录没有对应的原答摘录。', 'No answer quotation is recorded for this item.')}</p>}
-      {result?.feedback && <p>{needsReview && <span className="study-round-muted">{t('原反馈文字（待核对）：', 'Original feedback, pending review: ')}</span>}{result.feedback}</p>}
-      <details><summary>{t('查看材料中的检查依据', 'See the source requirement')}</summary><p>{criterion.expected}</p>{criterion.sources.map((citation, index) => <blockquote key={index}>{citation.quote}</blockquote>)}</details>
+      {result?.feedback && <p>{needsReview && <span className="study-round-muted">{t('原反馈文字（待核对）：', 'Original feedback, pending review: ')}</span>}<ExplanationText>{result.feedback}</ExplanationText></p>}
+      <details><summary>{t('查看材料中的检查依据', 'See the source requirement')}</summary><p><ExplanationText>{criterion.expected}</ExplanationText></p>{criterion.sources.map((citation, index) => <blockquote key={index}>{citation.quote}</blockquote>)}</details>
       {renderSources(criterion.sources)}
     </section>;
   })}</>;
@@ -76,6 +77,6 @@ export function FeedbackAnswer({ attempt, evaluation, language, renderSources }:
       </details>}
     </>}
     {currentFormat ? <details className="study-round-criterion-details"><summary>{t('查看逐项核对与原文依据', 'See the item-by-item review and sources')}</summary>{criterionDetails}</details>
-      : <>{!needsReview && <p className="study-round-feedback-summary">{evaluation.summary}</p>}{criterionDetails}</>}
+      : <>{!needsReview && <p className="study-round-feedback-summary"><ExplanationText>{evaluation.summary}</ExplanationText></p>}{criterionDetails}</>}
   </div>;
 }

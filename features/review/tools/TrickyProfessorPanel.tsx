@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import ReactMarkdown, { Components } from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
+import type { Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';

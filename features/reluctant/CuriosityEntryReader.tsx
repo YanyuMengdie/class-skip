@@ -1,5 +1,6 @@
+import { ExplanationText } from '@/shared/i18n/ExplanationMarkdown';
 import React from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
 import { ArrowUpRight, BookOpen, ChevronLeft } from 'lucide-react';
 import type { AppLanguage, TinyStudyEntry, TinyStudyEntryAction, TinyStudyEntryType } from '@/types';
 import { EntrySourceArt } from './EntrySourceArt';
@@ -59,8 +60,8 @@ export function CuriosityEntryReader({
         <div className="curiosity-reading__hero">
           <div className="curiosity-reading__headline">
             <div className="curiosity-reading__kicker"><span aria-hidden="true" />{label(entryTypes[entry.type])}</div>
-            <h2>{entry.title}</h2>
-            {entry.teaser && <p className="curiosity-reading__teaser">{entry.teaser}</p>}
+            <h2><ExplanationText>{entry.title}</ExplanationText></h2>
+            {entry.teaser && <p className="curiosity-reading__teaser"><ExplanationText>{entry.teaser}</ExplanationText></p>}
           </div>
           <div className="curiosity-reading__source-art">
             <EntrySourceArt type={entry.type} pageStart={entry.pageStart} pageEnd={entry.pageEnd}

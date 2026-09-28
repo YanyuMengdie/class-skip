@@ -1535,7 +1535,7 @@ export const ExamWorkspaceSocraticChat = forwardRef<ExamWorkspaceSocraticChatHan
                       </div>
                     ) : (
                       <div>
-                        <ExamWorkspaceAssistantMarkdown
+                        <ExamWorkspaceAssistantMarkdown userRequest={previousUserMessage?.text}
                           displayText={displayText}
                           citations={safeCitations}
                           materials={materials}

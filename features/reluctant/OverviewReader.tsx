@@ -1,3 +1,4 @@
+import { ExplanationText } from '@/shared/i18n/ExplanationMarkdown';
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowUp, BookOpen, Check, ChevronDown, FileText, RefreshCcw } from 'lucide-react';
 import { OverviewProse } from './OverviewProse';
@@ -194,7 +195,7 @@ export const ReluctantOverviewReader: React.FC<ReluctantOverviewReaderProps> = (
             <div className="overview-eyebrow">
               <BookOpen className="h-4 w-4" />{text('整份资料的主线', 'The main thread of the document')}
             </div>
-            <h2 className="overview-title">{explanation.title}</h2>
+            <h2 className="overview-title"><ExplanationText>{explanation.title}</ExplanationText></h2>
             <div className="overview-sections">
               {explanation.sections.map((section, index) => {
                 const pointIds = new Set(section.pointIds);
@@ -207,7 +208,7 @@ export const ReluctantOverviewReader: React.FC<ReluctantOverviewReaderProps> = (
                 const compactPages = ranges.slice(0, 4).join(language === 'en' ? ', ' : '、');
                 return (
                   <section key={index} className="overview-section">
-                    {heading && <div className="overview-section-heading"><span className="overview-section-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span><h3>{heading}</h3></div>}
+                    {heading && <div className="overview-section-heading"><span className="overview-section-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span><h3><ExplanationText>{heading}</ExplanationText></h3></div>}
                     <OverviewProse value={section.text} caveats={points.map(point => point.caveat).filter(Boolean)} language={language} />
                     {pages.length > 0 && (
                       <details className="overview-sources">

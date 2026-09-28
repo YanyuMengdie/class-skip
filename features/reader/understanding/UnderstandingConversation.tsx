@@ -1,8 +1,9 @@
+import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import { useSupportSurface } from '@/features/studySupport/StudySupportContext';
 import { useStudyDraft } from '@/features/studySupport/useStudyDraft';
 import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
 import React, { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -170,10 +171,10 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
         </div>}
       </div>
       <div className="understanding-transcript" ref={transcriptRef}>
-        {session.turns.map(turn => (
+        {session.turns.map((turn, turnIndex) => (
           <article key={turn.id} className={`understanding-turn ${turn.role === 'user' ? 'is-user' : 'is-model'}`}>
             <span className="understanding-speaker">{turn.role === 'user' ? localizeUiText("你") : localizeUiText("一起想一想")}</span>
-            <div data-preserve-language="true"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{turn.text}</ReactMarkdown></div>
+            <div data-preserve-language="true"><ReactMarkdown enabled={turn.role !== 'user'} userRequest={previousLearnerRequest(session.turns, turnIndex)} remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{turn.text}</ReactMarkdown></div>
           </article>
         ))}
         {busy && <p role="status" className="understanding-status"><Loader2 size={15} className="animate-spin" />{localizeUiText("正在准备这一小步…")}</p>}

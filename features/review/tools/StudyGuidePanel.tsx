@@ -1,6 +1,7 @@
+import { ExplanationText } from '@/shared/i18n/ExplanationMarkdown';
 import { useAppLanguage, localizeUiText, localizeText } from '@/shared/i18n/appLanguage';
 import React, { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
@@ -60,10 +61,10 @@ export const StudyGuidePanel: React.FC<StudyGuidePanelProps> = ({ onClose, pdfCo
       <main className="flex-1 overflow-y-auto p-6 space-y-6">
         {error && <p role="alert" className="text-rose-700">{localizeUiText(error)}</p>}
         {content ? <>
-          <p className="text-sm text-slate-500">{content.coverageNote || localizeUiText("这是已保存的整理结果，覆盖范围未经完整核对；未列出不代表不需要学习。")}</p>
-          {!!content.chapters?.length && <details><summary className="cursor-pointer font-semibold">{localizeUiText("章节与来源范围")}</summary><ul className="mt-3 space-y-2">{content.chapters.map((c, i) => <li key={i}>{c.title} {c.pageRange && <span className="text-slate-500">· {c.pageRange}</span>}</li>)}</ul></details>}
+          <p className="text-sm text-slate-500">{content.coverageNote ? <ExplanationText>{content.coverageNote}</ExplanationText> : localizeUiText("这是已保存的整理结果，覆盖范围未经完整核对；未列出不代表不需要学习。")}</p>
+          {!!content.chapters?.length && <details><summary className="cursor-pointer font-semibold">{localizeUiText("章节与来源范围")}</summary><ul className="mt-3 space-y-2">{content.chapters.map((c, i) => <li key={i}><ExplanationText>{c.title}</ExplanationText> {c.pageRange && <span className="text-slate-500">· {c.pageRange}</span>}</li>)}</ul></details>}
           {view === 'brief' ? <>
-            {!!content.reviewSuggestions?.keyPoints?.length && <section><h3 className="font-bold mb-3">{localizeUiText("核心要点")}</h3><ul className="list-disc pl-5 space-y-2">{content.reviewSuggestions.keyPoints.map((point, i) => <li key={i}>{point}</li>)}</ul></section>}
+            {!!content.reviewSuggestions?.keyPoints?.length && <section><h3 className="font-bold mb-3">{localizeUiText("核心要点")}</h3><ul className="list-disc pl-5 space-y-2">{content.reviewSuggestions.keyPoints.map((point, i) => <li key={i}><ExplanationText>{point}</ExplanationText></li>)}</ul></section>}
             {!content.coreConcepts?.length && content.markdownContent && <Markdown text={content.markdownContent} />}
           </> : <>
             {content.markdownContent ? <Markdown text={content.markdownContent} /> : <p className="text-slate-500">{localizeUiText("旧笔记没有保存详细讲解，下方仍可查看已保存的概念。")}</p>}
@@ -74,10 +75,10 @@ export const StudyGuidePanel: React.FC<StudyGuidePanelProps> = ({ onClose, pdfCo
             <p className="text-xs text-slate-500 mb-3">{localizeUiText("勾选后直接制作闪卡，无需重新生成。展开查看定义与相关易混点。")}</p>
             <div className="space-y-3">{content.coreConcepts.map((c, i) => <div key={i} className="border rounded-xl p-4 flex gap-3">
               <input type="checkbox" aria-label={localizeText(`选择 ${c.term}`, `Select ${c.term}`)} checked={selected.has(i)} onChange={() => setSelected(prev => { const next = new Set(prev); next.has(i) ? next.delete(i) : next.add(i); return next; })} />
-              <details className="flex-1 min-w-0"><summary className="cursor-pointer font-medium">{c.term}</summary><div className="mt-3 space-y-3"><Markdown text={c.definition} />{view === 'detail' && c.explanation && <Markdown text={c.explanation} />}{c.commonMistakes?.map((m, j) => <p key={j} className="text-sm text-amber-800">{localizeUiText("易混淆：")}{m}</p>)}</div></details>
+              <details className="flex-1 min-w-0"><summary className="cursor-pointer font-medium"><ExplanationText>{c.term}</ExplanationText></summary><div className="mt-3 space-y-3"><Markdown text={c.definition} />{view === 'detail' && c.explanation && <Markdown text={c.explanation} />}{c.commonMistakes?.map((m, j) => <p key={j} className="text-sm text-amber-800">{localizeUiText("易混淆：")}<ExplanationText>{m}</ExplanationText></p>)}</div></details>
             </div>)}</div>
           </section>}
-          {!!content.reviewSuggestions?.commonMistakes?.length && <details><summary className="cursor-pointer font-semibold">{localizeUiText("其他易混淆的地方")}</summary><ul className="list-disc pl-5 mt-3 space-y-2">{content.reviewSuggestions.commonMistakes.map((m, i) => <li key={i}>{m}</li>)}</ul></details>}
+          {!!content.reviewSuggestions?.commonMistakes?.length && <details><summary className="cursor-pointer font-semibold">{localizeUiText("其他易混淆的地方")}</summary><ul className="list-disc pl-5 mt-3 space-y-2">{content.reviewSuggestions.commonMistakes.map((m, i) => <li key={i}><ExplanationText>{m}</ExplanationText></li>)}</ul></details>}
         </> : <p className="text-slate-600">{localizeUiText("尚未生成统一笔记。已有的学习指南、速览、易错点和术语会保留在下方。")}</p>}
         {!!oldNotes.length && <section><h3 className="font-bold mb-3">{localizeUiText("以前保存的笔记")}</h3>{oldNotes.map(a => <details className="border rounded-xl p-4 mb-3" key={a.id}><summary className="cursor-pointer">{a.title}</summary><div className="mt-4"><Markdown text={legacyNoteMarkdown(a) || ''} /></div></details>)}</section>}
         <div className="border-t pt-4"><button type="button" disabled={busy || !cacheReady || !pdfContent} onClick={generate} className="rounded-xl px-4 py-2 bg-emerald-900 text-white disabled:opacity-50 inline-flex gap-2 items-center">{busy && <Loader2 className="w-4 h-4 animate-spin" />}{!cacheReady ? localizeUiText("正在读取已有笔记…") : busy ? localizeUiText("正在整理…") : guide ? localizeUiText("生成新版笔记") : localizeUiText("生成复习笔记")}</button><p className="text-xs text-slate-500 mt-2">{localizeUiText("点击才会调用 AI。已有版本保留；笔记中的重点不等于老师确认的必考内容。")}</p></div>

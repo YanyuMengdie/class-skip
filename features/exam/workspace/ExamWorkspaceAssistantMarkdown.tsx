@@ -1,3 +1,4 @@
+import { useTranslatedExplanation, ExplanationTranslationStatus } from '@/shared/i18n/ExplanationMarkdown';
 /**
  * P3 A 档：助手 Markdown 按块级顺序编号（根级 p / h1–h6 / li / blockquote / pre），与 citation.paragraphIndex 对齐；无索引回退 P1 底部链钮。
  * 列表项内层 p、blockquote 内层 p 不计独立编号（避免与容器重复）。
@@ -15,6 +16,7 @@ const SkipBlockIndexContext = createContext(false);
 
 export interface ExamWorkspaceAssistantMarkdownProps {
   displayText: string;
+  userRequest?: string;
   citations: ExamWorkspaceCitation[];
   materials: ExamMaterialLink[];
   onOpenMaterialPage: (materialId: string, page: number, opts?: OpenMaterialPageOptions) => void;
@@ -23,11 +25,13 @@ export interface ExamWorkspaceAssistantMarkdownProps {
 
 export const ExamWorkspaceAssistantMarkdown: React.FC<ExamWorkspaceAssistantMarkdownProps> = ({
   displayText,
+  userRequest,
   citations,
   materials,
   onOpenMaterialPage,
   msgAnchor,
 }) => {
+  const translation = useTranslatedExplanation(displayText, { userRequest });
   const { citationsByParagraph, unindexed } = useMemo(() => {
     const map = new Map<number, ExamWorkspaceCitation[]>();
     const un: ExamWorkspaceCitation[] = [];
@@ -249,9 +253,10 @@ export const ExamWorkspaceAssistantMarkdown: React.FC<ExamWorkspaceAssistantMark
   };
 
   return (
-    <div className="prose prose-sm max-w-none prose-slate [&_.katex]:text-inherit [&_.katex-display]:my-2">
+    <div ref={translation.ref} data-preserve-language="true" className="prose prose-sm max-w-none prose-slate [&_.katex]:text-inherit [&_.katex-display]:my-2">
+      <ExplanationTranslationStatus state={translation} />
       <ReactMarkdown remarkPlugins={[remarkMath, remarkGfm]} rehypePlugins={[rehypeKatex]} components={components}>
-        {displayText}
+        {translation.value}
       </ReactMarkdown>
       {unindexed.length > 0 && (
         <ExamWorkspaceCitationBlock citations={unindexed} materials={materials} onOpenMaterialPage={onOpenMaterialPage} />

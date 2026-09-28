@@ -1,6 +1,7 @@
+import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import React, { useState } from 'react';
 import { ArrowLeft, ArrowRight, Lightbulb } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
 import remarkGfm from 'remark-gfm';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { useSupportSurface } from '@/features/studySupport/StudySupportContext';
@@ -51,7 +52,7 @@ export const UnderstandingPanel: React.FC<Props> = props => {
       <details className="understanding-scope-details"><summary>{t('看看刚才那条讲解', 'View the reading message')}</summary><div className="understanding-saved-source"><ReactMarkdown remarkPlugins={[remarkGfm]}>{session.sourceText}</ReactMarkdown></div></details>
       {earlier.length > 0 && <details className="understanding-legacy"><summary>{t('已保存的辅导对话', 'Saved discussions')} · {earlier.length}</summary>
         {earlier.map(discussion => <details key={discussion.id}><summary>{discussion.topic || t('此前的讨论', 'Earlier discussion')}</summary>
-          {discussion.turns.map(turn => <article className="understanding-turn" key={turn.id}><span className="understanding-speaker">{turn.role === 'user' ? t('你', 'You') : t('一起想一想', 'Thinking together')}</span><ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.text}</ReactMarkdown></article>)}
+          {discussion.turns.map((turn, turnIndex) => <article className="understanding-turn" key={turn.id}><span className="understanding-speaker">{turn.role === 'user' ? t('你', 'You') : t('一起想一想', 'Thinking together')}</span><ReactMarkdown enabled={turn.role !== 'user'} userRequest={previousLearnerRequest(discussion.turns, turnIndex)} remarkPlugins={[remarkGfm]}>{turn.text}</ReactMarkdown></article>)}
           {session.guidedDiscussions?.some(item => item.id === discussion.id) && <div className="understanding-picker-actions"><button type="button" onClick={() => { setActiveId(discussion.id); setView('conversation'); }}>{t('接着这段想', 'Continue this discussion')}</button></div>}
         </details>)}
       </details>}

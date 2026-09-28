@@ -1,16 +1,17 @@
+import { ExplanationText } from '@/shared/i18n/ExplanationMarkdown';
 import React, { createContext, useContext, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { AppLanguage } from '@/types';
 import { parseStudyTerms, splitStudyTerms, type StudyTerm } from './studyTerms';
 import './studyTerms.css';
 
 const empty: StudyTerm[] = [];
-const Context = createContext<{ terms: StudyTerm[]; open?: (term: StudyTerm, trigger: HTMLElement) => void }>({ terms: empty });
+const Context = createContext<{ terms: StudyTerm[]; language?: AppLanguage; open?: (term: StudyTerm, trigger: HTMLElement) => void }>({ terms: empty });
 export const useStudyTerms = () => useContext(Context);
 
 export function StudyTerms({ terms, language, children }: { terms?: StudyTerm[]; language: AppLanguage; children: React.ReactNode }) {
   const validated = useMemo(() => parseStudyTerms(terms) ?? empty, [terms]);
   const [selected, setSelected] = useState<{ term: StudyTerm; trigger: HTMLElement } | null>(null);
-  const context = useMemo(() => ({ terms: validated, open: (term: StudyTerm, trigger: HTMLElement) => setSelected({ term, trigger }) }), [validated]);
+  const context = useMemo(() => ({ terms: validated, language, open: (term: StudyTerm, trigger: HTMLElement) => setSelected({ term, trigger }) }), [validated, language]);
   return <Context.Provider value={context}>
     {children}
     {selected && <TermDialog term={selected.term} trigger={selected.trigger} language={language} onClose={() => setSelected(null)} />}
@@ -41,23 +42,23 @@ function TermDialog({ term, trigger, language, onClose }: { term: StudyTerm; tri
       if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) onClose();
     }}>
     <div className="study-term-dialog-top"><span>{en ? 'In plain language' : '用大白话说'}</span><button type="button" autoFocus onClick={onClose} aria-label={en ? 'Close definition' : '关闭释义'}>×</button></div>
-    <h3 id={id}>{term.term}</h3>
+    <h3 id={id}>{en ? term.english : term.term}</h3>
     {term.term.toLowerCase() !== term.english.toLowerCase() && <p className="study-term-name" lang="en">{term.english}</p>}
-    <p id={`${id}-meaning`} className="study-term-meaning">{term.explanation}</p>
+    <p id={`${id}-meaning`} className="study-term-meaning"><ExplanationText language={language}>{term.explanation}</ExplanationText></p>
   </dialog>;
 }
 
 export function StudyTermButton({ index, showEnglish, children }: { index: number; showEnglish: boolean; children: React.ReactNode }) {
-  const { terms, open } = useStudyTerms(); const term = terms[index];
+  const { terms, open, language } = useStudyTerms(); const term = terms[index];
   if (!term || !open) return <>{children}</>;
   return <button type="button" className="study-term" aria-haspopup="dialog" onClick={event => open(term, event.currentTarget)}>
-    {children}{showEnglish && <span className="study-term-english" lang="en">（{term.english}）</span>}
+    {language === 'en' ? term.english : children}{language !== 'en' && showEnglish && <span className="study-term-english" lang="en">（{term.english}）</span>}
   </button>;
 }
 
 /** For plain diagram labels; Markdown remains the responsibility of OverviewProse. */
 export function StudyTermText({ value }: { value: string }) {
-  const { terms } = useStudyTerms();
-  return <>{splitStudyTerms(value, terms).map((part, i) => part.index === undefined ? <React.Fragment key={i}>{part.text}</React.Fragment>
+  const { terms, language } = useStudyTerms();
+  return <>{splitStudyTerms(value, terms).map((part, i) => part.index === undefined ? <ExplanationText key={i} language={language}>{part.text}</ExplanationText>
     : <StudyTermButton key={i} index={part.index} showEnglish={!!part.showEnglish}>{part.text}</StudyTermButton>)}</>;
 }

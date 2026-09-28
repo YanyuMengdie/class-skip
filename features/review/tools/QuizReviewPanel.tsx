@@ -1,3 +1,4 @@
+import { ExplanationText } from '@/shared/i18n/ExplanationMarkdown';
 import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
 import React, { useState, useMemo } from 'react';
 import { X, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, Lightbulb, RotateCcw, PlusCircle, Loader2, BookOpen, ListPlus } from 'lucide-react';
@@ -230,7 +231,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                     <Lightbulb className="w-4 h-4" />
                     {isCorrect ? localizeUiText("回答正确") : localizeUiText("解析")}
                   </div>
-                  <p className="leading-relaxed">{currentQ.explanation}</p>
+                  <p className="leading-relaxed"><ExplanationText>{currentQ.explanation}</ExplanationText></p>
                   {!isCorrect && onAddToTrap && selected !== null && !addedToTrapIds.has(currentQ.question) && (
                     <button
                       onClick={() => {
@@ -308,7 +309,7 @@ export const QuizReviewPanel: React.FC<QuizReviewPanelProps> = ({
                       ))}
                     </ul>
                     <p className="text-sm text-slate-500 border-t border-stone-200 pt-2 mt-2">
-                      <span className="font-bold">{localizeUiText("解析：")}</span> {q.explanation}
+                      <span className="font-bold">{localizeUiText("解析：")}</span> <ExplanationText>{q.explanation}</ExplanationText>
                     </p>
                   </div>
                 ))}

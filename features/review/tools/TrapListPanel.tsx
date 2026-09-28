@@ -1,3 +1,4 @@
+import { ExplanationText } from '@/shared/i18n/ExplanationMarkdown';
 import React from 'react';
 import { X, AlertTriangle, Trash2 } from 'lucide-react';
 import { TrapItem } from '@/types';
@@ -58,7 +59,7 @@ export const TrapListPanel: React.FC<TrapListPanelProps> = ({ onClose, items, on
                       </li>
                     ))}
                   </ul>
-                  <p className="mt-2 text-xs text-slate-500 border-t border-amber-100 pt-2">解析：{item.explanation}</p>
+                  <p className="mt-2 text-xs text-slate-500 border-t border-amber-100 pt-2">解析：<ExplanationText>{item.explanation}</ExplanationText></p>
                 </div>
               ))}
               {onSaveToStudio && items.length > 0 && (

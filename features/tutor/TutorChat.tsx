@@ -1,8 +1,10 @@
+import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import { useStudyDraft } from '@/features/studySupport/useStudyDraft';
 import { localizeText } from '@/shared/i18n/appLanguage';
 import { useSupportSurface } from '@/features/studySupport/StudySupportContext';
 import React, { useEffect, useRef, useState } from 'react';
-import ReactMarkdown, { Components } from 'react-markdown';
+import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
+import type { Components } from 'react-markdown';
 import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
@@ -287,7 +289,7 @@ export const TutorChat: React.FC<TutorChatProps> = ({
               ))}
               {msg.text && (
                 <div className="reader-message-body" data-preserve-language="true">
-                  <ReactMarkdown
+                  <ReactMarkdown enabled={msg.role !== 'user'} userRequest={previousLearnerRequest(messages, idx)}
                     components={MarkdownComponents}
                     remarkPlugins={[remarkMath, remarkGfm]}
                     rehypePlugins={[rehypeKatex]}
