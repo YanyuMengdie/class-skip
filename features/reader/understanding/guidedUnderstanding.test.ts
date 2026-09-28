@@ -20,14 +20,6 @@ describe('guided help preserves history and scope', () => {
   const migrated=prepareMessageUnderstanding({role:'model',text:'新的讲解',timestamp:1,skimUnderstanding:saved} as ChatMessage,'新的讲解',[3]);
   expect(savedUnderstandingDiscussions(migrated).map(x=>x.id)).toEqual(['old',guided.id]);
  });
- it('starts with an explanation and reserves a question for an explicit reason action', () => {
-  const session=createGuidedUnderstanding(parent);
-  const prompt=buildUnderstandingPrompt({session,action:'start',userText:'',minutes:5});
-  expect(prompt).toContain('绝对不要在开场给用户出题');expect(prompt).toContain('禁止换一种措辞再次追问');
-  expect(()=>normalizeUnderstandingResult({messageMarkdown:'请先回答',phase:'question',pageRefs:[]},{session,action:'start',userText:''})).toThrow('先解释背景');
-  expect(normalizeUnderstandingResult({messageMarkdown:'先给你讲清背景。',phase:'explanation',pageRefs:[]},{session,action:'start',userText:''}).phase).toBe('explanation');
-  expect(buildUnderstandingPrompt({session,action:'reason',userText:'',minutes:5})).toContain('一次最多一个问题');
- });
  it('recognizes not knowing without treating a reasoned answer as a non-answer', () => {
   for(const text of ['不知道','我还是没懂。',"I don't understand"] ) expect(isUnderstandingNonAnswer(text)).toBe(true);
   expect(isUnderstandingNonAnswer('我不知道原因，但我觉得删掉就不能再用了')).toBe(false);

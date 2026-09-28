@@ -112,3 +112,6 @@
 .case-reading-archive .understanding-header > span { font-size: 12px; color: #61765f; }
 .case-reading-archive .understanding-picker-actions button[aria-pressed="true"] { background: #365d46; color: #fffefa; }
 .case-archive-data { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+
+.understanding-reasoning-question { margin-top: 14px; padding: 12px 16px; border-left: 3px solid #65876c; border-radius: 0 8px 8px 0; background: #eef3e9; color: #294b37; line-height: 1.8; }
+.understanding-reasoning-question p { margin: 0; }

@@ -10,7 +10,8 @@ import rehypeKatex from 'rehype-katex';
 import { ArrowLeft, BookOpen, Lightbulb, Loader2, Send, Square } from 'lucide-react';
 import { generateReadingUnderstandingTurn } from '@/services/geminiService';
 import type { UnderstandingAction, UnderstandingSession, UnderstandingTurn } from './readingUnderstanding';
-import { isUnderstandingNonAnswer } from './guidedUnderstanding';
+import { resolveGuidedAction } from './guidedUnderstanding';
+import { isCaseUnderstanding } from './caseReasoning';
 import './understanding.css';
 
 export interface UnderstandingConversationProps {
@@ -39,8 +40,8 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
   generateTurn = generateReadingUnderstandingTurn,
 }) => {
   const { text: t } = useAppLanguage();
-  const guided = session.teachingFlow === 'guided-step-v1';
-  const actionLabel = (action: UnderstandingAction) => guided && action === 'foundation' ? t('这里还是没懂', 'I still don’t understand') : guided && action === 'explain' ? t('你接着讲', 'Please walk me through it') : localizeUiText(ACTION_LABELS[action] || '');
+  const guided = isCaseUnderstanding(session);
+  const actionLabel = (action: UnderstandingAction) => guided && action === 'reason' ? t('继续推理', 'Continue reasoning') : guided && action === 'hint' ? t('给我一条线索', 'Give me a clue') : guided && action === 'foundation' ? t('不知道，从哪想？', 'I don’t know where to start') : guided && action === 'explain' ? t('直接讲给我', 'Explain it to me') : localizeUiText(ACTION_LABELS[action] || '');
   const [input, setInput, saveInputDraft] = useStudyDraft(`understanding:${session.id}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +78,7 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
   const run = async (action: UnderstandingAction, text = '', retryBefore?: UnderstandingSession) => {
     if (requestRef.current || (action === 'answer' && !text.trim())) return;
     const submittedAnswer = action === 'answer';
-    if (guided && action === 'answer' && isUnderstandingNonAnswer(text)) action = 'foundation';
+    if (guided) action = resolveGuidedAction(action, text);
     const before = retryBefore ?? sessionRef.current;
     const controller = new AbortController();
     requestRef.current = controller;
@@ -98,12 +99,14 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
       if (controller.signal.aborted || requestRef.current !== controller) return;
       const reply: UnderstandingTurn = {
         id: crypto.randomUUID(), role: 'model', text: result.messageMarkdown, phase: result.phase, timestamp: Date.now(),
+        ...(result.reasoning?.question ? { question: result.reasoning.question } : {}),
       };
       onUpdate(previous => ({
         ...previous, topic: previous.focus?.title || result.topic, mode: result.mode, phase: result.phase,
         explained: Boolean(previous.explained) || (result.phase === 'explanation' && ['start', 'explain', 'foundation'].includes(action)),
         turns: [...previous.turns, reply],
         ...(result.reflection ? { reflection: result.reflection } : {}),
+        ...(guided ? { teachingFlow: 'case-reasoning-v2' as const, reasoning: result.reasoning } : {}),
       }));
       setRetry(null);
     } catch (cause) {
@@ -162,7 +165,7 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
         <p className="understanding-eyebrow"><Lightbulb size={15} />{localizeUiText("陪我想通这个")}</p>
         <h2>{session.topic || localizeUiText("从刚才这一段开始")}</h2>
         <details><summary>{localizeUiText("这次围绕哪段内容")}</summary><p data-preserve-language="true">{session.sourceText}</p></details>
-        {guided ? <p>{t('先讲清背景，再一起想一小步。随时可以回去接着读。', 'Background first, then one small step. Return to reading whenever you like.')}</p> : session.scopePolicy && <p>{t('仅讲解所选知识点；改变节奏不会扩大范围。', 'Only the selected topic; pace does not expand its scope.')}</p>}
+        {guided ? <p>{t('从一个具体情境开始，用你的判断找到卡住的那一步。', 'Use a concrete situation and your reasoning to find where you get stuck.')}</p> : session.scopePolicy && <p>{t('仅讲解所选知识点；改变节奏不会扩大范围。', 'Only the selected topic; pace does not expand its scope.')}</p>}
         {session.scopePolicy && !session.pageRefs.length && <p role="status">{t('对应页码待定位 · 当前依据领读段落解释，原文尚未核对。', 'Source pages not located · This explanation uses the reading excerpt and has not been checked against the original.')}</p>}
         {onJumpToPage && session.pageRefs.length > 0 && <div className="understanding-sources">
           {!session.scopePolicy && session.pageRefs.length > 6
@@ -175,6 +178,7 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
           <article key={turn.id} className={`understanding-turn ${turn.role === 'user' ? 'is-user' : 'is-model'}`}>
             <span className="understanding-speaker">{turn.role === 'user' ? localizeUiText("你") : localizeUiText("一起想一想")}</span>
             <div data-preserve-language="true"><ReactMarkdown enabled={turn.role !== 'user'} userRequest={previousLearnerRequest(session.turns, turnIndex)} remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{turn.text}</ReactMarkdown></div>
+            {turn.role === 'model' && turn.question && <div className="understanding-reasoning-question"><ReactMarkdown userRequest={previousLearnerRequest(session.turns, turnIndex)} remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{turn.question}</ReactMarkdown></div>}
           </article>
         ))}
         {busy && <p role="status" className="understanding-status"><Loader2 size={15} className="animate-spin" />{localizeUiText("正在准备这一小步…")}</p>}
@@ -192,10 +196,11 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
         <div className="understanding-actions">
           <button type="button" disabled={busy} aria-pressed={needsReview} onClick={() => onReview(!needsReview)}>{needsReview ? t('已留待回顾 · 我现在懂了', 'Saved for later · I understand now') : t('还没懂，先记下', 'Still unclear — save for later')}</button>
           <button type="button" disabled={busy || !hasReply} onClick={onFinish}>{guided ? t('回到刚才的位置', 'Back to reading') : t('这一点先到这里，查看下一步', 'Pause this topic and see what’s next')}</button>
-          {!hasReply && !busy && !retry && <button type="button" onClick={() => void run('start')}>{t('开始讲解这一点', 'Explain this topic')}</button>}
+          {!hasReply && !busy && !retry && <button type="button" onClick={() => void run('start')}>{t('开始一起推理', 'Start reasoning together')}</button>}
         </div>
         <div className="understanding-actions">
-          {guided ? <button type="button" disabled={busy || !hasReply} onClick={() => void run('reason')}>{t('带我想一步', 'Let me try one step')}</button> : <button type="button" disabled={busy} onClick={() => void run('hint')}>{localizeUiText("给点提示")}</button>}
+          {guided && hasReply && session.phase === 'explanation' && <button type="button" disabled={busy} onClick={() => void run('reason')}>{t('继续推理', 'Continue reasoning')}</button>}
+          <button type="button" disabled={busy || (guided && !hasReply)} onClick={() => void run('hint')}>{guided ? t('给我一条线索', 'Give me a clue') : localizeUiText("给点提示")}</button>
           <button type="button" disabled={busy || (guided && !hasReply)} onClick={() => void run('foundation')}>{actionLabel('foundation')}</button>
           <button type="button" disabled={busy || (guided && !hasReply)} onClick={() => void run('explain')}>{actionLabel('explain')}</button>
           {busy && <button type="button" onClick={cancel}><Square size={12} />{localizeUiText("停止")}</button>}

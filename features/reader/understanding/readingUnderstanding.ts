@@ -1,3 +1,4 @@
+import { CASE_REASONING_RULES, isCaseUnderstanding, normalizeCaseReasoning, type CaseReasoningState } from './caseReasoning';
 import type { UnderstandingPlan } from './understandingPlan';
 
 export type UnderstandingAction = 'start' | 'answer' | 'hint' | 'explain' | 'foundation' | 'revisit' | 'reason';
@@ -17,6 +18,7 @@ export interface UnderstandingTurn {
   timestamp: number;
   action?: UnderstandingAction;
   phase?: UnderstandingPhase;
+  question?: string;
 }
 
 export interface UnderstandingResult {
@@ -26,10 +28,11 @@ export interface UnderstandingResult {
   messageMarkdown: string;
   pageRefs: number[];
   reflection?: UnderstandingReflection;
+  reasoning?: CaseReasoningState;
 }
 
 export interface UnderstandingSession {
-  teachingFlow?: 'guided-step-v1';
+  teachingFlow?: 'guided-step-v1' | 'case-reasoning-v2';
   entryPath?: 'whole' | 'specific';
   focusQuestion?: string;
   guidedDiscussions?: UnderstandingSession[];
@@ -43,6 +46,7 @@ export interface UnderstandingSession {
   mode: UnderstandingMode;
   phase: UnderstandingPhase;
   reflection?: UnderstandingReflection;
+  reasoning?: CaseReasoningState;
   reviewRequested?: boolean;
   explained?: boolean;
   plan?: UnderstandingPlan;
@@ -133,8 +137,9 @@ export function buildUnderstandingPrompt(input: {
     phase: session.phase,
     allowedPageRefs: [...new Set(session.pageRefs.filter(validPage))],
     sourceText: session.sourceText,
-    turns: session.turns.map(({ role, text, action: turnAction, phase }) => ({ role, text, action: turnAction, phase })),
+    turns: session.turns.map(({ role, text, action: turnAction, phase, question }) => ({ role, text, action: turnAction, phase, question })),
     reflection: session.reflection,
+    reasoning: session.reasoning,
     action,
     userText,
   };
@@ -155,15 +160,8 @@ ${session.focus.path === 'essentials' ? '用户表示整体没懂：本轮是重
 这一轮共选 ${session.focus.roundTopicCount ?? 1} 个知识点，${minutes} 分钟是整轮节奏参考，每个知识点只占其中一部分；慢慢想可以更深入。用户追问时按需要继续，不用时间强行结束。
 start 时先把这一点简短讲清楚，phase=explanation，可在结尾邀请一次具体提问；不要一开场就考试。程序负责其他知识点的队列，不要宣称整个 Module/Part 已覆盖或学会，也不要自动讲下一点。` : ''}
 本轮动作：${action}
-${session.focus && action === 'start' ? '按上述当前知识点范围直接开始讲解，phase=explanation；不先要求答题。' : actionInstructions[action]}
-${session.teachingFlow === 'guided-step-v1' ? `【本次按需推演的教学顺序，优先于默认探查与迁移建议】
-用户因领读未理解而主动求助；不要考试化，不设计完整案件，不自动扩展到整个 Module，不生成知识点队列。whole 是当前点击消息整体没进脑子，不是整份课件；specific 聚焦 focusQuestion 或所选段落。
-start：先用几句大白话建立最少必要背景，解释每个必要术语，保留中英文。再由你示范一步因果推理。到这里就停，phase=explanation，绝对不要在开场给用户出题；由界面的“带我想一步”邀请用户主动开始。
-reason：仅使用已经讲清的背景，让用户往前想一步；最多一个简单问题，明确假设例子不是实验事实。若此前没有足够背景，先补背景，phase=explanation，不勉强提问。
-answer：先接住真实想法，明确正确部分，补清一个缺口，再把关系接回原讲解；默认 phase=explanation。不自动追加迁移测试或连续追问，不替用户宣称掌握。用户说不知道或没懂时，直接进一步拆解并示范，禁止换一种措辞再次追问。
-foundation：用户不知道或背景仍不清楚，降低术语密度，用更具体的小例子示范，phase=explanation，禁止结尾再问问题。
-explain：用户选择“你接着讲”，直接把推理和原文的关系讲完，phase=explanation，无答题门槛。
-随时允许返回领读，不要求获得 complete；接受示范不等于通过检验。` : ''}
+${isCaseUnderstanding(session) ? '执行下方案件推理流程中对应的本轮动作。' : session.focus && action === 'start' ? '按上述当前知识点范围直接开始讲解，phase=explanation；不先要求答题。' : actionInstructions[action]}
+${isCaseUnderstanding(session) ? CASE_REASONING_RULES : ''}
 本轮是否具备返回 complete 的交互前提：${canComplete(session, action, userText) ? '是，但仍须核对本次理由是否成立' : '否，禁止返回 complete'}。
 
 【结构化输出】
@@ -174,7 +172,7 @@ explain：用户选择“你接着讲”，直接把推理和原文的关系讲�
 - messageMarkdown：使用应用当前选择的输出语言，保留必要专业术语。不要展示内部阶段或规则。
 - pageRefs：本轮实际引用的应用内页码数组，只能选 allowedPageRefs 中的整数；没有引用则为空数组，禁止猜页码。
 - reflection：可选对象，含 before、trigger、after。仅在真实用户回答中观察到修正时提供；before 与 after 必须分别逐字摘录先后两次用户自己的回答，不能改写；trigger 必须逐字摘录本次原文或此前模型回合中实际出现的反例/提示。没有这种证据就省略整个对象。按钮请求不是用户对内容的理解，模型解释也不是用户的新理解。
-explain 与 foundation 只能返回 explanation。不得仅凭本轮生成了检验题就返回 complete。
+${isCaseUnderstanding(session) ? 'explain 只能返回 explanation；其他动作必须交出推理问题或在有证据时 complete，并返回完整 reasoning 对象。' : 'explain 与 foundation 只能返回 explanation。'}不得仅凭本轮生成了检验题就返回 complete。
 
 【当前材料与对话数据】
 ${JSON.stringify(context, null, 2)}`;
@@ -201,7 +199,7 @@ function normalizeReflection(
   const hasLaterAfter = beforeIndex >= 0 && attempts.slice(beforeIndex + 1).some((text) => text.includes(after));
   const triggerSources = [
     input.session.sourceText,
-    ...input.session.turns.filter((turn) => turn.role === 'model').map((turn) => turn.text),
+    ...input.session.turns.filter((turn) => turn.role === 'model').flatMap((turn) => [turn.text, turn.question ?? '']),
   ];
   if (!hasLaterAfter || !triggerSources.some((text) => text.includes(trigger))) return undefined;
   return { before, trigger, after };
@@ -225,12 +223,6 @@ export function normalizeUnderstandingResult(
     throw new Error('这次回复含有不在当前材料范围内的页码，请重试。');
   }
 
-  if (input.session.teachingFlow === 'guided-step-v1'
-    && ['start', 'foundation', 'explain'].includes(input.action)
-    && raw.phase !== 'explanation') {
-    throw new Error('这一步应先解释背景，不能直接要求答题，请重试。');
-  }
-
   const mode = input.action === 'foundation'
     ? 'acquisition'
     : raw.mode === 'acquisition' || raw.mode === 'restructuring' ? raw.mode : input.session.mode;
@@ -242,10 +234,12 @@ export function normalizeUnderstandingResult(
   if (phase === 'complete' && !canComplete(input.session, input.action, input.userText)) {
     throw new Error('这次回复缺少完成理解检验的依据，请重试。');
   }
-  if (input.action === 'explain' || input.action === 'foundation') {
+  if (!isCaseUnderstanding(input.session) && (input.action === 'explain' || input.action === 'foundation')) {
     phase = 'explanation';
   }
 
+  const reasoning = isCaseUnderstanding(input.session)
+    ? normalizeCaseReasoning(raw.reasoning, { ...input, phase, hasAttempt }) : undefined;
   const reflection = normalizeReflection(raw.reflection, input);
   return {
     topic: cleanText(raw.topic) || input.session.topic,
@@ -254,5 +248,6 @@ export function normalizeUnderstandingResult(
     messageMarkdown,
     pageRefs,
     ...(reflection ? { reflection } : {}),
+    ...(reasoning ? { reasoning } : {}),
   };
 }

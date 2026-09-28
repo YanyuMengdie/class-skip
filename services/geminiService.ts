@@ -1,3 +1,4 @@
+import { CASE_REASONING_RULES, isCaseUnderstanding } from '@/features/reader/understanding/caseReasoning';
 import { buildInterestEntryPrompt, INTEREST_ENTRY_STORY_RULES, type InterestEntryContext } from '@/features/reluctant/interestEntryPrompts';
 import { assertLectureCaseGenerationEnabled } from '@/features/reader/skim/lectureCaseRetirement';
 import { READING_MEDIA_INSTRUCTION, readingMediaSchema, parseReadingMedia } from '@/features/reader/skim/readingAids';
@@ -5663,7 +5664,7 @@ export const generateReadingUnderstandingTurn = async (input: {
       { text: buildUnderstandingPrompt(input) },
     ] }],
     config: {
-      systemInstruction: READING_UNDERSTANDING_RULES,
+      systemInstruction: `${READING_UNDERSTANDING_RULES}\n${isCaseUnderstanding(input.session) ? CASE_REASONING_RULES : ''}`,
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       responseMimeType: 'application/json',
       responseSchema: {
@@ -5672,11 +5673,24 @@ export const generateReadingUnderstandingTurn = async (input: {
           topic: { type: Type.STRING },
           mode: { type: Type.STRING, enum: ['acquisition', 'restructuring'] },
           phase: { type: Type.STRING, enum: ['question', 'explanation', 'check', 'complete'] },
-          messageMarkdown: { type: Type.STRING },
+          messageMarkdown: { type: Type.STRING, description: 'Context, feedback or a clue. For case reasoning, use statements only: put the sole question in reasoning.question, never repeat it here.' },
           pageRefs: { type: Type.ARRAY, items: { type: Type.INTEGER } },
+          ...(isCaseUnderstanding(input.session) ? { reasoning: {
+            type: Type.OBJECT, properties: {
+              centralQuestion: { type: Type.STRING }, situation: { type: Type.STRING },
+              move: { type: Type.STRING, enum: ['predict', 'justify', 'compare', 'revise', 'transfer', 'reveal', 'summarize'] },
+              question: { type: Type.STRING, description: 'The single next question displayed separately to the learner. Empty for reveal or completion.' },
+              diagnosis: { type: Type.OBJECT, properties: {
+                status: { type: Type.STRING, enum: ['unknown', 'gap', 'supported'] },
+                learnerQuote: { type: Type.STRING },
+                gapKind: { type: Type.STRING, enum: ['unknown', 'term', 'relationship', 'condition', 'evidence', 'none'] },
+                detail: { type: Type.STRING },
+              }, required: ['status', 'learnerQuote', 'gapKind', 'detail'] },
+            }, required: ['centralQuestion', 'situation', 'move', 'question', 'diagnosis'],
+          } } : {}),
           reflection: { type: Type.OBJECT, properties: { before: { type: Type.STRING }, trigger: { type: Type.STRING }, after: { type: Type.STRING } }, required: ['before', 'trigger', 'after'] },
         },
-        required: ['topic', 'mode', 'phase', 'messageMarkdown', 'pageRefs'],
+        required: ['topic', 'mode', 'phase', 'messageMarkdown', 'pageRefs', ...(isCaseUnderstanding(input.session) ? ['reasoning'] : [])],
       },
     },
   });
