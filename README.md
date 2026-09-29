@@ -1,38 +1,148 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 逃课神器 · Class Skip
 
-# Run and deploy your AI Studio app
+把 lecture、paper 和文章变成可以读下去、想明白、再复习的学习材料。
 
-This contains everything you need to run your app locally.
+Class Skip 是一个围绕 PDF 的 AI 学习工具：可以陪你分段领读，也可以从现实故事打开兴趣；遇到不懂的地方，通过你的判断和理由找出卡点，再给有针对性的帮助。
 
-View your app in AI Studio: https://ai.studio/apps/drive/1ySZ0q5YSZWHgOICdfUBc74N2HydgsXLI
+**在线使用：[class-skip-flash.vercel.app](https://class-skip-flash.vercel.app/)**
 
-## Run Locally
+当前线上版本对应分支：`codex/class-skip-flash`。
 
-**Prerequisites:**  Node.js
+## 第一次使用
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+1. 进入书房，在「资料库」上传 PDF，或打开已经保存的材料。
+2. 想正式学习，进入领读，选择连续阅读或分段阅读；分段目录允许自行选择顺序。
+3. 还不想开始，进入「我现在不想学」，先了解大意、听一个有意思的故事，或者用大白话从头看一点。
+4. 某条讲解没想通，选择这条消息对应的知识点，进入「陪我想通」；回答情境中的问题，让 AI 根据你的理由找出理解上的缺口。
+5. 想巩固时，进入「复习工作台」；需要跨材料整理时使用「联合复习」。
 
-### 开发调试建议
+可以在设置中切换中文和英文。界面和 AI 讲解都会遵循所选语言；你明确要求用中文解释时，会尊重这次要求。
 
-**上传 PDF 时请使用外部浏览器（如 Chrome）打开：**  
-在浏览器地址栏输入 **http://localhost:3000** 进行访问。  
+## 当前功能
 
-Cursor 内置 Browser Tab 预览对文件上传、PDF Worker 等存在兼容限制，可能导致「处理中」卡住或无法选择文件。使用系统浏览器可避免此类问题。
+### 阅读与理解
 
-### 备考引用：chunk 索引与检索（1-1 / 1-2）
+- **PDF 与讲解并排阅读**：查看原文页码、页面注释和讲解，并使用页面工具、学习工具与重点标记。
+- **连续领读与分段领读**：按资料内容组织阅读；分段保留各自的阅读位置、对话和待解决问题，支持返回目录与重新规划。
+- **陪我想通**：围绕刚才那条消息中的知识点展开案件推理式对话，帮助你发现自己具体哪里没懂。
 
-- **1-1**：PDF 切块持久化至 IndexedDB（`services/examChunkIndexStorage.ts`）。
-- **1-2**：`features/exam/lib/examChunkRetrieval.ts` 使用 **Okapi BM25**（自研轻量实现，**无额外 npm 依赖、无向量 API**）。中文为单字 + 二字 bigram 与英文整词混合分词；调试可加 `?debug=1` 在备考台底部试检索。
-- **1-3**：用户每轮发送后按 `workspaceKey` 检索，非空则向 `chatWithAdaptiveTutor` 注入 **†chunkId†** 白名单；检索为空时**不**注入 chunk 约束，模型侧**回退**与 1-3 前相同的文末 `citations` JSON 协议。助手回复经 `parseExamWorkspaceModelReply` 剥离暗号并校验链钮。
-- **1-4**：多材料同场合并为单条 IndexedDB 记录；`retrieveCandidateChunks` 在**整场** chunk 上检索（可选「仅当前预览材料」筛选）。无索引 / 检索空 / 检索失败时**不**注入 chunk 附录，仅文末 JSON；合并讲义仍以 `mergedContent` 作辅助上下文，**引用以 chunk 白名单或降级 JSON 为准**。
+「陪我想通」的基本流程是：
 
-### 略读 vs 备考对话 API
+> 一个具体情境 → 你作出判断并说明理由 → 找出缺少或混淆的一步 → 给一条线索 → 你修正判断 → 换个情境试试。
 
-- **备考工作台苏格拉底**：`services/geminiService.ts` 的 **`chatWithAdaptiveTutor`**（可注入 chunk / citations、KC、支架等）。
-- **略读 / 智能导读（`SkimPanel`）**：**`chatWithSkimAdaptiveTutor`**，`systemInstruction` 为 **`lib/prompts/systemPrompts.ts`** 的 STEM/HUMANITIES 长提示，与上者分离。
+开场会直接提出值得思考的问题。回答后继续沿着你的思路推进；说「不知道」时会把问题缩小、降低起步难度。你也可以选择「给我一条线索」或「直接讲给我」，听完解释后再继续推理。
+
+讨论范围来自当前选中的消息和知识点，相关原文按页引用，不把其他聊天自动并入这次讨论。问题会按完整知识主题组织，避免把每个小标题、例子和子条目都拆成独立任务。阅读完成与理解证据分别处理，不因为看完讲解就自动认定已经掌握。
+
+### 我现在不想学
+
+提供三种低负担的开始方式：
+
+| 入口 | 会得到什么 |
+| --- | --- |
+| 大概讲的是什么 | 了解整份资料的主线，可以选择直接讲清楚或用故事串起来。 |
+| 找个有意思的入口 | 先讲与资料有关的现实事件或有趣故事，把来龙去脉和结果讲完整，再连接到资料中的知识。 |
+| 大白话从头讲 | 按材料顺序，每次只讲一小段，可以要求更简单、再讲一点或换个例子。 |
+
+有意思的入口强调现实中的冲突、悬念和后果，表达可以生动，但不能夸大知识结论或把虚构案例冒充真实新闻。
+
+### 复习与资料管理
+
+- **复习工作台**：围绕材料中的知识点进行解读、练习、反馈与后续复习。
+- **联合复习**：结合多份材料整理和讨论，支持原文引用与定位。
+- **资料库**：管理 PDF、文件夹与已有学习记录。
+- **课程与日历、便签**：组织课程安排和随手记录；支持 Canvas 课程资料接入。
+- **课堂录音与转写**：使用独立语音服务处理课堂音频。
+
+### 学习陪伴
+
+可拖动的小猫「帮我一下」把求助入口放在阅读页面旁边：看不懂、学累了、无聊、心情不好或想离开，都可以从这里开始。休息建议可以引导你放松或离开屏幕，不要求立刻返回学习。
+
+### 中英文
+
+语言设置同时影响界面、分段标题和状态，以及领读、「我现在不想学」、复习工作台等入口的 AI 讲解。英文模式下，已保存的中文讲解也支持按需翻译展示，保留原始记录。
+
+原文引用、代码和数学内容保留原样；明确要求中文的回复可以继续显示中文。已有内容的翻译需要联网，失败时可以重试。
+
+## 本地运行
+
+建议使用 Node.js 22 和现代桌面浏览器。
+
+```bash
+npm install
+```
+
+在项目根目录创建 `.env.local`：
+
+```dotenv
+GEMINI_API_KEY=your_gemini_api_key
+
+# 可选：需要生成图片时配置
+OPENAI_API_KEY=your_openai_api_key
+
+# 可选：需要课堂录音转写时配置
+ELEVENLABS_API_KEY=your_elevenlabs_api_key
+```
+
+启动当前常用测试端口：
+
+```bash
+npm run dev -- --port 3008 --strictPort
+```
+
+打开 [http://localhost:3008](http://localhost:3008)。直接运行 `npm run dev` 时，配置中的默认端口是 **3001**。使用 `--strictPort` 可以避免端口被占用后自动换到另一个地址。
+
+AI 文本请求通过服务端 Gemini 接口处理；当前模型配置见 `server/examAstra.ts`。部分文件名仍包含 `Astra`，这是历史命名，不代表当前文本请求使用该模型。API 密钥由开发服务器或线上函数读取，不应放入前端代码或提交到 Git。
+
+## 数据保存
+
+本机模式使用 IndexedDB 等浏览器存储保存材料和学习状态；云端账户使用 Firebase 登录、Firestore 与 Storage，并提供本机工作区同步能力。AI 生成功能仍需要联网。
+
+本机数据按浏览器和网站地址隔离：`localhost:3008`、`localhost:3009` 和线上站点不会自动共享同一份本地数据。清除网站数据会影响本机记录。
+
+仓库目前使用现有项目的 Firebase 配置。独立部署到自己的项目时，需要对应配置 Firebase 项目、登录域名及数据访问规则；相关入口见 `services/firebase.ts`。
+
+## 开发与验证
+
+```bash
+npm run build           # 构建生产版本，输出到 dist
+npm test                # 运行 Vitest 测试
+npm run check:skim-tutor # 检查领读与备考对话接口没有混用
+```
+
+针对近期理解辅导与语言功能，可以运行：
+
+```bash
+npx vitest run features/reader/understanding shared/i18n services/readingOutputLanguage.test.ts
+```
+
+`npm run build` 是 Vite 构建，不等于 TypeScript 全量类型检查。当前仓库仍有历史类型错误，以及部分尚未跟随模型迁移更新的测试断言；验证改动时应区分这些问题与新增失败。
+
+## 部署到 Vercel
+
+项目通过 `vercel.json` 使用 Vite 构建，输出目录为 `dist`，`api/` 下的函数提供线上 AI、转写和 Canvas 接口。仅托管静态文件不能替代这些服务端接口；`npm run preview` 也仅用于检查静态构建。
+
+1. 安装 Vercel CLI，并在当前目录关联正确的 Vercel 项目。现有线上项目名为 `class-skip-flash`。
+2. 在 Vercel 项目中配置 `GEMINI_API_KEY`，按需配置图片与语音服务的环境变量。
+3. 完成相关验证后部署：
+
+```bash
+npm run deploy
+```
+
+该命令执行生产部署，会更新所关联项目的线上地址。GitHub 推送与 Vercel 部署是两个步骤；是否由推送触发自动部署，取决于 Vercel 项目的 Git 集成设置。
+
+## 代码导航
+
+| 路径 | 职责 |
+| --- | --- |
+| `features/reader/skim/` | 领读、阅读会话与分段入口 |
+| `features/reader/understanding/` | 当前消息的知识点整理、案件推理、对话和原文范围控制 |
+| `features/reluctant/` | 大意、现实故事入口与大白话阅读 |
+| `features/studySupport/` | 可拖动的小猫、求助与离开时的状态保存 |
+| `features/exam/` | 复习工作台、练习与材料引用 |
+| `shared/i18n/` | 界面语言、AI 输出语言与已有讲解翻译 |
+| `services/` | AI 调用、Firebase、本机存储与同步 |
+| `server/`、`api/` | 开发服务器代理与 Vercel 服务端接口 |
+
+领读对话使用 `chatWithSkimAdaptiveTutor`，复习工作台对话使用 `chatWithAdaptiveTutor`。两者保留各自的教学上下文；「陪我想通」通过 `generateReadingUnderstandingTurn` 处理当前知识点的推理对话。
