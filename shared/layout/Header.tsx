@@ -1,3 +1,4 @@
+import { studySaveLabel } from '@/services/cloudStudy/saveStatus';
 import { useStudySupport } from '@/features/studySupport/StudySupportContext';
 import type { BackgroundAudioStatus, BackgroundAudioError } from '@/features/background-audio/useBackgroundAudio';
 import { useAppLanguage, localizeUiText, localizeText } from '@/shared/i18n/appLanguage';
@@ -187,7 +188,7 @@ export const Header: React.FC<HeaderProps> = ({
   onPomodoroStart,
   onPomodoroStop
 }) => {
-  useAppLanguage();
+  const { language } = useAppLanguage();
   const [timerPopoverOpen, setTimerPopoverOpen] = useState(false);
   const timerPopoverRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -438,7 +439,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div className="relative group">
               <button className="flex items-center space-x-1 p-1.5 pr-3 bg-emerald-50 text-emerald-600 rounded-full border border-emerald-100 hover:bg-emerald-100 transition-colors" title={localizeUiText("已登录")} aria-label={localizeUiText("账户")}>
                 {user.photoURL ? <img src={user.photoURL} className="w-6 h-6 rounded-full border border-white" alt="" /> : <UserIcon className="w-5 h-5" />}
-                <span className="text-[10px] font-bold hidden xl:inline">{localWorkspace ? localizeUiText("本机保存") : isSyncing ? localizeUiText("同步中") : localizeUiText("已同步")}</span>
+                <span className="text-[10px] font-bold hidden xl:inline">{studySaveLabel(localWorkspace, isSyncing, saveError || '', language === 'en')}</span>
               </button>
               <div className="absolute top-full right-0 mt-2 w-32 bg-white rounded-xl shadow-xl border border-stone-100 p-1 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all z-50">
                 <button onClick={onLogout} className="w-full flex items-center gap-2 px-3 py-2 text-xs font-bold text-rose-500 hover:bg-rose-50 rounded-lg">

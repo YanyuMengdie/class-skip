@@ -1,3 +1,5 @@
+import { createFirestoreStudyRecord } from './cloudStudy/firestoreBackend';
+import type { CloudStudyRecord } from './cloudStudy/recordStore';
 import { isLocalUser, type WorkspaceUser as User } from './workspaceUser';
 import { isLocalId, localGet, localPut, localList, localCreate, localPatch, localDelete, saveLocalFile, createLocalSession, deleteLocalFolder, deleteLocalSession } from './localWorkspace';
 
@@ -18,9 +20,10 @@ import {
   setDoc, 
   updateDoc, 
   deleteDoc, 
-  deleteField,
   doc,
   getDoc,
+  getDocFromServer,
+  getDocsFromServer,
   getDocs,
   writeBatch,
   query,
@@ -291,172 +294,78 @@ export const createCloudFolder = async (user: User, folderName: string, parentId
     }
 };
 
-/**
- * 读取略读「一 session 一文档」新柜子：sessions/{id}/skims/{skimId}。
- * 子集合为空（当前阶段尚无任何子文档）⇒ 返回 []，调用方据此回退老数组 data/main.skimSessions。
- */
-export const readSkimSessions = async (sessionId: string): Promise<PersistedSkimSession[]> => {
-  if (isLocalId(sessionId)) return (await localGet<CloudSession>('sessions', sessionId))?.skimSessions ?? [];
-
-    try {
-        const skimsRef = collection(db, "sessions", sessionId, "skims");
-        const snapshot = await getDocs(skimsRef);
-        if (snapshot.empty) return [];
-        return await Promise.all(snapshot.docs.map(async (skimDoc) => {
-            const session = skimDoc.data() as PersistedSkimSession;
-            const deck = session.recordDeck;
-            if (!deck || deck.orderedCardIds.length === 0) return session;
-
-            const cardsSnapshot = await getDocs(collection(skimDoc.ref, 'cards'));
-            if (cardsSnapshot.empty) return session;
-            const cards = { ...deck.cards };
-            cardsSnapshot.docs.forEach((cardDoc) => {
-                const stored = cardDoc.data() as {
-                    messages?: PersistedSkimSession['messages'];
-                    digest?: typeof cards[string]['digest'];
-                };
-                const existing = cards[cardDoc.id];
-                if (!existing) return;
-                cards[cardDoc.id] = {
-                    ...existing,
-                    messages: stored.messages ?? existing.messages ?? [],
-                    ...(stored.digest ? { digest: stored.digest } : {}),
-                };
-            });
-            return { ...session, recordDeck: { ...deck, cards } };
-        }));
-    } catch (error) {
-        console.error("[Firestore] Read Skims Failed:", error);
-        return [];
-    }
-};
-
-/**
- * 写略读「一 session 一文档」新柜子：每个 session 写成 sessions/{id}/skims/{skimId} 子文档。
- * 用 writeBatch 保证多子文档原子写入。本阶段只 set（新增/覆盖），不做「差量删除已移除段」——
- * 删除清理留待「删除略读 session」功能落地时一并处理（见 deleteDoc 待办）。
- */
-export const writeSkimSessions = async (sessionId: string, skimSessions: PersistedSkimSession[]) => {
-  if (isLocalId(sessionId)) return localPatch('sessions', sessionId, { skimSessions });
-
-    for (const s of skimSessions) {
-        const batch = writeBatch(db);
-        const ref = doc(db, "sessions", sessionId, "skims", s.id);
-        const deck = s.recordDeck;
-        const rootSession = deck
-            ? {
-                ...s,
-                recordDeck: {
-                    ...deck,
-                    cards: Object.fromEntries(Object.entries(deck.cards).map(([cardId, card]) => [
-                        cardId,
-                        { ...card, messages: [], digest: undefined },
-                    ])),
-                },
-            }
-            : s;
-        batch.set(ref, JSON.parse(JSON.stringify(rootSession)));
-
-        const cardsRef = collection(ref, 'cards');
-        const existingCards = await getDocs(cardsRef);
-        const desiredCardIds = new Set(deck?.orderedCardIds ?? []);
-        existingCards.docs.forEach((cardDoc) => {
-            if (!desiredCardIds.has(cardDoc.id)) batch.delete(cardDoc.ref);
+/** Read-only legacy reader. Never hide a failed read as an empty learning record. */
+const readLegacySkimSessions = async (sessionId: string): Promise<PersistedSkimSession[]> => {
+    const snapshot = await getDocsFromServer(collection(db, 'sessions', sessionId, 'skims'));
+    return Promise.all(snapshot.docs.map(async skimDoc => {
+        const session = skimDoc.data() as PersistedSkimSession;
+        const deck = session.recordDeck;
+        if (!deck || deck.orderedCardIds.length === 0) return session;
+        const cardsSnapshot = await getDocsFromServer(collection(skimDoc.ref, 'cards'));
+        const cards = { ...deck.cards };
+        cardsSnapshot.docs.forEach(cardDoc => {
+            const stored = cardDoc.data();
+            const existing = cards[cardDoc.id];
+            if (existing) cards[cardDoc.id] = { ...existing,
+                messages: stored.messages ?? existing.messages ?? [],
+                ...(stored.digest ? { digest: stored.digest } : {}) };
         });
-        if (deck) {
-            deck.orderedCardIds.forEach((cardId) => {
-                const card = deck.cards[cardId];
-                if (!card) return;
-                batch.set(doc(cardsRef, cardId), JSON.parse(JSON.stringify({
-                    messages: card.messages ?? [],
-                    digest: card.digest ?? null,
-                    updatedAt: Date.now(),
-                })));
-            });
-        }
-        await batch.commit();
-    }
+        return { ...session, recordDeck: { ...deck, cards } };
+    }));
 };
 
-/** 永久删除一条领读会话及其分段对话子文档；不会触碰同文件下的其他领读或私教。 */
-export const deleteSkimSessionFromCloud = async (sessionId: string, skimId: string) => {
-  if (isLocalId(sessionId)) { const row = await localGet<CloudSession>('sessions', sessionId); return localPatch('sessions', sessionId, { skimSessions: (row?.skimSessions ?? []).filter(s => s.id !== skimId) }); }
-
-    const ref = doc(db, "sessions", sessionId, "skims", skimId);
-    const legacyRef = doc(db, "sessions", sessionId, "data", "main");
-    const [cardsSnapshot, legacySnapshot] = await Promise.all([
-        getDocs(collection(ref, 'cards')),
-        getDoc(legacyRef),
-    ]);
-    const batch = writeBatch(db);
-    cardsSnapshot.docs.forEach((cardDoc) => batch.delete(cardDoc.ref));
-    batch.delete(ref);
-    if (legacySnapshot.exists()) {
-        const legacySessions = legacySnapshot.data().skimSessions;
-        if (Array.isArray(legacySessions)) {
-            const remaining = legacySessions.filter((session: PersistedSkimSession) => session?.id !== skimId);
-            batch.update(legacyRef, remaining.length > 0
-                ? { skimSessions: remaining }
-                : { skimSessions: deleteField() });
-        }
+const studyRecords = new Map<string, CloudStudyRecord>();
+const cloudStudyRecord = (sessionId: string): CloudStudyRecord => {
+    const owner = auth.currentUser?.uid;
+    if (!owner) throw new Error('请登录后保存云端资料。');
+    const key = `${owner}:${sessionId}`;
+    let record = studyRecords.get(key);
+    if (!record) {
+        record = createFirestoreStudyRecord(db, owner, sessionId, () => {
+            if (auth.currentUser?.uid !== owner) throw new Error('账号已切换，已停止保存原账号资料。');
+        }, async () => {
+            const snapshot = await getDocFromServer(doc(db, 'sessions', sessionId, 'data', 'main'));
+            const fullData = snapshot.exists() ? snapshot.data() : {};
+            const skims = await readLegacySkimSessions(sessionId);
+            if (skims.length) fullData.skimSessions = skims;
+            return fullData;
+        });
+        studyRecords.set(key, record);
     }
-    await batch.commit();
+    return record;
 };
 
 export const fetchSessionDetails = async (sessionId: string): Promise<Partial<CloudSession>> => {
-  if (isLocalId(sessionId)) return (await localGet<CloudSession>('sessions', sessionId)) ?? {};
+    if (isLocalId(sessionId)) return (await localGet<CloudSession>('sessions', sessionId)) ?? {};
+    // New manifests are authoritative; missing/corrupt chunks fail closed, never revert to stale legacy data.
+    return cloudStudyRecord(sessionId).read();
+};
 
+export const readSkimSessions = async (sessionId: string): Promise<PersistedSkimSession[]> =>
+    (await fetchSessionDetails(sessionId)).skimSessions ?? [];
+
+export const writeSkimSessions = async (sessionId: string, skimSessions: PersistedSkimSession[]) =>
+    updateCloudSessionState(sessionId, { skimSessions }, true);
+
+/** Save new immutable chunks + one atomic manifest. Legacy main/skims/cards remain untouched. */
+export const updateCloudSessionState = async (sessionId: string, data: Partial<CloudSession>, strict = false) => {
+    if (isLocalId(sessionId)) return localPatch('sessions', sessionId, Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)));
     try {
-        const heavyRef = doc(db, "sessions", sessionId, "data", "main");
-        const snapshot = await getDoc(heavyRef);
-        const fullData = snapshot.exists() ? (snapshot.data() as Partial<CloudSession>) : {};
-        // 兼容读取：新柜子（skims/ 子集合）优先；子集合为空时回退老数组 data/main.skimSessions（行为照旧）。
-        const skimDocs = await readSkimSessions(sessionId);
-        if (skimDocs.length > 0) {
-            fullData.skimSessions = skimDocs;
-        }
-        return fullData;
+        const { metaUpdates, heavyUpdates } = splitUpdateData(data);
+        if (Object.keys(metaUpdates).length) metaUpdates.updatedAt = Date.now();
+        await cloudStudyRecord(sessionId).save(heavyUpdates, metaUpdates);
     } catch (error) {
-        console.error("[Firestore] Fetch Details Failed:", error);
-        return {};
+        console.error('[Sync] Update Failed:', error);
+        if (strict) throw error;
     }
 };
 
-export const updateCloudSessionState = async (sessionId: string, data: Partial<CloudSession>, strict = false) => {
-  if (isLocalId(sessionId)) return localPatch('sessions', sessionId, Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)));
-
-  try {
-    // skimSessions 改走子集合（sessions/{id}/skims/{skimId}），不再进 data/main，绕开单文档 1MB 上限。
-    // activeSkimIndex 仍随 rest 走 heavy → data/main（轻量字段，原路不变）。
-    const { skimSessions, ...rest } = data;
-    const { metaUpdates, heavyUpdates } = splitUpdateData(rest);
-    const promises = [];
-
-    if (Object.keys(metaUpdates).length > 0) {
-        metaUpdates.updatedAt = Timestamp.now();
-        const rootRef = doc(db, "sessions", sessionId);
-        const cleanMeta = JSON.parse(JSON.stringify(metaUpdates));
-        promises.push(updateDoc(rootRef, cleanMeta));
-    }
-
-    if (Object.keys(heavyUpdates).length > 0) {
-        const heavyRef = doc(db, "sessions", sessionId, "data", "main");
-        const cleanHeavy = JSON.parse(JSON.stringify(heavyUpdates));
-        promises.push(updateDoc(heavyRef, cleanHeavy));
-    }
-
-    // 本次更新携带 skimSessions（未被 isUntouched 抑制）⇒ 拆子文档写。undefined 则跳过（语义同读取层）。
-    if (skimSessions !== undefined) {
-        promises.push(writeSkimSessions(sessionId, skimSessions));
-    }
-
-    if (promises.length > 0) {
-        await Promise.all(promises);
-    }
-  } catch (error) {
-    console.error("[Sync] Update Failed:", error);
-    if (strict) throw error;
-  }
+/** Explicit deletion removes a tab from the current snapshot, preserving all other fields and legacy backups. */
+export const deleteSkimSessionFromCloud = async (sessionId: string, skimId: string) => {
+    const details = await fetchSessionDetails(sessionId);
+    await updateCloudSessionState(sessionId, {
+        skimSessions: (details.skimSessions ?? []).filter(session => session.id !== skimId),
+    }, true);
 };
 
 export const renameCloudSession = async (sessionId: string, newName: string) => {

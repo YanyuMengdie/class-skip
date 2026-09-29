@@ -1,3 +1,4 @@
+import { studySaveFailure } from '@/services/cloudStudy/saveStatus';
 import { useBackgroundAudio } from '@/features/background-audio/useBackgroundAudio';
 import { useReviewCache } from '@/features/review/lib/useReviewCache';
 import { reviewSourceKey, notesToTree } from '@/features/review/lib/reviewNotes';
@@ -1403,7 +1404,7 @@ const App: React.FC = () => {
 
   // Share the current snapshot between autosave and explicit pauses.
   const saveCurrentStudyProgress = useCallback(async () => {
-    if (!fileHash || !fileName) return;
+    if (!fileHash || !fileName || isOpeningStudyFile || isProcessingFile) return;
 
     // 「读旧不毁旧」：仍是迁移产出的同一份内存列表（用户没动过略读）⇒ 这次不写新格式，只续写旧扁平字段。
     const isUntouchedMigration = isUntouchedSkimMigration();
@@ -1446,7 +1447,7 @@ const App: React.FC = () => {
     await storageService.saveFileState(item);
     setHistoryItems(await storageService.getAllHistory());
 
-  }, [fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState, examSummaryContentKey]);
+  }, [isOpeningStudyFile, isProcessingFile, fileHash, fileName, explanations, chatCache, skimMessages, annotations, notebookData, pageComments, currentIndex, viewMode, skimTopHeight, skimFocusMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, customBackgroundUrl, customAvatarUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState, examSummaryContentKey]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => { void saveCurrentStudyProgress().catch(error => console.warn('Auto-save failed:', error)); }, 2000);
@@ -1454,23 +1455,31 @@ const App: React.FC = () => {
   }, [saveCurrentStudyProgress]);
 
   const saveWorkspaceProgress = useCallback(async () => {
-    if (!currentSessionId || !user) return;
+    if (!currentSessionId || !user || isOpeningStudyFile || isProcessingFile) return;
+    await saveCurrentStudyProgress();
     await updateCloudSessionState(currentSessionId, {
-        // 阶段三：把完整 skimSessions + activeSkimIndex 一并写云端（整包覆盖，冲突走「后写覆盖」策略 A）。
+        // 完整阅读快照由分块存储发布；并发版本冲突时保留本机副本，不覆盖云端。
         // 「读旧不毁旧」复用本地同一套抑制：迁移未触碰前不写新字段、只续写旧扁平字段，不改写云端旧记录。
         ...(isUntouchedSkimMigration() ? {} : { skimSessions, activeSkimIndex }),
         explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode: viewMode === 'tutor' ? 'deep' : viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
       }, true);
-  }, [currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
+  }, [saveCurrentStudyProgress, isOpeningStudyFile, isProcessingFile, currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
   useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      void saveWorkspaceProgress().then(() => setStorageError('')).catch(error => {
-        console.error('资料保存失败', error); setIsSyncing(false);
-        setStorageError(isLocalUser(user) ? '本机保存未完成，请检查浏览器存储空间。当前内容仍在页面中。' : '云端保存未完成，请检查网络。当前内容仍在页面中。');
+    if (!currentSessionId || isOpeningStudyFile || isProcessingFile) return;
+    let active = true;
+    setIsSyncing(true);
+    const save = () => {
+      void saveWorkspaceProgress().then(() => {
+        if (active) { setStorageError(''); setIsSyncing(false); }
+      }).catch(error => {
+        console.error('资料保存失败', error);
+        if (active) { setIsSyncing(false); setStorageError(studySaveFailure(error, isLocalUser(user))); }
       });
-    }, 3000);
-    return () => window.clearTimeout(timeout);
-  }, [saveWorkspaceProgress, user]);
+    };
+    const timeout = window.setTimeout(save, 3000);
+    window.addEventListener('online', save);
+    return () => { active = false; window.clearTimeout(timeout); window.removeEventListener('online', save); };
+  }, [saveWorkspaceProgress, user, currentSessionId, isOpeningStudyFile, isProcessingFile]);
 
 
 
@@ -1661,6 +1670,7 @@ const App: React.FC = () => {
       const fullText = pdfText.join('\n');
       setFileName(file.name); setSlides(newSlides); setFullPdfText(fullText); setPdfPageTexts(pdfText); setStudyTime(0); pageEntryTime.current = Date.now();
       const existingRecord = await storageService.getFileState(hash);
+      if (restoreData && existingRecord) await storageService.preserveBeforeCloudRestore(existingRecord);
       const stateToRestore = restoreData || (existingRecord ? existingRecord.state : null);
       if (stateToRestore) {
         setExplanations(stateToRestore.explanations || {}); setExplanationErrors({}); setChatCache(stateToRestore.chatCache || {}); setAnnotations(stateToRestore.annotations || {}); if (stateToRestore.notebookData) setNotebookData(stateToRestore.notebookData); setPageComments(stateToRestore.pageComments || {});
@@ -1749,6 +1759,8 @@ const App: React.FC = () => {
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]; if (!file) return; setIsProcessingFile(true);
     setIsOpeningStudyFile(true);
+    setCurrentSessionId(null); // A failed new upload must never save into the previously open file.
+    setStorageError('');
 
     try {
       const PROCESS_FILE_TIMEOUT_MS = 120000;
@@ -1774,6 +1786,8 @@ const App: React.FC = () => {
   const handleRestoreCloudSession = async (session: CloudSession, options?: { initialPage?: number }) => {
     if (!user) return;
     const wasInDashboard = shellMode === 'dashboard';
+    setCurrentSessionId(null);
+    setStorageError('');
     setIsOpeningStudyFile(true);
     if (wasInDashboard) setShellMode('study');
     setIsProcessingFile(true);
@@ -1825,7 +1839,7 @@ const App: React.FC = () => {
     } catch (e) {
       console.error('Restore failed:', e);
       if (wasInDashboard) setShellMode('dashboard');
-      alert(isLocalUser(user) ? '无法读取本机资料，请重新添加文件或检查浏览器存储。' : '无法从云端恢复，请重试。');
+      alert(isLocalUser(user) ? '无法读取本机资料，请重新添加文件或检查浏览器存储。' : studySaveFailure(e, false));
     } finally {
       setIsOpeningStudyFile(false);
       setIsProcessingFile(false);

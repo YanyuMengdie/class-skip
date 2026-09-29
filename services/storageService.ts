@@ -1,3 +1,4 @@
+import { localPut } from './localWorkspace';
 
 import { FileHistoryItem, TutorSession } from '@/types';
 
@@ -50,13 +51,19 @@ class StorageService {
         const store = transaction.objectStore(STORE_NAME);
         const request = store.put(item);
 
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject('Failed to save file state');
+        // A successful request can still be followed by a quota/transaction abort.
+        transaction.oncomplete = () => resolve();
+        transaction.onabort = transaction.onerror = () => reject(transaction.error || new Error('Failed to save file state'));
+        request.onerror = () => reject(request.error || new Error('Failed to save file state'));
       } catch (e) {
         console.error('Save error:', e);
         reject(e);
       }
     });
+  }
+
+  async preserveBeforeCloudRestore(item: FileHistoryItem): Promise<void> {
+    await localPut('studyHistoryRecovery', `${item.hash}:${item.lastOpened}`, item);
   }
 
   async getFileState(hash: string): Promise<FileHistoryItem | null> {
