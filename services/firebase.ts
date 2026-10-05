@@ -341,6 +341,22 @@ export const fetchSessionDetails = async (sessionId: string): Promise<Partial<Cl
     return cloudStudyRecord(sessionId).read();
 };
 
+/** Separate manifests for module review: never patch the reading or old practice records. */
+export const moduleReviewCloudRecord = (sessionId: string, key: string): CloudStudyRecord => {
+    const owner = auth.currentUser?.uid;
+    if (!owner || isLocalId(sessionId)) throw new Error('Cloud review requires a signed-in owner.');
+    const namespace = `module-review-${key}-`;
+    const cacheKey = `${owner}:${sessionId}:${namespace}`;
+    let record = studyRecords.get(cacheKey);
+    if (!record) {
+        record = createFirestoreStudyRecord(db, owner, sessionId, () => {
+            if (auth.currentUser?.uid !== owner) throw new Error('Account changed; review saving stopped.');
+        }, async () => ({}), namespace);
+        studyRecords.set(cacheKey, record);
+    }
+    return record;
+};
+
 export const readSkimSessions = async (sessionId: string): Promise<PersistedSkimSession[]> =>
     (await fetchSessionDetails(sessionId)).skimSessions ?? [];
 

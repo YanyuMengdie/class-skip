@@ -4,9 +4,10 @@ import { byteLength, CloudRecordError, validateManifest } from './chunks';
 import { CloudStudyRecord, type RecordBackend, type StudyDraft } from './recordStore';
 
 export function createFirestoreStudyRecord(db: Firestore, owner: string, sessionId: string,
-  assertOwner: () => void, readLegacy: RecordBackend['readLegacy']) {
-  const at = (name: string) => doc(db, 'sessions', sessionId, 'data', name);
-  const draftBucket = `cloudStudyDrafts/${owner}/${sessionId}`;
+  assertOwner: () => void, readLegacy: RecordBackend['readLegacy'], namespace = '') {
+  if (namespace && !/^module-review-[a-f0-9]{64}-$/.test(namespace)) throw new Error('Invalid review namespace.');
+  const at = (name: string) => doc(db, 'sessions', sessionId, 'data', `${namespace}${name}`);
+  const draftBucket = `cloudStudyDrafts/${owner}/${sessionId}${namespace ? `/${namespace}` : ''}`;
   const backend: RecordBackend = {
     async readHead() {
       assertOwner();

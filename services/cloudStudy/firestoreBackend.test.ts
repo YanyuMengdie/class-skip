@@ -65,3 +65,22 @@ it('isolates device backups by owner as well as session', async () => {
   await createFirestoreStudyRecord({} as never, 'owner', 'test', () => {}, async () => ({})).save({ notes: ['private'] });
   expect([...fake.drafts.keys()].every(key => key.startsWith('cloudStudyDrafts/owner/test/'))).toBe(true);
 });
+
+it('stores module review in separate chunk manifests without touching reading or other modules', async () => {
+  fake.documents.set('sessions/test', { userId: 'owner', fileName: 'lecture.pdf' });
+  const reading = createFirestoreStudyRecord({} as never, 'owner', 'test', () => {}, async () => ({ skimSessions: ['unchanged'], oldPractice: ['keep'] }));
+  await reading.save({ page: 8 });
+  const original = structuredClone([...fake.documents]);
+  fake.writes = [];
+  const namespace = `module-review-${'a'.repeat(64)}-`;
+  const review = createFirestoreStudyRecord({} as never, 'owner', 'test', () => {}, async () => ({}), namespace);
+  await review.save({review: {lesson:'Substantial teaching '.repeat(80000), attempts:[{answer:'中文回答'}]}});
+  for (const [path,data] of original) expect(fake.documents.get(path)).toEqual(data);
+  expect(fake.writes.every(path=>path.startsWith(`sessions/test/data/${namespace}`))).toBe(true);
+  expect([...fake.drafts.keys()].some(path=>path.startsWith(`cloudStudyDrafts/owner/test/${namespace}/`))).toBe(true);
+  const restored = await createFirestoreStudyRecord({} as never, 'owner', 'test', () => {}, async () => ({}), namespace).read();
+  expect(restored.review).toEqual({lesson:'Substantial teaching '.repeat(80000),attempts:[{answer:'中文回答'}]});
+  const other = await createFirestoreStudyRecord({} as never,'owner','test',()=>{},async()=>({}),`module-review-${'b'.repeat(64)}-`).read();
+  expect(other).toEqual({});
+  expect(()=>createFirestoreStudyRecord({} as never,'owner','test',()=>{},async()=>({}),'../main')).toThrow();
+});

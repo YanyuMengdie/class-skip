@@ -89,10 +89,15 @@ function safeError(code: string, english: boolean): Error {
 }
 
 /** The local server handles PDFs, images, schemas and model access. No provider fallback. */
-export async function generateReadingContent(params: GenerateContentParameters, options: { profile?: 'course-brief'; outputLanguage?: AppLanguage } = {}): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number } }> {
+export function readingOutputContract(language: AppLanguage, englishAssignment = false): string {
+  return englishAssignment
+    ? 'EXPLICIT LEARNER LANGUAGE CONTRACT: Questions and options MUST be natural English in promptEn/optionsEn, regardless of app language. The learner explicitly requests faithful Chinese translations ONLY in promptZh/optionsZh; these must not add hints or answers. Reference answers and criteria may use the app language: ' + language + '. All IDs and enum values stay unchanged.'
+    : getAIOutputLanguageInstruction(language);
+}
+export async function generateReadingContent(params: GenerateContentParameters, options: { profile?: 'course-brief'; outputLanguage?: AppLanguage; englishAssignment?: boolean } = {}): Promise<{ text: string; usage?: { inputTokens: number; outputTokens: number } }> {
   const english = getCurrentAppLanguage() === 'en';
   const request = buildReadingAstraRequest(params);
-  const body = { ...request, instructions: `${request.instructions}\n\n${getAIOutputLanguageInstruction(options.outputLanguage ?? getCurrentAppLanguage())}`, ...(options.profile ? { profile: options.profile } : {}) };
+  const body = { ...request, instructions: `${request.instructions}\n\n${readingOutputContract(options.outputLanguage ?? getCurrentAppLanguage(), options.englishAssignment)}`, ...(options.profile ? { profile: options.profile } : {}) };
   const externalSignal = params.config?.abortSignal;
   if (externalSignal?.aborted) throw abortError();
   const controller = new AbortController();

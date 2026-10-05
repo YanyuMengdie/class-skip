@@ -24,6 +24,7 @@ export interface ExamWorkspacePageProps {
   standaloneMaterial?: ExamMaterialLink | null;
   onChooseReviewScope: () => void;
   onChooseLecture: () => void;
+  onModuleReview?: (material: ExamMaterialLink) => void;
   activeExamId: string | null;
   onActiveExamIdChange: (id: string | null) => void;
   onBack: () => void;
@@ -323,6 +324,7 @@ export const ExamWorkspacePage: React.FC<ExamWorkspacePageProps> = (props) => {
         <div className="round-workspace-header-actions">
           <button className="round-shell-button round-shell-quiet" type="button" onClick={() => { if (neutralScope) persistExposure(records.rounds.flatMap(round => round.blueprint.scope.materials), 'feedback'); setHistoryOpen(true); }}><History size={16} />{text('复习记录', 'Records')}</button>
           <button className="round-shell-button" type="button" disabled={knowledgeBusy || themes.busy} onClick={props.onChooseReviewScope}>{text('切换复习方式', 'Choose review mode')}</button>
+          {props.onModuleReview && activeMaterial && <button className="round-shell-button" type="button" disabled={knowledgeBusy || themes.busy} onClick={() => props.onModuleReview?.(activeMaterial)}><BookOpen size={16}/>{text('按 module 重学', 'Relearn by module')}</button>}
           {!standaloneMaterial && <button className="round-shell-button" type="button" disabled={knowledgeBusy} onClick={onOpenExamHub}>{text('管理考试与资料', 'Manage exams & materials')}</button>}
         </div>
       </header>

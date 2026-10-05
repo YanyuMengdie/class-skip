@@ -50,6 +50,9 @@ import { TurtleSoupPanel } from '@/features/turtleSoup/TurtleSoupPanel';
 import { ExamPredictionPanel } from '@/features/exam/ExamPredictionPanel';
 import { ExamHubModal } from '@/features/exam/ExamHubModal';
 import { ExamWorkspacePage } from '@/features/exam/workspace/ExamWorkspacePage';
+import { ModuleReviewPage } from '@/features/exam/moduleReview/ModuleReviewPage';
+import { ModuleReviewChoice } from '@/features/exam/moduleReview/ModuleReviewChoice';
+import type { ModuleReviewSource } from '@/features/exam/moduleReview/types';
 import { ReviewWorkspaceEntry } from '@/features/exam/workspace/ReviewWorkspaceEntry';
 import { CramWorkspace } from '@/features/exam/cram/CramWorkspace';
 import { createLectureReviewMaterial } from '@/features/exam/lib/lectureReviewScope';
@@ -859,7 +862,7 @@ const App: React.FC = () => {
   /** P0：主界面 study vs 全屏备考工作台 */
   const [appMode, setAppMode] = useState<'study' | 'examWorkspace'>('study');
   const [selectedExamId, setActiveExamId] = useState<string | null>(null);
-  const [reviewWorkspaceMode, setReviewWorkspaceMode] = useState<'home' | 'lecture' | 'exam' | 'cram'>('home');
+  const [reviewWorkspaceMode, setReviewWorkspaceMode] = useState<'home' | 'lectureChoice' | 'moduleReview' | 'lecture' | 'exam' | 'cram'>('home');
   const [reviewEntryPickLecture, setReviewEntryPickLecture] = useState(false);
   const [lectureReviewMaterial, setLectureReviewMaterial] = useState<ExamMaterialLink | null>(null);
   const standaloneMaterial = reviewWorkspaceMode === 'lecture' && lectureReviewMaterial?.userId === user?.uid ? lectureReviewMaterial : null;
@@ -870,7 +873,7 @@ const App: React.FC = () => {
   [user?.uid, currentSessionId, fileHash, fileName, pdfDataUrl]);
   const startLectureReview = (material: ExamMaterialLink) => {
     setLectureReviewMaterial(material);
-    setReviewWorkspaceMode('lecture');
+    setReviewWorkspaceMode('lectureChoice');
     setReviewEntryPickLecture(false);
     setAppMode('examWorkspace');
   };
@@ -2207,6 +2210,19 @@ const App: React.FC = () => {
     },
     [user, fileHash, pdfDataUrl, fileName, currentSessionId]
   );
+
+  const loadModuleReviewSource = useCallback(async (material: ExamMaterialLink): Promise<ModuleReviewSource> => {
+    const pdf = await resolveExamMaterialPdf(material);
+    if (!pdf) throw new Error('请先打开这份 PDF，再进入按 module 重学。 / Open this PDF before starting module review.');
+    const isCurrent = !!((material.cloudSessionId && material.cloudSessionId === currentSessionId)
+      || (material.fileHash && material.fileHash === fileHash));
+    if (isCurrent) return { pdf, sessions: skimSessions, preferredSessionId: activeSkim?.id, knowledge: lsapContentMap?.kcs ?? [] };
+    const saved = material.cloudSessionId ? await fetchSessionDetails(material.cloudSessionId)
+      : material.fileHash ? (await storageService.getFileState(material.fileHash))?.state : null;
+    if (!saved) throw new Error('无法读取领读记录，请重新打开资料后再试。 / Could not load the reading record; reopen the material and retry.');
+    const sessions = saved.skimSessions ?? [];
+    return { pdf, sessions, preferredSessionId: sessions[saved.activeSkimIndex ?? 0]?.id, knowledge: saved.lsapContentMap?.kcs ?? [] };
+  }, [resolveExamMaterialPdf, currentSessionId, fileHash, skimSessions, activeSkim?.id, lsapContentMap]);
 
   /** P2：备考工作台合并讲义（与保温流同一套逻辑与长度截断）；用于合并预览、逻辑原子整包等 */
   const getMergedDocContentForExamLinks = useCallback(
@@ -4795,6 +4811,12 @@ const App: React.FC = () => {
           onBack={() => setAppMode('study')}
           onLibrary={() => { setAppMode('study'); setShellMode('dashboard'); setDashboardInitialTab('library'); }}
         />
+      ) : reviewWorkspaceMode === 'lectureChoice' && lectureReviewMaterial ? (
+        <ModuleReviewChoice material={lectureReviewMaterial} onBack={() => setReviewWorkspaceMode('home')}
+          onModules={() => setReviewWorkspaceMode('moduleReview')} onPractice={() => setReviewWorkspaceMode('lecture')} />
+      ) : reviewWorkspaceMode === 'moduleReview' && lectureReviewMaterial ? (
+        <ModuleReviewPage key={`${user.uid}:${lectureReviewMaterial.id}`} userId={user.uid} material={lectureReviewMaterial}
+          loadSource={loadModuleReviewSource} onBack={() => setReviewWorkspaceMode('lectureChoice')} onStudy={() => setAppMode('study')} />
       ) : reviewWorkspaceMode === 'cram' ? (
         <CramWorkspace key={user.uid} user={user} currentMaterial={currentLectureReviewMaterial}
           currentContentMap={lsapContentMap} resolvePdf={resolveExamMaterialPdf}
@@ -4804,7 +4826,8 @@ const App: React.FC = () => {
         <ExamWorkspacePage
           key={`${user.uid}:${reviewWorkspaceMode}:${standaloneMaterial?.id ?? 'exam'}`}
           standaloneMaterial={standaloneMaterial}
-          onChooseReviewScope={() => { setReviewEntryPickLecture(false); setReviewWorkspaceMode('home'); }}
+          onChooseReviewScope={() => { setReviewEntryPickLecture(false); setReviewWorkspaceMode(standaloneMaterial ? 'lectureChoice' : 'home'); }}
+          onModuleReview={material => { setLectureReviewMaterial(material); setReviewWorkspaceMode('moduleReview'); }}
           onChooseLecture={() => { setReviewEntryPickLecture(true); setReviewWorkspaceMode('home'); }}
           user={user}
           activeExamId={activeExamId}
