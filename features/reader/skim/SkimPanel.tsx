@@ -964,7 +964,6 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const [routeError, setRouteError] = useState<string | null>(null);
   const recordOpeningStartedRef = useRef<string | null>(null);
   const [showGranularityModal, setShowGranularityModal] = useState(false);
-  const [routeBriefingOpen, setRouteBriefingOpen] = useState(false);
   const [routeOutlineOpen, setRouteOutlineOpen] = useState(false);
   const [activeRouteItemId, setActiveRouteItemId] = useState<string | null>(null);
   /** 阶段4b 防线：paper/文章模式下原文（pdfDataUrl）未就位时的友好提示，挡住"开始陪读" */
@@ -3028,24 +3027,6 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           <div className="reader-route-overview px-5 py-2 text-xs text-stone-500">
             本次范围：PDF {configuredRangeStart}–{configuredRangeEnd} · {pageRangeLabel}
           </div>
-        )}
-
-        {stage === 'reading' && !focusMode && studyStyle === 'continuous' && studyMap && skimContentType === 'lecture' && (
-          <section className="reader-route-overview">
-            <button type="button" className="reader-route-overview-toggle" onClick={() => setRouteBriefingOpen(v => !v)} aria-expanded={routeBriefingOpen}>
-              <Map className="h-3.5 w-3.5 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">{studyMap.topic || '本次领读路线'}</span>
-              <span className="shrink-0">{selectedModuleCount} 个 module · {skimPace === 'part' ? '按 part 推进' : '按 module 推进'}</span>
-              <ChevronDown className={`h-3.5 w-3.5 shrink-0 transition-transform ${routeBriefingOpen ? 'rotate-180' : ''}`} />
-            </button>
-            <p className="reader-route-scope">范围：{pageRangeLabel}</p>
-            {routeBriefingOpen && (
-              <div className="reader-route-overview-detail">
-                <p className="whitespace-pre-wrap">{studyMap.initialBriefing}</p>
-                {localPrereqs.length > 0 && <div className="mt-3 flex flex-wrap gap-2">{localPrereqs.map(p => <span key={p.id} className="reader-prerequisite">✓ {p.concept}</span>)}</div>}
-              </div>
-            )}
-          </section>
         )}
 
         {activeRecordCard && (
