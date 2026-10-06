@@ -6,6 +6,7 @@ import { StudyToolMenu } from '@/features/review/StudyToolMenu';
 import { prepareLectureKnowledge, type PrepareLectureKnowledgeOptions } from '@/features/exam/round/lectureKnowledge';
 
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { flushSync } from 'react-dom';
 import { StudyCompanion } from '@/features/studySupport/StudyCompanion';
 import { useStudySupport, useSupportSurface } from '@/features/studySupport/StudySupportContext';
 import { Header } from '@/shared/layout/Header';
@@ -16,6 +17,12 @@ import { SlidePageComments } from '@/features/reader/page-notes/SlidePageComment
 import { ExplanationPanel } from '@/features/reader/deep-read/ExplanationPanel';
 import { SkimPanel } from '@/features/reader/skim/SkimPanel';
 import { recentStudyPdfs, isStudyPdfFinished, prepareQuickStudy } from '@/features/reader/quickStudy';
+import { useReaderDevice } from '@/features/reader/mobile/useReaderDevice';
+import { MobileLibrary } from '@/features/reader/mobile/MobileLibrary';
+import { MobileReader } from '@/features/reader/mobile/MobileReader';
+import '@/features/reader/mobile/mobileReading.css';
+import { acquireReadingLease, observeReading } from '@/services/readingPresence';
+import { refreshStudyIfClean } from '@/services/firebase';
 import { updateReadingMessages } from '@/features/reader/skim/readingSessionUpdates';
 import { SkimRecordShelf } from '@/features/reader/skim/SkimRecordShelf';
 import { SessionTabInk, type SessionTabInkPosition } from '@/features/reader/motion/SessionTabInk';
@@ -401,6 +408,27 @@ const buildSkimRecordDigest = (messages: ChatMessage[]) => {
 };
 
 const App: React.FC = () => {
+  const { mobile: isMobileReader, switchDevice } = useReaderDevice();
+  const openedPdfFile = useRef<File | null>(null);
+  const [mobileSourcePage, setMobileSourcePage] = useState<number | null>(null);
+  const [remoteReadingBusy, setRemoteReadingBusy] = useState(false);
+  const [refreshingReading, setRefreshingReading] = useState(false);
+  const readingRemoteBusyRef = useRef(false);
+  const readingRefreshingRef = useRef(false);
+  readingRemoteBusyRef.current = remoteReadingBusy;
+  const [online, setOnline] = useState(navigator.onLine);
+  const lastSyncedSave = useRef<(() => Promise<void>) | null>(null);
+  const latestWorkspaceSave = useRef<() => Promise<void>>(async () => {});
+  const savesInFlight = useRef(0);
+  const adoptingRemote = useRef(false);
+  const remoteRefreshPending = useRef(false);
+  const refreshReadingRef = useRef<() => Promise<void>>(async () => {});
+  const liveReadingContext = useRef({ id: null as string | null, busy: false });
+  useEffect(() => {
+    const changed = () => setOnline(navigator.onLine);
+    window.addEventListener('online', changed); window.addEventListener('offline', changed);
+    return () => { window.removeEventListener('online', changed); window.removeEventListener('offline', changed); };
+  }, []);
   const studySupport = useStudySupport();
   const supportPaused = studySupport?.paused ?? false;
   const supportPauseStarted = useRef<number | null>(null);
@@ -1468,8 +1496,11 @@ const App: React.FC = () => {
     return () => window.clearTimeout(timeout);
   }, [saveCurrentStudyProgress]);
 
-  const saveWorkspaceProgress = useCallback(async () => {
+  const saveWorkspaceProgress: () => Promise<void> = useCallback(async () => {
     if (!currentSessionId || !user || isOpeningStudyFile || isProcessingFile) return;
+    if (readingRefreshingRef.current || readingRemoteBusyRef.current) throw new Error('另一端正在生成或同步中，请稍后再试。');
+    savesInFlight.current += 1;
+    try {
     await saveCurrentStudyProgress();
     await updateCloudSessionState(currentSessionId, {
         // 完整阅读快照由分块存储发布；并发版本冲突时保留本机副本，不覆盖云端。
@@ -1477,14 +1508,85 @@ const App: React.FC = () => {
         ...(isUntouchedSkimMigration() ? {} : { skimSessions, activeSkimIndex }),
         explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode: viewMode === 'tutor' ? 'deep' : viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
       }, true);
+    lastSyncedSave.current = saveWorkspaceProgress;
+    } finally { savesInFlight.current -= 1; }
   }, [saveCurrentStudyProgress, isOpeningStudyFile, isProcessingFile, currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
+  latestWorkspaceSave.current = saveWorkspaceProgress;
+  liveReadingContext.current = { id: currentSessionId, busy: skimActiveLoading || isOpeningStudyFile || isProcessingFile || tutorActiveLoading || isGeneratingAI || isChatLoading };
+  const applyRemoteStudy = useRef<(data: Partial<CloudSession>) => void>(() => {});
+  applyRemoteStudy.current = data => {
+    adoptingRemote.current = true;
+    if (data.skimSessions?.length) {
+      const activeId = activeSkim.id;
+      const sessions = data.skimSessions.map((session, index) => {
+        const local = skimSessions.find(item => item.id === session.id);
+        const deck = session.recordDeck && local?.recordDeck ? {
+          ...session.recordDeck,
+          view: local.recordDeck.view,
+          activeCardId: local.recordDeck.activeCardId && session.recordDeck.cards[local.recordDeck.activeCardId] ? local.recordDeck.activeCardId : session.recordDeck.activeCardId,
+          selectedModuleIndex: local.recordDeck.selectedModuleIndex,
+        } : session.recordDeck;
+        return { ...createEmptySkimSession(index + 1), ...session, title: session.title || `领读 ${index + 1}`,
+          ...(local ? { continuousLastPage: local.continuousLastPage, topHeight: local.topHeight, focusMode: local.focusMode } : {}), recordDeck: deck };
+      });
+      const index = Math.max(0, sessions.findIndex(session => session.id === activeId));
+      setSkimSessions(sessions); setActiveSkimIndex(index); activeIdRef.current = sessions[index].id;
+      migratedSkimBaselineRef.current = null;
+    } else {
+      setSkimMessages(data.skimMessages ?? []); setStudyMap(data.studyMap ?? null); setSkimStage(data.skimStage ?? 'diagnosis'); setQuizData(data.quizData ?? null);
+    }
+    setExplanations(data.explanations ?? {}); setChatCache(data.chatCache ?? {}); setAnnotations(data.annotations ?? {});
+    if (data.notebookData !== undefined) setNotebookData(data.notebookData);
+    setPageComments(data.pageComments ?? {});
+    setReviewQuizRounds(data.reviewQuizRounds ?? []); setReviewFlashCards(data.reviewFlashCards ?? []); setFlashCardEstimate(data.flashCardEstimate);
+    setPageMarks(data.pageMarks ?? {}); setStudyGuide(data.studyGuide ?? null); setSavedArtifacts(data.savedArtifacts ?? []);
+    setLsapContentMap(data.lsapContentMap ?? null); setLsapState(data.lsapState ?? null);
+    if (data.docType) setDocType(data.docType);
+    if (data.personaSettings) setPersonaSettings(data.personaSettings);
+    if (data.customAvatarUrl !== undefined) setCustomAvatarUrl(data.customAvatarUrl || null);
+    if (data.customBackgroundUrl !== undefined) setCustomBackgroundUrl(data.customBackgroundUrl || null);
+    setStorageError(''); setIsSyncing(false);
+  };
+  useEffect(() => {
+    if (!currentSessionId || isLocalUser(user)) return;
+    const id = currentSessionId;
+    let active = true; let fetching = false;
+    // The freshly loaded document is the initial clean baseline, before the user edits it.
+    lastSyncedSave.current = latestWorkspaceSave.current;
+    const refresh = async () => {
+      if (!active || fetching || !remoteRefreshPending.current || !navigator.onLine || document.hidden) return;
+      const context = liveReadingContext.current;
+      if (context.id !== id || context.busy || savesInFlight.current || lastSyncedSave.current !== latestWorkspaceSave.current) return;
+      const baseline = latestWorkspaceSave.current;
+      fetching = true;
+      readingRefreshingRef.current = true; setRefreshingReading(true);
+      // Do not change a save dependency until after the clean-snapshot guard has run.
+      try {
+        const data = await refreshStudyIfClean(id, () => active && liveReadingContext.current.id === id && !liveReadingContext.current.busy && !savesInFlight.current && latestWorkspaceSave.current === baseline);
+        if (!active) return;
+        if (data) flushSync(() => applyRemoteStudy.current(data));
+        if (latestWorkspaceSave.current === baseline) remoteRefreshPending.current = false;
+      } catch (error) { if (active) setStorageError(studySaveFailure(error, false)); }
+      finally { fetching = false; readingRefreshingRef.current = false; if (active) setRefreshingReading(false); }
+    };
+    refreshReadingRef.current = refresh;
+    const changed = () => { remoteRefreshPending.current = true; void refresh(); };
+    const stop = observeReading(id, changed, value => { if (active) setRemoteReadingBusy(value); }, error => { if (active) setStorageError(studySaveFailure(error, false)); });
+    const timer = window.setInterval(() => { void refresh(); }, 5000);
+    window.addEventListener('online', changed); document.addEventListener('visibilitychange', changed);
+    return () => { active = false; stop(); window.clearInterval(timer); window.removeEventListener('online', changed); document.removeEventListener('visibilitychange', changed); setRemoteReadingBusy(false); };
+  }, [currentSessionId, user.uid]);
   useEffect(() => {
     if (!currentSessionId || isOpeningStudyFile || isProcessingFile) return;
+    if (adoptingRemote.current) { adoptingRemote.current = false; lastSyncedSave.current = saveWorkspaceProgress; return; }
+    if (remoteReadingBusy || refreshingReading) return;
+    if (lastSyncedSave.current === saveWorkspaceProgress) { setIsSyncing(false); return; }
     let active = true;
     setIsSyncing(true);
     const save = () => {
       void saveWorkspaceProgress().then(() => {
         if (active) { setStorageError(''); setIsSyncing(false); }
+        void refreshReadingRef.current();
       }).catch(error => {
         console.error('资料保存失败', error);
         if (active) { setIsSyncing(false); setStorageError(studySaveFailure(error, isLocalUser(user))); }
@@ -1493,7 +1595,19 @@ const App: React.FC = () => {
     const timeout = window.setTimeout(save, 3000);
     window.addEventListener('online', save);
     return () => { active = false; window.clearTimeout(timeout); window.removeEventListener('online', save); };
-  }, [saveWorkspaceProgress, user, currentSessionId, isOpeningStudyFile, isProcessingFile]);
+  }, [saveWorkspaceProgress, user, currentSessionId, isOpeningStudyFile, isProcessingFile, remoteReadingBusy, refreshingReading]);
+
+  useEffect(() => {
+    const pause = () => {
+      if (document.visibilityState !== 'hidden') return;
+      void saveCurrentStudyProgress().catch(() => {});
+      if (navigator.onLine && !readingRemoteBusyRef.current && !readingRefreshingRef.current) {
+        void latestWorkspaceSave.current().catch(() => {});
+      }
+    };
+    document.addEventListener('visibilitychange', pause);
+    return () => document.removeEventListener('visibilitychange', pause);
+  }, [saveCurrentStudyProgress]);
 
 
 
@@ -1678,7 +1792,9 @@ const App: React.FC = () => {
       const hash = await generateFileHash(file);
       setFileHash(hash);
       let images: string[] = []; let pdfText: string[] = []; let rawPdfData: string | null = null;
-      if (file.type === 'application/pdf') { rawPdfData = await readFileAsDataURL(file); setPdfDataUrl(rawPdfData); images = await convertPdfToImages(file); pdfText = await extractPdfText(file); } else if (file.type.startsWith('image/')) { const image = await readFileAsDataURL(file); images = [image]; pdfText = ["Image Upload - No Text Layer"]; rawPdfData = image; setPdfDataUrl(image); }
+      if (file.type === 'application/pdf') { rawPdfData = await readFileAsDataURL(file); setPdfDataUrl(rawPdfData); pdfText = await extractPdfText(file); images = isMobileReader ? pdfText.map(() => '') : await convertPdfToImages(file); } else if (file.type.startsWith('image/')) { const image = await readFileAsDataURL(file); images = [image]; pdfText = ["Image Upload - No Text Layer"]; rawPdfData = image; setPdfDataUrl(image); }
+      openedPdfFile.current = file;
+      setMobileSourcePage(null);
 
       const newSlides: Slide[] = images.map((img, idx) => ({ id: `slide-${hash}-${idx}`, imageUrl: img, pageNumber: idx + 1 }));
       const fullText = pdfText.join('\n');
@@ -1814,7 +1930,8 @@ const App: React.FC = () => {
       const heavyDetails = options?.prepared ?? await fetchSessionDetails(session.id);
       const file = await fetchFileFromUrl(session.fileUrl, session.fileName);
       if (options?.quickStudy && quickStudyOwner.current !== user.uid) return;
-      const fullData = { ...session, ...heavyDetails };
+      const restored = { ...session, ...heavyDetails };
+      const fullData = isMobileReader && !options?.prepared ? prepareQuickStudy(restored, createEmptySkimSession()) : restored;
       const restoreData: Partial<FilePersistedState> = {
         explanations: fullData.explanations,
         chatCache: fullData.chatCache,
@@ -1849,6 +1966,7 @@ const App: React.FC = () => {
       setCurrentSessionId(session.id);
       await reloadStudyCloudSessions();
       setShellMode('study');
+      if (isMobileReader) { setViewMode('skim'); setAppMode('study'); }
       if (options?.quickStudy) {
         setAppMode('study');
         setViewMode('skim');
@@ -4022,9 +4140,28 @@ const App: React.FC = () => {
   const studyRightPanel = viewMode === 'skim' ? (
     // 标签栏（领读+问答同排，共享）+ SkimPanel 同框：SkimPanel 始终挂载，切换标签只换喂进去的「激活会话切片」。
     <div className="flex flex-col h-full">
-      {sessionTabBar}
+      {!isMobileReader && sessionTabBar}
+      {(remoteReadingBusy || refreshingReading || !online) && <div className="reading-presence-notice" role="status">{!online
+        ? uiText('当前离线。已加载内容仍可阅读，输入草稿会保留；联网后再发送。', 'Offline. Keep reading loaded content; drafts are kept. Reconnect to send.')
+        : remoteReadingBusy ? uiText('另一端正在生成解析，请等它完成。', 'Another device is generating this reading. Please wait.')
+        : uiText('正在接收另一端的领读更新…', 'Receiving reading updates…')}</div>}
       <div className="flex-1 min-h-0">
+        <fieldset disabled={remoteReadingBusy || refreshingReading} className="h-full min-w-0 border-0 m-0 p-0">
         {!(quickStudyBusy && isOpeningStudyFile) && <SkimPanel
+          mobile={isMobileReader}
+          onOpenRecord={handleOpenSkimRecord}
+          externalBusy={remoteReadingBusy || refreshingReading}
+          beforeReadingTurn={async () => {
+            const baseline = latestWorkspaceSave.current;
+            await refreshReadingRef.current();
+            if (latestWorkspaceSave.current !== baseline) throw new Error('已收到另一端的新讲解，请查看后再继续。');
+            if (currentSessionId) {
+              await latestWorkspaceSave.current();
+              return acquireReadingLease(currentSessionId);
+            }
+            return { assert: async () => {}, release: async () => {} };
+          }}
+          persistReadingTurn={async () => { await latestWorkspaceSave.current(); setIsSyncing(false); setStorageError(''); }}
           autoStartRequest={!isOpeningStudyFile && quickStudyId === currentSessionId ? quickStudyAutoStart : null}
           onAutoStartConsumed={() => setQuickStudyAutoStart(null)}
           readingSessionKey={JSON.stringify([user.uid, fileHash, currentSessionId, activeSkim.id, activeRecordCard?.id ?? 'continuous'])}
@@ -4044,7 +4181,7 @@ const App: React.FC = () => {
           quizData={quizData}
           setQuizData={setQuizData}
           docType={docType}
-          onNotebookAdd={handleAddNote}
+          onNotebookAdd={isMobileReader ? undefined : handleAddNote}
           onRegenerateStudyMap={handleRegenerateStudyMap}
           studyMapModuleCount={studyMapModuleCount}
           totalPages={slides.length}
@@ -4074,7 +4211,7 @@ const App: React.FC = () => {
           onCaseLearningChange={setLectureCaseLearning}
           caseSourceId={fileHash || currentSessionId || fileName || 'local-document'}
           currentPage={slides.length > 0 ? currentIndex + 1 : undefined}
-          onJumpToPage={slides.length > 0 ? (page) => setCurrentIndex(Math.max(0, Math.min(page - 1, slides.length - 1))) : undefined}
+          onJumpToPage={slides.length > 0 ? (page) => { const safePage = Math.max(1, Math.min(page, slides.length)); setCurrentIndex(safePage - 1); if (isMobileReader) setMobileSourcePage(safePage); } : undefined}
           cloudSessions={studyCloudSessions}
           currentCloudSessionId={currentSessionId}
           pageRangeStart={activeSkim.pageRangeStart}
@@ -4083,8 +4220,9 @@ const App: React.FC = () => {
           setPageRangeEnd={setSkimPageRangeEnd}
           onLoadingChange={setSkimActiveLoading}
           skipDiagnosis={activeSkim.skipDiagnosis}
-          onStartTutorMode={handleStartTutorMode}
+          onStartTutorMode={isMobileReader ? undefined : handleStartTutorMode}
         />}
+        </fieldset>
       </div>
     </div>
   ) : viewMode === 'tutor' ? (
@@ -4245,8 +4383,17 @@ const App: React.FC = () => {
     },
   }, companionVisible);
 
-  if (!hasStarted) {
-    return <WelcomeScreen onStart={() => { setHasStarted(true); setDashboardInitialTab('library'); setShellMode('dashboard'); }} />;
+  const changeReaderDevice = async () => {
+    try {
+      await saveCurrentStudyProgress();
+      if (currentSessionId) await saveWorkspaceProgress();
+      if (!switchDevice(isMobileReader ? 'full' : 'mobile')) alert(uiText('请允许浏览器保存网站偏好后重试。', 'Allow browser storage and retry.'));
+    } catch { setStorageError(uiText('进度尚未同步，暂未切换界面。请联网后重试。', 'Progress is not synced. Reconnect before switching.')); }
+  };
+  const deviceSwitch = <button className="reader-device-switch" disabled={skimActiveLoading || isOpeningStudyFile} onClick={() => void changeReaderDevice()}>{uiText('手机版', 'Mobile version')}</button>;
+
+  if (!hasStarted && !isMobileReader) {
+    return <>{deviceSwitch}<WelcomeScreen onStart={() => { setHasStarted(true); setDashboardInitialTab('library'); setShellMode('dashboard'); }} /></>;
   }
 
   if (authLoading) {
@@ -4258,9 +4405,26 @@ const App: React.FC = () => {
     );
   }
 
+  if (isMobileReader) {
+    return <><LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
+      {shellMode === 'dashboard' ? <MobileLibrary user={user} cloudAvailable={isCloudUser(authUser)} onUseCloud={() => setUseLocalWorkspace(false)} onLogin={handleLogin}
+        onOpen={session => { setHasStarted(true); void handleRestoreCloudSession(session); }} busy={isOpeningStudyFile || quickStudyBusy}
+        onFull={() => void changeReaderDevice()} onQuickStudy={() => { setHasStarted(true); void handleQuickStudy(); }} notice={quickStudyNotice || storageError} />
+        : <MobileReader title={fileName || uiText('领读', 'Guided reading')} sessions={skimSessions} activeIndex={activeSkimIndex}
+          onSelect={index => { setActiveSkimIndex(index); setViewMode('skim'); }} onAdd={handleAddSkimSession}
+          busy={skimActiveLoading || isOpeningStudyFile || refreshingReading || remoteReadingBusy} loading={isOpeningStudyFile}
+          onBack={() => { void saveCurrentStudyProgress(); setShellMode('dashboard'); }} onFull={() => void changeReaderDevice()}
+          status={!online ? uiText('离线 · 待同步', 'Offline · sync pending') : storageError || (isSyncing ? uiText('待同步…', 'Sync pending…') : isLocalUser(user) ? uiText('本机记录', 'On this device') : uiText('已同步', 'Synced'))}
+          file={openedPdfFile.current} sourcePage={mobileSourcePage} onSourcePage={page => setMobileSourcePage(Math.max(1, Math.min(slides.length, page)))} onCloseSource={() => setMobileSourcePage(null)}>
+          {studyRightPanel}
+        </MobileReader>}
+    </>;
+  }
+
   if (shellMode === 'dashboard' && !(appMode === 'examWorkspace' && user)) {
     return (
       <div className="min-h-screen bg-[#f7f8f6] font-sans">
+        {deviceSwitch}
         <LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
         <DashboardScreen
           onLibraryFileDeleted={id => {
@@ -4303,6 +4467,7 @@ const App: React.FC = () => {
 
   return (
     <div className="flex flex-col min-h-screen bg-[#FFFBF7] font-sans">
+      {deviceSwitch}
       {companionVisible && <StudyCompanion key={`${user.uid}:${fileHash ?? ''}:${appMode}:${reviewWorkspaceMode}`} />}
       {isCombinedReviewLoading && (
         <div className="fixed inset-0 z-[180] bg-black/40 flex items-center justify-center">

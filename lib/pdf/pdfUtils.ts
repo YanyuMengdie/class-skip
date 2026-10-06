@@ -87,6 +87,7 @@ export const renderPdfPagePreview = async (
     data: arrayBuffer,
     ...getDocumentOptions(),
   }).promise;
+  try {
   const safePageNumber = Math.min(pdf.numPages, Math.max(1, Math.trunc(pageNumber1Based) || 1));
   const page = await pdf.getPage(safePageNumber);
   const viewport = page.getViewport({ scale });
@@ -106,6 +107,7 @@ export const renderPdfPagePreview = async (
   } as any).promise;
 
   return canvas.toDataURL('image/png');
+  } finally { await pdf.destroy(); }
 };
 
 export const renderPdfFirstPagePreview = async (file: File, scale = 0.8): Promise<string> => (

@@ -55,6 +55,21 @@ export class CloudStudyRecord {
   read(): Promise<Record<string, unknown>> {
     return this.enqueue(() => this.restore());
   }
+  get revision(): string | null | undefined { return this.loaded?.revision; }
+  /** Observe another device only while the caller still has the last saved snapshot. */
+  refreshIfClean(canApply: () => boolean): Promise<Record<string, unknown> | null> {
+    return this.enqueue(async () => {
+      if (!this.loaded || !canApply()) return null;
+      const raw = await this.backend.readHead();
+      const head = raw == null ? null : validateManifest(raw);
+      if ((head?.revision ?? null) === this.loaded.revision) return null;
+      if ((await this.backend.drafts()).some(draft => draft.pending)) return null;
+      const data = head ? await decodeFields(head.fields, hash => this.backend.readChunk(hash)) : await this.backend.readLegacy();
+      if (!canApply()) return null;
+      this.loaded = { data, revision: head?.revision ?? null, fields: head?.fields };
+      return structuredClone(data);
+    });
+  }
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.tail.catch(() => {}).then(operation);
     this.tail = result; return result;

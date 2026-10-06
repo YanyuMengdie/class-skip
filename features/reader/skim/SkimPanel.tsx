@@ -1,4 +1,7 @@
 import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
+import { useReadingScroll } from '../mobile/useReadingScroll';
+import { flushSync } from 'react-dom';
+import type { ReadingLease } from '@/services/readingPresence';
 import { useRecordLabels } from './useRecordLabels';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { ReadingMessage } from './ReadingMessage';
@@ -52,6 +55,11 @@ import type { UnderstandingSession } from '@/features/reader/understanding/readi
 import { prepareMessageUnderstanding } from '@/features/reader/understanding/understandingScope';
 
 interface SkimPanelProps {
+  mobile?: boolean;
+  onOpenRecord?: (id: string) => void;
+  externalBusy?: boolean;
+  beforeReadingTurn?: () => Promise<ReadingLease>;
+  persistReadingTurn?: () => Promise<void>;
   readingSessionKey?: string;
   understandingGenerateTurn?: React.ComponentProps<typeof UnderstandingPanel>['generateTurn'];
   studyMap: StudyMap | null;
@@ -868,6 +876,11 @@ class TakeawaysDraftMarkdownPreview extends Component<
 }
 
 export const SkimPanel: React.FC<SkimPanelProps> = ({
+  mobile = false,
+  onOpenRecord,
+  externalBusy = false,
+  beforeReadingTurn,
+  persistReadingTurn,
   studyMap,
   isLoading,
   onSwitchToDeep,
@@ -1489,11 +1502,13 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const chatInputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingImages, setPendingImages] = useState<string[]>([]);
-  const isExplanationBusy = isChatLoading
+  const ownExplanationBusy = isChatLoading
     || understandingBusy
     || variantLoadingMessageId !== null
     || takeawaysLoading
     || knowledgeExtractionLoading;
+  const isExplanationBusy = ownExplanationBusy || externalBusy;
+  const turnStartingRef = useRef(false);
 
   useEffect(() => {
     setIsChatLoading(false);
@@ -1524,10 +1539,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   ]));
   useEffect(() => {
     cancelReadingBookmark();
-    if (chatContainerRef.current) {
-        chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
   }, [readingTranscriptRevision, isChatLoading, cancelReadingBookmark]);
+  useReadingScroll(chatContainerRef, `${readingSessionKey}:${stage}:${recordDeck?.view ?? 'continuous'}`, readingTranscriptRevision, isChatLoading, mobile ? 'mobile' : 'full');
 
   const openUnderstanding = (message: ChatMessage, index: number, trigger: HTMLButtonElement) => {
     if (isExplanationBusy || !(pdfDataUrl || fullText)) return;
@@ -1583,8 +1596,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   // 含 isRegeneratingMap / isGeneratingRoute：因「开始领读」会先重算地图/路线(数秒)再发首条消息，这段窗口若被切走，
   // 后续 setStage/setMessages 会落到切换后的会话 → 串台。一并锁住才真正「切换不串台」。
   useEffect(() => {
-    onLoadingChange?.(isExplanationBusy || isRegeneratingMap || isGeneratingRoute);
-  }, [isExplanationBusy, isRegeneratingMap, isGeneratingRoute, onLoadingChange]);
+    onLoadingChange?.(ownExplanationBusy || isRegeneratingMap || isGeneratingRoute);
+  }, [ownExplanationBusy, isRegeneratingMap, isGeneratingRoute, onLoadingChange]);
 
   useEffect(() => {
     return () => {
@@ -1782,6 +1795,10 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   };
 
   const handleStartWithModuleCount = async () => {
+      if (externalBusy || !navigator.onLine) {
+          setExplanationGenerationError(localizeText('当前离线或另一端正在生成，请稍后再试。', 'Offline or another device is generating. Please retry shortly.', language));
+          return;
+      }
       if (skimContentType !== 'lecture') {
           await startCompanionReading();
           return;
@@ -1950,7 +1967,21 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       // CRITICAL: Prioritize PDF Vision Data over Text to avoid hallucination on scanned docs
       let content = contentOverride ?? (pdfDataUrl || fullText);
 
-      if ((!trimmed && pendingImages.length === 0) || !content || isExplanationBusy) return;
+      if ((!trimmed && pendingImages.length === 0) || !content || isExplanationBusy || turnStartingRef.current) return;
+      if (!navigator.onLine) {
+          setExplanationGenerationError(localizeText('当前离线，输入草稿已保留。联网后请主动发送。', 'You are offline. Your draft is kept. Send it when reconnected.', language));
+          return;
+      }
+      turnStartingRef.current = true;
+      let turnLease: ReadingLease | undefined;
+      try {
+          turnLease = await beforeReadingTurn?.();
+          if (requestScope !== understandingScopeRef.current) { await turnLease?.release(); turnStartingRef.current = false; return; }
+      } catch (error) {
+          turnStartingRef.current = false;
+          setExplanationGenerationError(readingFailureMessage(error, '另一端有更新或正在生成，请同步后重试。输入草稿仍然保留。'));
+          return;
+      }
 
       const payloadForTutor = sendOpts?.tutorUserText ?? trimmed;
       const modeToUse = forceMode || (stage === 'reading' ? 'reading' : 'tutoring');
@@ -2101,8 +2132,11 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
               } : {}),
               ...(isKnowledgeExtractionAnswer ? { skimKnowledgeExtractionFeedback: true } : {}),
           };
+          await turnLease?.assert();
+          if (requestScope !== understandingScopeRef.current || abortController.signal.aborted) return;
           markReplyArrival(aiMsg);
-          setMessages(prev => [...prev, aiMsg]);
+          flushSync(() => setMessages(prev => [...prev, aiMsg]));
+          await persistReadingTurn?.();
       } catch (e) {
           if (abortController.signal.aborted || skimGenerationCancelledRef.current || requestScope !== understandingScopeRef.current) return;
           const isAbort =
@@ -2114,6 +2148,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             ? '这次连接式讲解没有通过内容或页码校验。原对话没有被覆盖，可以重试。'
             : '这次领读没有完成，原对话已保留，可以重试。'));
       } finally {
+          turnStartingRef.current = false;
+          await turnLease?.release();
           if (requestScope === understandingScopeRef.current) setIsChatLoading(false);
           if (skimAbortControllerRef.current === abortController) {
               skimAbortControllerRef.current = null;
@@ -2328,7 +2364,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           recordOpeningStartedRef.current = activeRecordCard.id;
           return;
       }
-      if (isChatLoading || !(pdfDataUrl || fullText) || recordOpeningStartedRef.current === activeRecordCard.id) return;
+      if (isExplanationBusy || !(pdfDataUrl || fullText) || recordOpeningStartedRef.current === activeRecordCard.id || !navigator.onLine) return;
 
       recordOpeningStartedRef.current = activeRecordCard.id;
       const levelLabel = activeRecordCard.partIndex == null
@@ -2342,7 +2378,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         buildLectureReadingOptions(),
         { appendUserWhenOverride: false }
       );
-  }, [activeRecordCard?.id, messages.length, recordDeck?.view, studyStyle, isChatLoading, pdfDataUrl, fullText]);
+  }, [activeRecordCard?.id, messages.length, recordDeck?.view, studyStyle, isChatLoading, externalBusy, pdfDataUrl, fullText]);
 
   const handleShowTakeaways = async () => {
       if (messages.length === 0 || isExplanationBusy) return;
@@ -2510,6 +2546,13 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     const cards = recordDeck.orderedCardIds.map((id) => recordDeck.cards[id]).filter(Boolean);
     const completedCount = cards.filter((card) => card.status === 'completed').length;
     const inProgressCount = cards.filter((card) => card.status === 'in_progress').length;
+    if (mobile) return <div className="mobile-sections">
+      <h2>{localizeText('这一讲，一段段读。', 'One section at a time.', language)}</h2>
+      <p className="mobile-muted">{language === 'en' ? `${completedCount} / ${cards.length} completed` : `${completedCount} / ${cards.length} 已学完`}</p>
+      {cards.map(card => <button type="button" key={card.id} disabled={isExplanationBusy} onClick={() => onOpenRecord?.(card.id)}>
+        <span><small>Module {card.moduleIndex}{card.partIndex ? ` · Part ${card.partIndex}` : ''}</small><strong>{recordLabels.label(card, 'title')}</strong><small>{language === 'en' ? `Pages ${card.pageStart}–${card.pageEnd}` : `第 ${card.pageStart}–${card.pageEnd} 页`} · {localizeText(card.status === 'completed' ? '已学完' : card.status === 'in_progress' ? '学习中' : '未开始', card.status === 'completed' ? 'Completed' : card.status === 'in_progress' ? 'In progress' : 'Not started', language)}</small></span><ArrowRight className="h-4 w-4 shrink-0" />
+      </button>)}
+    </div>;
     return (
       <div className="flex h-full flex-col border-l border-stone-100 bg-white">
         <div className="border-b border-stone-100 px-5 py-4">
@@ -2576,7 +2619,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     <div ref={containerRef} className={`reading-conversation ${stage === 'reading' ? 'is-reading' : 'is-preparing'} h-full bg-[#fffefb] flex flex-col relative overflow-hidden`}>
       <div style={{ display: 'contents' }} inert={Boolean(activeUnderstanding)} aria-hidden={activeUnderstanding ? true : undefined}>
       {/* Selection Popover */}
-      {selectionRect && (
+      {!mobile && selectionRect && (
         <div 
             className="fixed z-[100] transform -translate-x-1/2 animate-in fade-in zoom-in-95 duration-150 flex items-center space-x-2"
             style={{ top: selectionRect.top, left: selectionRect.left }}
@@ -2654,7 +2697,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                         <div className="flex flex-col gap-2">
                             {contentTypeSelector}
                             {studyStyleSelector}
-                            {auxiliaryMaterialSelector}
+                            {!mobile && auxiliaryMaterialSelector}
                             {readingScopeSelector("skim-fresh")}
                             {routeError && <p role="alert" className="text-xs text-rose-600">{routeError}</p>}
                             {skimContentType !== 'lecture' && companionGuardNotice && (
@@ -3243,6 +3286,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     return (
                     <div
                         key={messageId}
+                        data-reading-message={messageId}
                         ref={(node) => {
                             messageRefs.current[messageId] = node;
                         }}
@@ -3299,9 +3343,10 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                             )}
                             <div className="reader-message-body" data-preserve-language="true">
                               {msg.role === 'model' && displayedMedia ? <ReadingMessage
+                                preserveStoredContent
                                 text={normalizeGeneratedLineBreaks(displayedText)} media={displayedMedia}
                                 components={MarkdownComponents} pdfDataUrl={pdfDataUrl} onPage={onJumpToPage} language={language} userRequest={previousLearnerRequest(messages, idx)}
-                              /> : <ReactMarkdown enabled={msg.role !== 'user'} userRequest={previousLearnerRequest(messages, idx)}
+                              /> : <ReactMarkdown enabled={false} userRequest={previousLearnerRequest(messages, idx)}
                                   components={MarkdownComponents}
                                   remarkPlugins={[remarkMath, remarkGfm]}
                                   rehypePlugins={[rehypeKatex]}
@@ -3337,7 +3382,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                 </div>
                               </details>
                             )}
-                            {explanationState && activeExplanationVariant && (
+                            {!mobile && explanationState && activeExplanationVariant && (
                               <div className="mt-3 border-t border-stone-200 pt-2">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <button
@@ -3374,7 +3419,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                 )}
                               </div>
                             )}
-                            {isLegacyRecordExplanation && activeRecordCard && (
+                            {!mobile && isLegacyRecordExplanation && activeRecordCard && (
                               <div className="mt-3 border-t border-stone-200 pt-2">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <button
@@ -3405,7 +3450,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                 )}
                               </div>
                             )}
-                            {stage === 'reading' && msg.role === 'model' && !msg.isQuiz && !msg.skimKnowledgeExtraction && !msg.skimKnowledgeExtractionFeedback && displayedText.trim().length > 30 && (
+                            {!mobile && stage === 'reading' && msg.role === 'model' && !msg.isQuiz && !msg.skimKnowledgeExtraction && !msg.skimKnowledgeExtractionFeedback && displayedText.trim().length > 30 && (
                               <div className="reader-understanding-entry">
                                 <button type="button" disabled={isExplanationBusy || !(pdfDataUrl || fullText)} onClick={event => openUnderstanding(msg, idx, event.currentTarget)}>
                                   <Lightbulb className="h-3.5 w-3.5" />陪我想通这个
@@ -3673,6 +3718,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         </div>
 
         <div className="reader-composer border-t border-stone-50 bg-white shrink-0 space-y-2">
+            {mobile && stage === 'reading' && <button type="button" className="mobile-primary" disabled={isExplanationBusy} onClick={() => void handleSend('继续', 'reading')}>{localizeText('继续领读', 'Continue reading', language)}<ArrowRight className="ml-2 h-4 w-4" /></button>}
             {stage === 'reading' && <p className="reader-composer-hint">随时追问，或说“继续”接着读。</p>}
             {explanationGenerationError && (
               <div className="flex items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">

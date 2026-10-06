@@ -341,6 +341,10 @@ export const fetchSessionDetails = async (sessionId: string): Promise<Partial<Cl
     return cloudStudyRecord(sessionId).read();
 };
 
+export const currentStudyRevision = (sessionId: string) => isLocalId(sessionId) ? null : cloudStudyRecord(sessionId).revision;
+export const refreshStudyIfClean = async (sessionId: string, canApply: () => boolean): Promise<Partial<CloudSession> | null> =>
+    isLocalId(sessionId) ? null : cloudStudyRecord(sessionId).refreshIfClean(canApply);
+
 /** Separate manifests for module review: never patch the reading or old practice records. */
 export const moduleReviewCloudRecord = (sessionId: string, key: string): CloudStudyRecord => {
     const owner = auth.currentUser?.uid;

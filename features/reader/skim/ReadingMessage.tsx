@@ -13,8 +13,8 @@ import { parseReadingMedia, readingBlocks, readingAidBlockIndex, missingReadingA
 import { SourceFigure } from './SourceFigure';
 import './readingAids.css';
 
-export function ReadingMessage({ text, media, components, pdfDataUrl, onPage, language, userRequest }: {
-  text:string; media?:ReadingMedia; components:Components; pdfDataUrl?:string; onPage?:(page:number)=>void; language:AppLanguage; userRequest?:string;
+export function ReadingMessage({ text, media, components, pdfDataUrl, onPage, language, userRequest, preserveStoredContent = false }: {
+  text:string; media?:ReadingMedia; components:Components; pdfDataUrl?:string; onPage?:(page:number)=>void; language:AppLanguage; userRequest?:string; preserveStoredContent?:boolean;
 }) {
   const safe=useMemo(()=>parseReadingMedia(media,text,1,Number.MAX_SAFE_INTEGER,!!pdfDataUrl),[media,text,pdfDataUrl]);
   const renderers=useMemo<Components>(()=>({...components,span:({node,children})=>node?.properties?.['data-study-term']!==undefined
@@ -39,8 +39,8 @@ export function ReadingMessage({ text, media, components, pdfDataUrl, onPage, la
   const missingNotice=layout.unplaced.length
     ? (en?'Some diagrams could not be placed here. See the supplementary diagrams at the end of this message.':'部分图解未能定位到正文，请查看本条讲解末尾的补充图解。')
     : (en?'The diagram mentioned here is unavailable. You can ask “Please explain the missing chain in words.”':'这里提到的图解未能显示。你可以追问“请用文字补充刚才缺失的链条”。');
-  return <StudyTerms terms={safe.terms} language={requestsChinese(userRequest) ? 'zh-CN' : language}><div className="reading-enriched">
-    {layout.chunks.map((chunk,i)=><React.Fragment key={i}><ReactMarkdown userRequest={userRequest} language={language} skipHtml components={renderers} remarkPlugins={[remarkMath,remarkGfm,[remarkStudyTerms,safe.terms??[]]]} rehypePlugins={[rehypeKatex]}>{chunk.text}</ReactMarkdown>
+  return <StudyTerms preserveContent={preserveStoredContent} terms={safe.terms} language={requestsChinese(userRequest) ? 'zh-CN' : language}><div className="reading-enriched">
+    {layout.chunks.map((chunk,i)=><React.Fragment key={i}><ReactMarkdown enabled={!preserveStoredContent} userRequest={userRequest} language={language} skipHtml components={renderers} remarkPlugins={[remarkMath,remarkGfm,[remarkStudyTerms,safe.terms??[]]]} rehypePlugins={[rehypeKatex]}>{chunk.text}</ReactMarkdown>
       {chunk.aids.map((a,j)=><ReadingDiagram key={j} aid={a} pdfDataUrl={pdfDataUrl} onPage={onPage} language={language}/>)}
       {chunk.missing&&<p className="reading-aid-notice" role="status">{missingNotice}</p>}
     </React.Fragment>)}
