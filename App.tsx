@@ -15,6 +15,7 @@ import { exportStudyHandoutPdf } from '@/features/reader/export/studyHandoutPdf'
 import { SlidePageComments } from '@/features/reader/page-notes/SlidePageComments';
 import { ExplanationPanel } from '@/features/reader/deep-read/ExplanationPanel';
 import { SkimPanel } from '@/features/reader/skim/SkimPanel';
+import { recentStudyPdfs, isStudyPdfFinished, prepareQuickStudy } from '@/features/reader/quickStudy';
 import { updateReadingMessages } from '@/features/reader/skim/readingSessionUpdates';
 import { SkimRecordShelf } from '@/features/reader/skim/SkimRecordShelf';
 import { SessionTabInk, type SessionTabInkPosition } from '@/features/reader/motion/SessionTabInk';
@@ -409,6 +410,13 @@ const App: React.FC = () => {
   // --- STATE DECLARATIONS ---
   const [hasStarted, setHasStarted] = useState(false);
   const [shellMode, setShellMode] = useState<'dashboard' | 'study'>('dashboard');
+  const [quickStudyBusy, setQuickStudyBusy] = useState(false);
+  const [quickStudyNotice, setQuickStudyNotice] = useState('');
+  const [quickStudyId, setQuickStudyId] = useState<string | null>(null);
+  const [quickStudyAutoStart, setQuickStudyAutoStart] = useState<string | null>(null);
+  const [quickStudyRecordPending, setQuickStudyRecordPending] = useState<string | null>(null);
+  const quickStudyLock = useRef(false);
+  const lastQuickStudyId = useRef<string | null>(null);
   const [dashboardInitialTab, setDashboardInitialTab] = useState<'library' | 'calendar' | 'memo' | 'energy' | 'growth' | 'profile' | 'settings'>('library');
   const [profileNotebook, setProfileNotebook] = useState<LearnerProfileNotebook>(() => loadLocalProfileNotebook());
   const [activeStudyStartedAt, setActiveStudyStartedAt] = useState<number | null>(null);
@@ -732,6 +740,8 @@ const App: React.FC = () => {
   const [useLocalWorkspace, setUseLocalWorkspace] = useState(() => localStorage.getItem('classskip_workspace_location') === 'local');
   useEffect(() => { localStorage.setItem('classskip_workspace_location', useLocalWorkspace ? 'local' : 'cloud'); }, [useLocalWorkspace]);
   const user: User = useLocalWorkspace ? LOCAL_WORKSPACE_USER : authUser ?? LOCAL_WORKSPACE_USER;
+  const quickStudyOwner = useRef(user.uid);
+  quickStudyOwner.current = user.uid;
   const [authLoading, setAuthLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [storageError, setStorageError] = useState('');
@@ -1400,6 +1410,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setCurrentSessionId(null); setTutorSessions([]); setActiveTutorIndex(0); setStudyCloudSessions([]);
+    setQuickStudyId(null); setQuickStudyNotice(''); setQuickStudyAutoStart(null); setQuickStudyRecordPending(null); lastQuickStudyId.current = null;
     setReviewPageOpen(false); setAppMode('study'); setStorageError('');
     setFileName(null); setFileHash(null); setPdfDataUrl(null); setSlides([]); setFullPdfText('');
     setShellMode('dashboard');
@@ -1760,6 +1771,8 @@ const App: React.FC = () => {
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (quickStudyLock.current) return;
+    setQuickStudyId(null); setQuickStudyAutoStart(null);
     const file = event.target.files?.[0]; if (!file) return; setIsProcessingFile(true);
     setIsOpeningStudyFile(true);
     setCurrentSessionId(null); // A failed new upload must never save into the previously open file.
@@ -1786,8 +1799,10 @@ const App: React.FC = () => {
     }
   };
 
-  const handleRestoreCloudSession = async (session: CloudSession, options?: { initialPage?: number }) => {
+  const handleRestoreCloudSession = async (session: CloudSession, options?: { initialPage?: number; quickStudy?: boolean; prepared?: CloudSession }) => {
     if (!user) return;
+    if (quickStudyLock.current && !options?.quickStudy) return;
+    if (!options?.quickStudy) { setQuickStudyId(null); setQuickStudyAutoStart(null); }
     const wasInDashboard = shellMode === 'dashboard';
     setCurrentSessionId(null);
     setStorageError('');
@@ -1796,8 +1811,9 @@ const App: React.FC = () => {
     setIsProcessingFile(true);
     try {
       if (!session.fileUrl) throw new Error('File URL missing');
-      const heavyDetails = await fetchSessionDetails(session.id);
+      const heavyDetails = options?.prepared ?? await fetchSessionDetails(session.id);
       const file = await fetchFileFromUrl(session.fileUrl, session.fileName);
+      if (options?.quickStudy && quickStudyOwner.current !== user.uid) return;
       const fullData = { ...session, ...heavyDetails };
       const restoreData: Partial<FilePersistedState> = {
         explanations: fullData.explanations,
@@ -1833,6 +1849,15 @@ const App: React.FC = () => {
       setCurrentSessionId(session.id);
       await reloadStudyCloudSessions();
       setShellMode('study');
+      if (options?.quickStudy) {
+        setAppMode('study');
+        setViewMode('skim');
+        setIsSidePanelCollapsed(false);
+        setQuickStudyId(session.id);
+        setQuickStudyAutoStart(`${session.id}:${Date.now()}`);
+        const reading = fullData.skimSessions?.[fullData.activeSkimIndex ?? 0];
+        setQuickStudyRecordPending(reading?.studyStyle === 'records' && reading.recordDeck?.view !== 'reader' ? session.id : null);
+      }
       setIsSyncing(true);
       const pendCloud = pendingNavSegmentRef.current;
       if (pendCloud && pendCloud.cloudSessionId === session.id) {
@@ -1842,10 +1867,57 @@ const App: React.FC = () => {
     } catch (e) {
       console.error('Restore failed:', e);
       if (wasInDashboard) setShellMode('dashboard');
+      if (options?.quickStudy) { setShellMode('dashboard'); throw e; }
       alert(isLocalUser(user) ? '无法读取本机资料，请重新添加文件或检查浏览器存储。' : studySaveFailure(e, false));
     } finally {
       setIsOpeningStudyFile(false);
       setIsProcessingFile(false);
+    }
+  };
+
+  const handleQuickStudy = async (another = false) => {
+    if (quickStudyLock.current || isOpeningStudyFile || isProcessingFile || skimActiveLoading || tutorActiveLoading || isGeneratingAI || isChatLoading) return;
+    const owner = user.uid;
+    quickStudyLock.current = true;
+    setQuickStudyBusy(true);
+    setQuickStudyNotice('');
+    try {
+      // Persist before fetching candidates so a just-completed module is included in selection.
+      await saveCurrentStudyProgress();
+      await saveWorkspaceProgress();
+      const recent = recentStudyPdfs(await getUserSessions(user, { throwOnError: true }));
+      if (quickStudyOwner.current !== owner) return;
+      if (!recent.length) {
+        setQuickStudyNotice(uiText('还没有 PDF，先在资料库上传一份吧。', 'Upload a PDF to your library first.'));
+        return;
+      }
+      const details = await Promise.all(recent.map(async file => ({ ...file, ...await fetchSessionDetails(file.id) })));
+      if (quickStudyOwner.current !== owner) return;
+      const unfinished = details.filter(file => !isStudyPdfFinished(file));
+      if (!unfinished.length) {
+        setQuickStudyNotice(uiText('最近上传的 10 份 PDF 都已标记学完，可以上传新资料，或从资料库选择想复习的内容。', 'Your latest 10 PDFs are marked complete. Upload something new or choose a review from your library.'));
+        return;
+      }
+      const previous = another ? currentSessionId : lastQuickStudyId.current;
+      const alternatives = unfinished.filter(file => file.id !== previous);
+      if (another && !alternatives.length) {
+        setQuickStudyNotice(uiText('最近上传的 10 份 PDF 中，没有另一份未完成的资料了。先接着这份吧。', 'There is no other unfinished PDF among your latest 10 uploads. Continue with this one.'));
+        return;
+      }
+      const pool = alternatives.length ? alternatives : unfinished;
+      const chosen = pool[Math.floor(Math.random() * pool.length)];
+      const prepared = prepareQuickStudy(chosen, createEmptySkimSession());
+      await handleRestoreCloudSession(chosen, { quickStudy: true, prepared });
+      if (quickStudyOwner.current === owner) lastQuickStudyId.current = chosen.id;
+    } catch (error) {
+      console.error('Quick study could not open a PDF:', error);
+      if (quickStudyOwner.current === owner) setQuickStudyNotice(uiText(
+        '保存进度或读取资料没有完成，这次没有继续切换。请检查连接后重试；已有记录仍然保留。',
+        'Saving progress or opening the PDF did not finish. Please check your connection and retry. Your saved records are kept.',
+      ));
+    } finally {
+      quickStudyLock.current = false;
+      setQuickStudyBusy(false);
     }
   };
 
@@ -3938,12 +4010,23 @@ const App: React.FC = () => {
       : { ...session, continuousLastPage: page });
   }, [activeSkim.studyStyle, currentIndex, slides.length, updateActiveSkimSession]);
 
+  useEffect(() => {
+    if (!quickStudyRecordPending || quickStudyRecordPending !== currentSessionId || isOpeningStudyFile || skimActiveLoading) return;
+    const deck = activeSkim.recordDeck;
+    if (activeSkim.studyStyle !== 'records' || !deck?.orderedCardIds.length) return;
+    const next = deck.orderedCardIds.find(id => deck.cards[id]?.status !== 'completed');
+    setQuickStudyRecordPending(null);
+    if (next) handleOpenSkimRecord(next);
+  }, [quickStudyRecordPending, currentSessionId, isOpeningStudyFile, skimActiveLoading, activeSkim.recordDeck, activeSkim.studyStyle, handleOpenSkimRecord]);
+
   const studyRightPanel = viewMode === 'skim' ? (
     // 标签栏（领读+问答同排，共享）+ SkimPanel 同框：SkimPanel 始终挂载，切换标签只换喂进去的「激活会话切片」。
     <div className="flex flex-col h-full">
       {sessionTabBar}
       <div className="flex-1 min-h-0">
-        <SkimPanel
+        {!(quickStudyBusy && isOpeningStudyFile) && <SkimPanel
+          autoStartRequest={!isOpeningStudyFile && quickStudyId === currentSessionId ? quickStudyAutoStart : null}
+          onAutoStartConsumed={() => setQuickStudyAutoStart(null)}
           readingSessionKey={JSON.stringify([user.uid, fileHash, currentSessionId, activeSkim.id, activeRecordCard?.id ?? 'continuous'])}
           studyMap={studyMap}
           isLoading={isStudyMapLoading}
@@ -4001,7 +4084,7 @@ const App: React.FC = () => {
           onLoadingChange={setSkimActiveLoading}
           skipDiagnosis={activeSkim.skipDiagnosis}
           onStartTutorMode={handleStartTutorMode}
-        />
+        />}
       </div>
     </div>
   ) : viewMode === 'tutor' ? (
@@ -4194,6 +4277,9 @@ const App: React.FC = () => {
           onLogin={handleLogin}
           onLogout={handleLogout}
           onRestoreSession={handleRestoreCloudSession}
+          onQuickStudy={() => void handleQuickStudy()}
+          quickStudyBusy={quickStudyBusy || skimActiveLoading || tutorActiveLoading || isGeneratingAI || isChatLoading}
+          quickStudyNotice={quickStudyNotice}
           onUpload={handleFileUpload}
           onOpenCurrentStudy={() => setShellMode('study')}
           onOpenExamWorkspace={() => {
@@ -4872,6 +4958,20 @@ const App: React.FC = () => {
           </div>
         )}
         {commonHeader}
+
+        {quickStudyId && quickStudyId === currentSessionId && (
+          <div className="shrink-0 border-b border-[#D8DFD4] bg-[#EDF1E8] px-5 py-2 text-sm text-[#294C3D]">
+            <div className="flex items-center justify-between gap-4">
+              <span>{uiText('先从这份开始，不用一次学完。', 'Start with this one. You do not have to finish it all now.')}</span>
+              <button type="button" onClick={() => void handleQuickStudy(true)}
+                disabled={quickStudyBusy || isOpeningStudyFile || skimActiveLoading || tutorActiveLoading || isGeneratingAI || isChatLoading || !!quickStudyAutoStart}
+                className="shrink-0 rounded-lg border border-[#C3D0C4] bg-white px-3 py-2 font-semibold disabled:opacity-50">
+                {quickStudyBusy ? uiText('正在挑选…', 'Picking…') : uiText('换一份', 'Try another')}
+              </button>
+            </div>
+            {quickStudyNotice && <p role="status" className="mt-2 text-[#805A37]">{quickStudyNotice}</p>}
+          </div>
+        )}
 
         {fileName && slides.length > 0 && (
           <div className="craft-study-strip reading-study-strip shrink-0 border-b">

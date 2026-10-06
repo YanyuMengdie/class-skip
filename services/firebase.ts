@@ -469,7 +469,7 @@ export const deleteCloudFolderPreservingContents = async (user: User, folder: Cl
   await batch.commit();
 };
 
-export const getUserSessions = async (user: User): Promise<CloudSession[]> => {
+export const getUserSessions = async (user: User, options?: { throwOnError?: boolean }): Promise<CloudSession[]> => {
   if (isLocalUser(user)) return (await localList<CloudSession>('sessions')).sort((a, b) => (b.sortIndex ?? 0) - (a.sortIndex ?? 0));
 
   try {
@@ -502,6 +502,7 @@ export const getUserSessions = async (user: User): Promise<CloudSession[]> => {
     return sessions.sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt));
   } catch (error) {
     console.error("[Firebase] Get Sessions Failed:", error);
+    if (options?.throwOnError) throw error;
     return [];
   }
 };

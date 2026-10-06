@@ -111,6 +111,8 @@ interface SkimPanelProps {
   onLoadingChange?: (loading: boolean) => void;
   /** 方案 A：true = 本段为「+」新建段，跳过诊断开场，studyMap=null 时也直接显示配置区 */
   skipDiagnosis?: boolean;
+  autoStartRequest?: string | null;
+  onAutoStartConsumed?: () => void;
   /** 问答模式入口：点击切到独立 tutor viewMode（数据/逻辑全在 App 层，SkimPanel 只负责通知） */
   onStartTutorMode?: () => void;
   studyStyle: SkimStudyStyle;
@@ -905,6 +907,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   setPageRangeEnd,
   onLoadingChange,
   skipDiagnosis = false,
+  autoStartRequest = null,
+  onAutoStartConsumed,
   onStartTutorMode,
   studyStyle,
   onStudyStyleChange,
@@ -930,6 +934,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const recordLabels = useRecordLabels(studyStyle === 'records' ? recordDeck : null, language);
   const [input, setInput, saveInputDraft] = useStudyDraft(`skim:${readingSessionKey}:${studyStyle}:${activeRecordCard?.id ?? ''}`);
   const [isChatLoading, setIsChatLoading] = useState(false);
+  const autoStartSeenRef = useRef<string | null>(null);
   const [variantLoadingMessageId, setVariantLoadingMessageId] = useState<string | null>(null);
   const [variantErrors, setVariantErrors] = useState<Record<string, string>>({});
   const [explanationGenerationError, setExplanationGenerationError] = useState<string | null>(null);
@@ -1803,8 +1808,19 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           }
       }
 
-      startFormalReading(contentOverride, freshMap); // 裁剪内容 + 新 map 显式传下去
+      await startFormalReading(contentOverride, freshMap); // 裁剪内容 + 新 map 显式传下去
   };
+
+  useEffect(() => {
+      if (!autoStartRequest || autoStartSeenRef.current === autoStartRequest || !(pdfDataUrl || fullText) || isLoading) return;
+      autoStartSeenRef.current = autoStartRequest;
+      onAutoStartConsumed?.();
+      // Existing conversations and record-card openings already have their own resume flow.
+      if (messages.length || studyStyle === 'case' || (studyStyle === 'records' && activeRecordCard)) return;
+      void handleStartWithModuleCount().catch(error => {
+          setExplanationGenerationError(readingFailureMessage(error, '领读没有开始，请重试。原记录仍然保留。'));
+      });
+  }, [autoStartRequest, pdfDataUrl, fullText, isLoading]);
 
   const handleSkipToReading = () => {
       if (onRegenerateStudyMap) {

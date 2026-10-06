@@ -117,6 +117,9 @@ interface DashboardScreenProps {
   onLogin: () => void;
   onLogout: () => void;
   onRestoreSession: (session: CloudSession, options?: { initialPage?: number }) => void | Promise<void>;
+  onQuickStudy: () => void;
+  quickStudyBusy: boolean;
+  quickStudyNotice: string;
   onLibraryFileDeleted?: (fileId: string) => void;
   onLibraryFileRenamed?: (fileId: string, name: string) => void;
   onUpload: (event: React.ChangeEvent<HTMLInputElement>) => void;
@@ -306,6 +309,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onLogin,
   onLogout,
   onRestoreSession,
+  onQuickStudy,
+  quickStudyBusy,
+  quickStudyNotice,
   onLibraryFileDeleted,
   onLibraryFileRenamed,
   onUpload,
@@ -1556,6 +1562,18 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       </aside>
 
       <section className="min-w-0">
+        <div className="mb-6 rounded-2xl border border-[#CCD8CB] bg-[#EDF1E8] p-5 sm:p-6">
+          <button type="button" onClick={onQuickStudy} disabled={quickStudyBusy || isProcessing || !!openingSessionId}
+            className="flex w-full items-center justify-between gap-4 text-left text-[#294C3D] disabled:opacity-60">
+            <span>
+              <span className="block text-lg font-bold">{quickStudyBusy ? text('正在帮你挑选…', 'Finding a place to start…') : text('任务太多不知道从哪里学', 'Too many tasks — where do I start?')}</span>
+              <span className="mt-2 block text-sm">{text('我帮你选一份，先从这里开始。', 'Let me pick one. Start here.')}</span>
+            </span>
+            {quickStudyBusy ? <Loader2 className="h-5 w-5 shrink-0 animate-spin" /> : <ArrowRight className="h-5 w-5 shrink-0" />}
+          </button>
+          <p className="mt-3 text-xs text-[#6C796C]">{text('从最近上传的 10 份 PDF 中，随机选一份尚未完成的，直接进入领读。', 'Jump into guided reading with an unfinished PDF picked at random from your 10 latest uploads.')}</p>
+          {quickStudyNotice && <p role="status" className="mt-3 text-sm text-[#805A37]">{quickStudyNotice}</p>}
+        </div>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
           <div>
             <h2 className="text-2xl font-black text-slate-900 tracking-tight">{localMode ? localizeUiText("本机资料库") : localizeUiText("云端资料库")}</h2>
