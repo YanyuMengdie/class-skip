@@ -4102,6 +4102,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
         <UnderstandingPanel
           key={`${understandingScope}:${activeUnderstanding.id}`}
           session={activeUnderstanding}
+          expanded={!mobile && focusMode}
+          onToggleExpanded={mobile ? undefined : () => setFocusMode(value => !value)}
           documentContent={pdfDataUrl || fullText || ''}
           pageTexts={pdfPageTexts}
           onUpdate={updateUnderstanding}

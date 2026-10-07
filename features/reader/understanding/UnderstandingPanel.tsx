@@ -11,7 +11,7 @@ import { createGuidedUnderstanding, savedUnderstandingDiscussions } from './guid
 import type { UnderstandingTopic } from './understandingPlan';
 import './understanding.css';
 
-type Props = Pick<UnderstandingConversationProps, 'session' | 'documentContent' | 'pageTexts' | 'onUpdate' | 'onClose' | 'onBusyChange' | 'onJumpToPage' | 'generateTurn'>;
+type Props = Pick<UnderstandingConversationProps, 'session' | 'documentContent' | 'pageTexts' | 'onUpdate' | 'onClose' | 'onBusyChange' | 'onJumpToPage' | 'generateTurn' | 'expanded' | 'onToggleExpanded'>;
 export const UnderstandingPanel: React.FC<Props> = props => {
   const { session, onUpdate, onClose } = props;
   const { text: t } = useAppLanguage();
