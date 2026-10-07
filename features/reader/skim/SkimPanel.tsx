@@ -5,6 +5,7 @@ import type { ReadingLease } from '@/services/readingPresence';
 import { useRecordLabels } from './useRecordLabels';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { ReadingMessage } from './ReadingMessage';
+import { ReadingWaitingCat } from './ReadingWaitingCat';
 import { parseReadingResponse, type ReadingMedia } from './readingAids';
 import { useStudyDraft } from '@/features/studySupport/useStudyDraft';
 import { localizeText } from '@/shared/i18n/appLanguage';
@@ -2527,12 +2528,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
   if (isLoading) {
     return (
-      <div className="h-full flex flex-col items-center justify-center p-8 bg-white border-l border-stone-100">
-        <div className="w-16 h-16 bg-gradient-to-tr from-indigo-100 to-teal-50 rounded-2xl flex items-center justify-center animate-bounce mb-6 shadow-indigo-100 shadow-lg">
-           <Map className="w-8 h-8 text-indigo-600" />
-        </div>
-        <h3 className="text-xl font-bold text-slate-800 mb-2">正在扫描文档基因...</h3>
-        <p className="text-sm text-slate-400 text-center max-w-[240px] leading-relaxed">正在进行预飞检查，识别前置知识与逻辑架构。</p>
+      <div className="h-full overflow-y-auto bg-[#fffefa] border-l border-stone-100">
+        <ReadingWaitingCat preparing />
       </div>
     );
   }
@@ -3251,14 +3248,18 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
         <div ref={chatContainerRef} className="reading-chat flex-1 min-w-0 overflow-y-auto custom-scrollbar bg-white">
              {messages.length === 0 ? (
+               isChatLoading ? <ReadingWaitingCat key={readingSessionKey} /> : (
                  <div className="flex flex-col items-center justify-center h-full text-stone-300 space-y-4 opacity-70">
                      <div className="p-4 bg-stone-50 rounded-full">
                          <MessageCircle className="w-10 h-10" />
                      </div>
                      <p className="text-xs font-bold text-stone-400">
-                       {activeRecordCard ? '正在准备这一分段的专属领读…' : '请先在上方完成【知识准备】'}
+                       {activeRecordCard
+                         ? localizeText('这里还没有讲解。输入“开始领读”即可开始。', 'No explanation yet. Send “Start reading” to begin.', language)
+                         : localizeText('请先在上方完成【知识准备】', 'Complete the preparation above to begin.', language)}
                      </p>
                  </div>
+               )
              ) : (
                  <>
                  {messages.map((msg, idx) => {
@@ -3704,17 +3705,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
                  </>
              )}
-             {isChatLoading && (
-                 <div className="flex justify-start">
-                     <div className="bg-stone-50 border border-stone-100 rounded-2xl rounded-tl-none p-3 shadow-sm">
-                         <div className="flex space-x-1">
-                             <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full animate-bounce"></div>
-                             <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full animate-bounce delay-150"></div>
-                             <div className="w-1.5 h-1.5 bg-indigo-300 rounded-full animate-bounce delay-300"></div>
-                         </div>
-                     </div>
-                 </div>
-             )}
+             {isChatLoading && messages.length > 0 && <ReadingWaitingCat compact key={readingSessionKey} />}
         </div>
 
         <div className="reader-composer border-t border-stone-50 bg-white shrink-0 space-y-2">
