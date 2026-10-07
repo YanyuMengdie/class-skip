@@ -342,6 +342,8 @@ export const fetchSessionDetails = async (sessionId: string): Promise<Partial<Cl
 };
 
 export const currentStudyRevision = (sessionId: string) => isLocalId(sessionId) ? null : cloudStudyRecord(sessionId).revision;
+export const withCurrentStudyRevision = <T,>(sessionId: string, operation: (revision: string | null) => Promise<T>): Promise<T> =>
+    isLocalId(sessionId) ? operation(null) : cloudStudyRecord(sessionId).withCurrentRevision(operation);
 export const refreshStudyIfClean = async (sessionId: string, canApply: () => boolean): Promise<Partial<CloudSession> | null> =>
     isLocalId(sessionId) ? null : cloudStudyRecord(sessionId).refreshIfClean(canApply);
 

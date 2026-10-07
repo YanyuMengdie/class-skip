@@ -2,6 +2,7 @@ import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import { useReadingScroll } from '../mobile/useReadingScroll';
 import { flushSync } from 'react-dom';
 import type { ReadingLease } from '@/services/readingPresence';
+import { isReadingStateFailure, readingStateFailure } from '@/services/readingSyncStatus';
 import { useRecordLabels } from './useRecordLabels';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { ReadingMessage } from './ReadingMessage';
@@ -1980,7 +1981,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           if (requestScope !== understandingScopeRef.current) { await turnLease?.release(); turnStartingRef.current = false; return; }
       } catch (error) {
           turnStartingRef.current = false;
-          setExplanationGenerationError(readingFailureMessage(error, '另一端有更新或正在生成，请同步后重试。输入草稿仍然保留。'));
+          console.warn('Reading start state check failed:', error);
+          setExplanationGenerationError(readingStateFailure(error, language === 'en'));
           return;
       }
 
@@ -2145,7 +2147,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
               || (typeof e === 'object' && e !== null && 'name' in e && (e as { name: string }).name === 'AbortError');
           if (isAbort) return;
           console.error(e);
-          setExplanationGenerationError(readingFailureMessage(e, usesConnectedLectureExplanation
+          setExplanationGenerationError(isReadingStateFailure(e) ? readingStateFailure(e, language === 'en') : readingFailureMessage(e, usesConnectedLectureExplanation
             ? '这次连接式讲解没有通过内容或页码校验。原对话没有被覆盖，可以重试。'
             : '这次领读没有完成，原对话已保留，可以重试。'));
       } finally {

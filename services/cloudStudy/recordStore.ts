@@ -56,6 +56,13 @@ export class CloudStudyRecord {
     return this.enqueue(() => this.restore());
   }
   get revision(): string | null | undefined { return this.loaded?.revision; }
+  /** Serialize a revision check with this page's saves so its own commit cannot look remote. */
+  withCurrentRevision<T>(operation: (revision: string | null) => Promise<T>): Promise<T> {
+    return this.enqueue(async () => {
+      if (!this.loaded) await this.restore();
+      return operation(this.loaded!.revision);
+    });
+  }
   /** Observe another device only while the caller still has the last saved snapshot. */
   refreshIfClean(canApply: () => boolean): Promise<Record<string, unknown> | null> {
     return this.enqueue(async () => {

@@ -22,6 +22,7 @@ import { MobileLibrary } from '@/features/reader/mobile/MobileLibrary';
 import { MobileReader } from '@/features/reader/mobile/MobileReader';
 import '@/features/reader/mobile/mobileReading.css';
 import { acquireReadingLease, observeReading } from '@/services/readingPresence';
+import { ReadingSyncError } from '@/services/readingSyncStatus';
 import { refreshStudyIfClean } from '@/services/firebase';
 import { updateReadingMessages } from '@/features/reader/skim/readingSessionUpdates';
 import { SkimRecordShelf } from '@/features/reader/skim/SkimRecordShelf';
@@ -421,6 +422,8 @@ const App: React.FC = () => {
   const latestWorkspaceSave = useRef<() => Promise<void>>(async () => {});
   const savesInFlight = useRef(0);
   const adoptingRemote = useRef(false);
+  const remoteReadingVersion = useRef(0);
+  const readingGenerationGate = useRef(false);
   const remoteRefreshPending = useRef(false);
   const refreshReadingRef = useRef<() => Promise<void>>(async () => {});
   const liveReadingContext = useRef({ id: null as string | null, busy: false });
@@ -1498,7 +1501,8 @@ const App: React.FC = () => {
 
   const saveWorkspaceProgress: () => Promise<void> = useCallback(async () => {
     if (!currentSessionId || !user || isOpeningStudyFile || isProcessingFile) return;
-    if (readingRefreshingRef.current || readingRemoteBusyRef.current) throw new Error('另一端正在生成或同步中，请稍后再试。');
+    if (readingRefreshingRef.current) throw new ReadingSyncError('refreshing');
+    if (readingRemoteBusyRef.current) throw new ReadingSyncError('reader-busy');
     savesInFlight.current += 1;
     try {
     await saveCurrentStudyProgress();
@@ -1515,6 +1519,7 @@ const App: React.FC = () => {
   liveReadingContext.current = { id: currentSessionId, busy: skimActiveLoading || isOpeningStudyFile || isProcessingFile || tutorActiveLoading || isGeneratingAI || isChatLoading };
   const applyRemoteStudy = useRef<(data: Partial<CloudSession>) => void>(() => {});
   applyRemoteStudy.current = data => {
+    remoteReadingVersion.current += 1;
     adoptingRemote.current = true;
     if (data.skimSessions?.length) {
       const activeId = activeSkim.id;
@@ -1550,31 +1555,51 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentSessionId || isLocalUser(user)) return;
     const id = currentSessionId;
-    let active = true; let fetching = false;
+    let active = true;
+    let refreshTask: Promise<void> | null = null;
+    remoteRefreshPending.current = false;
     // The freshly loaded document is the initial clean baseline, before the user edits it.
     lastSyncedSave.current = latestWorkspaceSave.current;
     const refresh = async () => {
-      if (!active || fetching || !remoteRefreshPending.current || !navigator.onLine || document.hidden) return;
+      if (!active) return;
+      if (refreshTask) return refreshTask;
+      if (!remoteRefreshPending.current || !navigator.onLine || document.hidden) return;
       const context = liveReadingContext.current;
-      if (context.id !== id || context.busy || savesInFlight.current || lastSyncedSave.current !== latestWorkspaceSave.current) return;
+      if (context.id !== id || context.busy || readingGenerationGate.current || savesInFlight.current || lastSyncedSave.current !== latestWorkspaceSave.current) return;
       const baseline = latestWorkspaceSave.current;
-      fetching = true;
       readingRefreshingRef.current = true; setRefreshingReading(true);
       // Do not change a save dependency until after the clean-snapshot guard has run.
-      try {
-        const data = await refreshStudyIfClean(id, () => active && liveReadingContext.current.id === id && !liveReadingContext.current.busy && !savesInFlight.current && latestWorkspaceSave.current === baseline);
-        if (!active) return;
-        if (data) flushSync(() => applyRemoteStudy.current(data));
-        if (latestWorkspaceSave.current === baseline) remoteRefreshPending.current = false;
-      } catch (error) { if (active) setStorageError(studySaveFailure(error, false)); }
-      finally { fetching = false; readingRefreshingRef.current = false; if (active) setRefreshingReading(false); }
+      refreshTask = (async () => {
+        try {
+          const data = await refreshStudyIfClean(id, () => active && liveReadingContext.current.id === id && !liveReadingContext.current.busy && !readingGenerationGate.current && !savesInFlight.current && latestWorkspaceSave.current === baseline);
+          if (!active) return;
+          if (data) flushSync(() => applyRemoteStudy.current(data));
+          if (latestWorkspaceSave.current === baseline) remoteRefreshPending.current = false;
+        } catch (error) {
+          if (active) setStorageError(studySaveFailure(error, false));
+          throw error;
+        } finally {
+          if (active) { readingRefreshingRef.current = false; setRefreshingReading(false); }
+        }
+      })();
+      try { await refreshTask; } finally { refreshTask = null; }
     };
     refreshReadingRef.current = refresh;
-    const changed = () => { remoteRefreshPending.current = true; void refresh(); };
+    const refreshQuietly = () => { void refresh().catch(() => {}); };
+    const changed = () => { remoteRefreshPending.current = true; refreshQuietly(); };
     const stop = observeReading(id, changed, value => { if (active) setRemoteReadingBusy(value); }, error => { if (active) setStorageError(studySaveFailure(error, false)); });
-    const timer = window.setInterval(() => { void refresh(); }, 5000);
+    const timer = window.setInterval(refreshQuietly, 5000);
     window.addEventListener('online', changed); document.addEventListener('visibilitychange', changed);
-    return () => { active = false; stop(); window.clearInterval(timer); window.removeEventListener('online', changed); document.removeEventListener('visibilitychange', changed); setRemoteReadingBusy(false); };
+    return () => {
+      active = false; stop(); window.clearInterval(timer);
+      window.removeEventListener('online', changed); document.removeEventListener('visibilitychange', changed);
+      if (refreshReadingRef.current === refresh) {
+        refreshReadingRef.current = async () => {};
+        readingRefreshingRef.current = false;
+        setRefreshingReading(false);
+      }
+      setRemoteReadingBusy(false);
+    };
   }, [currentSessionId, user.uid]);
   useEffect(() => {
     if (!currentSessionId || isOpeningStudyFile || isProcessingFile) return;
@@ -1586,7 +1611,7 @@ const App: React.FC = () => {
     const save = () => {
       void saveWorkspaceProgress().then(() => {
         if (active) { setStorageError(''); setIsSyncing(false); }
-        void refreshReadingRef.current();
+        void refreshReadingRef.current().catch(() => {});
       }).catch(error => {
         console.error('资料保存失败', error);
         if (active) { setIsSyncing(false); setStorageError(studySaveFailure(error, isLocalUser(user))); }
@@ -4143,8 +4168,8 @@ const App: React.FC = () => {
       {!isMobileReader && sessionTabBar}
       {(remoteReadingBusy || refreshingReading || !online) && <div className="reading-presence-notice" role="status">{!online
         ? uiText('当前离线。已加载内容仍可阅读，输入草稿会保留；联网后再发送。', 'Offline. Keep reading loaded content; drafts are kept. Reconnect to send.')
-        : remoteReadingBusy ? uiText('另一端正在生成解析，请等它完成。', 'Another device is generating this reading. Please wait.')
-        : uiText('正在接收另一端的领读更新…', 'Receiving reading updates…')}</div>}
+        : remoteReadingBusy ? uiText('这份资料已有生成请求尚未结束，请稍后再试。', 'A generation request for this material is still active. Please wait.')
+        : uiText('正在同步云端领读记录…', 'Syncing cloud reading records…')}</div>}
       <div className="flex-1 min-h-0">
         <fieldset disabled={remoteReadingBusy || refreshingReading} className="h-full min-w-0 border-0 m-0 p-0">
         {!(quickStudyBusy && isOpeningStudyFile) && <SkimPanel
@@ -4152,12 +4177,25 @@ const App: React.FC = () => {
           onOpenRecord={handleOpenSkimRecord}
           externalBusy={remoteReadingBusy || refreshingReading}
           beforeReadingTurn={async () => {
-            const baseline = latestWorkspaceSave.current;
+            const baseline = remoteReadingVersion.current;
             await refreshReadingRef.current();
-            if (latestWorkspaceSave.current !== baseline) throw new Error('已收到另一端的新讲解，请查看后再继续。');
+            if (liveReadingContext.current.id !== currentSessionId) throw new ReadingSyncError('scope-changed');
+            if (remoteReadingVersion.current !== baseline) throw new ReadingSyncError('cloud-updated');
             if (currentSessionId) {
-              await latestWorkspaceSave.current();
-              return acquireReadingLease(currentSessionId);
+              // A notification from our own save must not start a refresh during this turn.
+              readingGenerationGate.current = true;
+              try {
+                try { await latestWorkspaceSave.current(); }
+                catch (error) { setStorageError(studySaveFailure(error, isLocalUser(user))); throw error; }
+                if (liveReadingContext.current.id !== currentSessionId) throw new ReadingSyncError('scope-changed');
+                const lease = await acquireReadingLease(currentSessionId);
+                return {
+                  assert: lease.assert,
+                  release: async () => {
+                    try { await lease.release(); } finally { readingGenerationGate.current = false; }
+                  },
+                };
+              } catch (error) { readingGenerationGate.current = false; throw error; }
             }
             return { assert: async () => {}, release: async () => {} };
           }}

@@ -1,6 +1,7 @@
 import { doc, onSnapshot, runTransaction } from 'firebase/firestore';
-import { auth, db, currentStudyRevision } from './firebase';
+import { auth, db, currentStudyRevision, withCurrentStudyRevision } from './firebase';
 import { isLocalId } from './localWorkspace';
+import { ReadingSyncError } from './readingSyncStatus';
 
 const writer = crypto.randomUUID();
 const leaseMs = 180_000;
@@ -9,17 +10,17 @@ export type ReadingLease = { assert: () => Promise<void>; release: () => Promise
 
 /** Document-wide lease also protects whole-document snapshots when different tabs generate. */
 export async function acquireReadingLease(id: string): Promise<ReadingLease> {
-  if (!navigator.onLine) throw new Error('当前离线，问题草稿已保留。请联网后再发送。');
+  if (!navigator.onLine) throw new ReadingSyncError('offline');
   if (isLocalId(id)) return { assert: async () => {}, release: async () => {} };
   const owner = auth.currentUser?.uid;
-  if (!owner) throw new Error('请先登录。');
+  if (!owner) throw new ReadingSyncError('signed-out');
   const token = crypto.randomUUID();
   let lost = false;
   const guard = () => {
     if (auth.currentUser?.uid !== owner || lost)
-      throw new Error('生成状态已中断，原记录仍然保留。请重新打开这份资料后继续。');
+      throw new ReadingSyncError('lease-lost');
   };
-  const claim = async (renew = false) =>
+  const claim = async (renew = false, expectedRevision: string | null = null) =>
     runTransaction(db, async (tx) => {
       guard();
       const ref = lockRef(id);
@@ -27,16 +28,16 @@ export async function acquireReadingLease(id: string): Promise<ReadingLease> {
       const now = Date.now();
       if (renew) {
         if (lock?.token !== token || lock.expiresAt <= now)
-          throw new Error('领读生成锁已失效，请重试。');
+          throw new ReadingSyncError('lease-lost');
       } else {
         const head = (await tx.get(doc(db, 'sessions', id, 'data', 'state-v2'))).data();
-        if ((head?.revision ?? null) !== (currentStudyRevision(id) ?? null))
-          throw new Error('另一端有新的领读记录，正在同步，请稍后再试。');
-        if (lock?.expiresAt > now) throw new Error('另一端正在生成这份资料的解析，请等它完成。');
+        if ((head?.revision ?? null) !== expectedRevision)
+          throw new ReadingSyncError('cloud-updated');
+        if (lock?.expiresAt > now) throw new ReadingSyncError('reader-busy');
       }
       tx.set(ref, { writer, token, expiresAt: now + leaseMs });
     });
-  await claim();
+  await withCurrentStudyRevision(id, revision => claim(false, revision));
   const heartbeat = window.setInterval(() => {
     void claim(true).catch(() => {
       lost = true;
@@ -69,7 +70,13 @@ export function observeReading(
   if (isLocalId(id)) return () => {};
   let expiresAt = 0;
   let isOther = false;
-  const publish = () => busy(isOther && expiresAt > Date.now());
+  let wasBusy = false;
+  const publish = () => {
+    const next = isOther && expiresAt > Date.now();
+    busy(next);
+    if (wasBusy && !next) changed();
+    wasBusy = next;
+  };
   const head = onSnapshot(
     doc(db, 'sessions', id, 'data', 'state-v2'),
     (snapshot) => {
@@ -88,7 +95,6 @@ export function observeReading(
       isOther = !!data && data.writer !== writer;
       expiresAt = data?.expiresAt ?? 0;
       publish();
-      if (!isOther) changed();
     },
     failed,
   );
