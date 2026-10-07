@@ -28,7 +28,7 @@ import remarkMath from 'remark-math';
 import remarkGfm from 'remark-gfm';
 import rehypeKatex from 'rehype-katex';
 import { StudyMap, ChatMessage, Prerequisite, QuizData, SkimStage, DocType, SkimContentType, SkimAuxiliaryMaterial, SkimAuxiliaryMaterialRole, SkimAuxiliaryUseMode, SkimReadingRoute, SkimReadingRouteNode, SkimReadingMessageAnchor, SkimReadingAnchorKind, CloudSession, SkimStudyStyle, SkimExplanationDepth, SkimExplanationStyle, SkimExplanationVariantKey, SkimModuleTakeaway, SkimRecordDeck, SkimRecordCardState, LectureCaseLearningState } from '@/types';
-import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X, Maximize2, Minimize2, Folder, LayoutGrid, Link2, Plus, RefreshCw, Library, RotateCcw, Check } from 'lucide-react';
+import { Rocket, Send, Square, PencilLine, Map, MessageCircle, Bot, AlertCircle, HelpCircle, CheckCircle2, ShieldAlert, ArrowRight, BookOpen, BrainCircuit, Lightbulb, Lock, SkipForward, Move, ListChecks, ClipboardList, Loader2, ChevronDown, Upload, Trash2, ImagePlus, X, Maximize2, Minimize2, Folder, LayoutGrid, Link2, Plus, RefreshCw, Library, RotateCcw, Check, MoreHorizontal, ArrowDown } from 'lucide-react';
 import { chatWithSkimAdaptiveTutor, generateContinuousLectureTurn, generateContinuousLectureVariant, generateLegacyRecordExplanationVariant, generateGatekeeperQuiz, generateModuleKnowledgeExtraction, generateModuleTakeaways, generateSkimReadingRoute } from '@/services/geminiService';
 import { readingFailureMessage } from '@/services/readingAstraClient';
 import { fetchFileFromUrl, readFileAsDataURL, extractPdfPageRange } from '@/lib/pdf/pdfUtils';
@@ -58,6 +58,8 @@ import { prepareMessageUnderstanding } from '@/features/reader/understanding/und
 
 interface SkimPanelProps {
   mobile?: boolean;
+  pdfPanelPercent?: number;
+  onPdfPanelPercentChange?: (percent: number) => void;
   onOpenRecord?: (id: string) => void;
   externalBusy?: boolean;
   beforeReadingTurn?: () => Promise<ReadingLease>;
@@ -879,6 +881,8 @@ class TakeawaysDraftMarkdownPreview extends Component<
 
 export const SkimPanel: React.FC<SkimPanelProps> = ({
   mobile = false,
+  pdfPanelPercent = 40,
+  onPdfPanelPercentChange,
   onOpenRecord,
   externalBusy = false,
   beforeReadingTurn,
@@ -985,6 +989,29 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const recordOpeningStartedRef = useRef<string | null>(null);
   const [showGranularityModal, setShowGranularityModal] = useState(false);
   const [routeOutlineOpen, setRouteOutlineOpen] = useState(false);
+  const [readingToolsOpen, setReadingToolsOpen] = useState(false);
+  const readingToolsRef = useRef<HTMLDivElement>(null);
+  const compactReading = !mobile && stage === 'reading';
+  useEffect(() => {
+    setReadingToolsOpen(false);
+    setRouteOutlineOpen(false);
+  }, [readingSessionKey, stage]);
+  useEffect(() => {
+    if (!compactReading || (!readingToolsOpen && !routeOutlineOpen)) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!readingToolsRef.current?.contains(event.target as Node)
+        && !(event.target as Element).closest?.('.reader-outline-popover')) {
+        setReadingToolsOpen(false);
+        setRouteOutlineOpen(false);
+      }
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { setReadingToolsOpen(false); setRouteOutlineOpen(false); }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    document.addEventListener('keydown', escape);
+    return () => { document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', escape); };
+  }, [readingToolsOpen, routeOutlineOpen, compactReading]);
   const [activeRouteItemId, setActiveRouteItemId] = useState<string | null>(null);
   /** 阶段4b 防线：paper/文章模式下原文（pdfDataUrl）未就位时的友好提示，挡住"开始陪读" */
   const [companionGuardNotice, setCompanionGuardNotice] = useState<string | null>(null);
@@ -2614,8 +2641,46 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     );
   }
 
+  const recordCompletion = (
+    <>{activeRecordCard && (
+              <div className="reader-completion flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-100 bg-indigo-50/45 px-3 py-2">
+                <div>
+                  <p className="text-xs font-black text-slate-800">
+                    {localizeText(activeRecordCard.status === 'completed' ? '这一分段已标记为学完' : '学完由你自己决定', activeRecordCard.status === 'completed' ? 'This section is marked as completed' : 'You decide when you are done', language)}
+                  </p>
+                  <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
+                    {localizeText('这只代表学过了，不代表考试层面已经掌握。', 'Read does not mean mastered for an exam.', language)}
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {activeRecordCard.status === 'completed' ? (
+                    <>
+                      <button type="button" disabled={isExplanationBusy} onClick={onUndoRecordComplete} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">
+                        <RotateCcw className="h-3.5 w-3.5" />{localizeText('撤销', 'Undo', language)}
+                      </button>
+                      <button type="button" className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600">{localizeText('留在这里', 'Stay here', language)}</button>
+                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">{localizeText('返回分段目录', 'Back to sections', language)}</button>
+                      {nextRecordCard && (
+                        <button type="button" disabled={isExplanationBusy} onClick={onOpenNextRecord} className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-indigo-700">
+                          {localizeText('下一段', 'Next section', language)}<ArrowRight className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">{localizeText('返回分段目录', 'Back to sections', language)}</button>
+                      <button type="button" disabled={isExplanationBusy} onClick={onCompleteRecord} className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-emerald-700">
+                        <Check className="h-3.5 w-3.5" />{localizeText('我学完了', 'Mark as completed', language)}
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}</>
+  );
+
   return (
-    <div ref={containerRef} className={`reading-conversation ${stage === 'reading' ? 'is-reading' : 'is-preparing'} h-full bg-[#fffefb] flex flex-col relative overflow-hidden`}>
+    <div ref={containerRef} className={`reading-conversation ${stage === 'reading' ? 'is-reading' : 'is-preparing'} ${compactReading ? 'is-compact-reading' : ''} h-full bg-[#fffefb] flex flex-col relative overflow-hidden`}>
       <div style={{ display: 'contents' }} inert={Boolean(activeUnderstanding)} aria-hidden={activeUnderstanding ? true : undefined}>
       {/* Selection Popover */}
       {!mobile && selectionRect && (
@@ -3003,6 +3068,53 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       {/* 2. BOTTOM HALF: Chat (Hidden in Quiz Mode) */}
       {stage !== 'quiz' && showPreparationChat && (
       <div className="reader-dialogue flex-1 flex flex-col min-h-0 bg-white relative z-20">
+        {compactReading ? (
+          <div className="reader-compact-bar shrink-0">
+            <div className="reader-compact-heading">
+              <p className="reader-compact-title">
+                {activeRecordCard
+                  ? <>Module {activeRecordCard.moduleIndex}{activeRecordCard.partIndex == null ? '' : ` · Part ${activeRecordCard.partIndex}`} · {recordLabels.label(activeRecordCard, 'title')}</>
+                  : localizeText('一起读下去', 'Read together', language)}
+              </p>
+              <p className="reader-compact-subtitle">
+                {activeRecordCard
+                  ? language === 'en' ? `Pages ${activeRecordCard.pageStart}–${activeRecordCard.pageEnd} · On page ${currentPage}` : `第 ${activeRecordCard.pageStart}–${activeRecordCard.pageEnd} 页 · 当前第 ${currentPage} 页`
+                  : language === 'en' ? `Pages ${configuredRangeStart}–${configuredRangeEnd} · Continuous reading` : `第 ${configuredRangeStart}–${configuredRangeEnd} 页 · 连续领读`}
+                {activeRecordCard && <span> · {localizeText(activeRecordCard.status === 'completed' ? '已学完' : '学习中', activeRecordCard.status === 'completed' ? 'Completed' : 'In progress', language)}</span>}
+              </p>
+              {activeRecordCard && recordLabels.failed && <button type="button" onClick={recordLabels.retry} className="text-xs text-amber-700 underline">{localizeText('分段翻译失败，点击重试', 'Section translation failed. Retry', language)}</button>}
+            </div>
+            <div className="reader-compact-actions" ref={readingToolsRef}>
+              <button type="button" className="reader-compact-button" disabled={activeRecordCard ? isExplanationBusy : false}
+                aria-expanded={activeRecordCard ? undefined : routeOutlineOpen}
+                onClick={() => { setReadingToolsOpen(false); if (activeRecordCard) onOpenRecordShelf?.(); else setRouteOutlineOpen(v => !v); }}>
+                <Library className="h-3.5 w-3.5" />{localizeText('目录', 'Sections', language)}
+              </button>
+              <button type="button" className="reader-compact-button reader-compact-icon" aria-label={localizeText('领读工具', 'Reading tools', language)} aria-expanded={readingToolsOpen}
+                onClick={() => { setRouteOutlineOpen(false); setReadingToolsOpen(v => !v); }}><MoreHorizontal className="h-4 w-4" /></button>
+              <button type="button" className="reader-compact-button reader-compact-icon" onClick={() => setFocusMode(v => !v)} aria-label={localizeText(focusMode ? '退出放大领读' : '放大领读', focusMode ? 'Exit expanded reading' : 'Expand reading', language)}>
+                {focusMode ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+              </button>
+              {readingToolsOpen && <div className="reader-tools-popover" aria-label={localizeText('领读工具', 'Reading tools', language)}>
+                {skimContentType === 'lecture' && (studyStyle === 'continuous' || activeRecordCard) && <>
+                  <p>{localizeText('讲解方式', 'Explanation style', language)}</p>
+                  {(['standard', 'interesting'] as const).map(style => <button key={style} type="button" disabled={isExplanationBusy} aria-pressed={explanationStyle === style}
+                    onClick={() => { onExplanationStyleChange(style); setReadingToolsOpen(false); }}>
+                    {explanationStyle === style && <Check className="h-3.5 w-3.5" />}{localizeText(style === 'interesting' ? '有意思地讲' : '正常讲', style === 'interesting' ? 'Make it interesting' : 'Standard', language)}
+                  </button>)}
+                  <small>{localizeText('只影响之后的新讲解', 'Applies to new explanations', language)}</small>
+                  <button type="button" disabled={isExplanationBusy || messages.length === 0} onClick={() => { setReadingToolsOpen(false); void handleShowTakeaways(); }}>
+                    {takeawaysLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ListChecks className="h-3.5 w-3.5" />}{localizeText('看要点', 'Key points', language)}
+                  </button>
+                </>}
+                <button type="button" onClick={() => { setReadingToolsOpen(false); chatContainerRef.current?.scrollTo({ top: chatContainerRef.current.scrollHeight, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }); }}><ArrowDown className="h-3.5 w-3.5" />{localizeText('读到末尾', 'Jump to the end', language)}</button>
+                {onPdfPanelPercentChange && <label className="reader-width-control">{localizeText('PDF 占比', 'PDF width', language)} · {Math.round(pdfPanelPercent)}%
+                  <input type="range" min="35" max="55" value={pdfPanelPercent} onChange={event => onPdfPanelPercentChange(Number(event.target.value))} aria-label={localizeText('PDF 占比', 'PDF width', language)} />
+                </label>}
+              </div>}
+            </div>
+          </div>
+        ) : (
         <div className="reader-context-bar shrink-0">
             <div className="reader-context-heading">
                 <div className="reader-context-icon">
@@ -3081,13 +3193,15 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             )}
         </div>
 
-        {stage === 'reading' && skimContentType !== 'lecture' && studyStyle === 'continuous' && (
+        )}
+
+        {!compactReading && stage === 'reading' && skimContentType !== 'lecture' && studyStyle === 'continuous' && (
           <div className="reader-route-overview px-5 py-2 text-xs text-stone-500">
             本次范围：PDF {configuredRangeStart}–{configuredRangeEnd} · {pageRangeLabel}
           </div>
         )}
 
-        {activeRecordCard && (
+        {!compactReading && activeRecordCard && (
           <div className="reader-record-context shrink-0 border-b border-indigo-100 bg-indigo-50/45 px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -3130,8 +3244,8 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           </div>
         )}
 
-        {stage === 'reading' && studyStyle === 'continuous' && (displayRouteOutlineItems.length > 0 || isGeneratingRoute || routeError || !!onReadingRouteChange) && (
-            <div className="reader-outline shrink-0">
+        {stage === 'reading' && studyStyle === 'continuous' && (!compactReading || routeOutlineOpen) && (displayRouteOutlineItems.length > 0 || isGeneratingRoute || routeError || !!onReadingRouteChange) && (
+            <div className={`reader-outline shrink-0 ${compactReading ? 'reader-outline-popover' : ''}`}>
                 <div className="flex items-center justify-between gap-3">
                     <button
                         type="button"
@@ -3210,7 +3324,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                                 <button
                                     key={item.id}
                                     type="button"
-                                    onClick={() => handleJumpToRouteItem(item)}
+                                    onClick={() => { handleJumpToRouteItem(item); if (compactReading) setRouteOutlineOpen(false); }}
                                     aria-current={isActive ? 'true' : undefined}
                                     className={`flex w-full items-start gap-2 rounded-lg px-2.5 py-2 text-left transition-colors ${
                                         isActive
@@ -3708,11 +3822,12 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                  </>
              )}
              {isChatLoading && messages.length > 0 && <ReadingWaitingCat compact key={readingSessionKey} />}
+             {!mobile && recordCompletion}
         </div>
 
         <div className="reader-composer border-t border-stone-50 bg-white shrink-0 space-y-2">
             {mobile && stage === 'reading' && <button type="button" className="mobile-primary" disabled={isExplanationBusy} onClick={() => void handleSend('继续', 'reading')}>{localizeText('继续领读', 'Continue reading', language)}<ArrowRight className="ml-2 h-4 w-4" /></button>}
-            {stage === 'reading' && <p className="reader-composer-hint">随时追问，或说“继续”接着读。</p>}
+            {!compactReading && stage === 'reading' && <p className="reader-composer-hint">随时追问，或说“继续”接着读。</p>}
             {explanationGenerationError && (
               <div className="flex items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
                 <span>{explanationGenerationError}</span>
@@ -3721,41 +3836,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                 </button>
               </div>
             )}
-            {activeRecordCard && (
-              <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-100 bg-indigo-50/45 px-3 py-2">
-                <div>
-                  <p className="text-xs font-black text-slate-800">
-                    {activeRecordCard.status === 'completed' ? '这一分段已标记为学完' : '学完由你自己决定'}
-                  </p>
-                  <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
-                    这只代表学过了，不代表考试层面已经掌握。
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {activeRecordCard.status === 'completed' ? (
-                    <>
-                      <button type="button" disabled={isExplanationBusy} onClick={onUndoRecordComplete} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">
-                        <RotateCcw className="h-3.5 w-3.5" />撤销
-                      </button>
-                      <button type="button" className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600">留在这里</button>
-                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">返回分段目录</button>
-                      {nextRecordCard && (
-                        <button type="button" disabled={isExplanationBusy} onClick={onOpenNextRecord} className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-indigo-700">
-                          下一段<ArrowRight className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">返回分段目录</button>
-                      <button type="button" disabled={isExplanationBusy} onClick={onCompleteRecord} className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-emerald-700">
-                        <Check className="h-3.5 w-3.5" />我学完了
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
+            {mobile && recordCompletion}
             {/* 隐藏的文件选择器:由"图片"按钮触发 */}
             <input
                 ref={fileInputRef}
@@ -3792,16 +3873,16 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     onChange={(e) => {
                         setInput(e.target.value);
                         e.target.style.height = 'auto';
-                        e.target.style.height = e.target.scrollHeight + 'px';
+                        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
                     }}
                     onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey) {
+                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) {
                             e.preventDefault();
                             handleSend();
                         }
                     }}
                     onPaste={handlePaste}
-                    placeholder={stage === 'tutoring' ? "回答 AI 的追问或说‘我不懂’..." : "与导读 AI 交流..."}
+                    placeholder={localizeText(stage === 'tutoring' ? '回答 AI 的追问或说“我不懂”…' : '随时追问，或说“继续”接着读…', stage === 'tutoring' ? 'Answer, or say “I don’t understand”…' : 'Ask a question, or say “Continue”…', language)}
                     className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm focus:ring-0 focus:outline-none text-slate-700 placeholder:text-stone-400 resize-none overflow-y-auto max-h-[120px]"
                     disabled={isExplanationBusy || stage === 'diagnosis'}
                 />

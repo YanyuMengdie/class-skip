@@ -756,6 +756,7 @@ const App: React.FC = () => {
 
   const [isImmersive, setIsImmersive] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(60);
+  const [readingPdfPercent, setReadingPdfPercent] = useState(40);
   const [isSidePanelCollapsed, setIsSidePanelCollapsed] = useState(false);
   /** 本页注释区域高度占左侧面板的百分比（可拖拽调节），默认 25%，范围 15–65 */
   const [notesPanelHeightPercent, setNotesPanelHeightPercent] = useState(25);
@@ -4174,6 +4175,8 @@ const App: React.FC = () => {
         <fieldset disabled={remoteReadingBusy || refreshingReading} className="h-full min-w-0 border-0 m-0 p-0">
         {!(quickStudyBusy && isOpeningStudyFile) && <SkimPanel
           mobile={isMobileReader}
+          pdfPanelPercent={readingPdfPercent}
+          onPdfPanelPercentChange={isMobileReader ? undefined : setReadingPdfPercent}
           onOpenRecord={handleOpenSkimRecord}
           externalBusy={remoteReadingBusy || refreshingReading}
           beforeReadingTurn={async () => {
@@ -4378,7 +4381,7 @@ const App: React.FC = () => {
         ? '问答'
         : '页面工具';
 
-  // 阅读双栏使用剩余空间的 46:54；专用工作区及沉浸拖宽仍沿用原布局。
+  // 阅读双栏默认 40:60，比例只属于当前界面，不写入学习记录。
   const isReadingWorkspaceLayout = (viewMode === 'skim' || viewMode === 'tutor')
     && !(isClassroomPanelVisible && isClassroomMode && currentLecture)
     && !studioExpandedId
@@ -5215,7 +5218,7 @@ const App: React.FC = () => {
             </button>
         )}
 
-        <main className={`reading-workspace-main flex-1 flex overflow-hidden relative ${isReadingWorkspaceLayout && !isImmersive && !isSidePanelCollapsed ? 'is-reading-layout' : ''}`}>
+        <main style={{ '--reading-pdf-share': readingPdfPercent, '--reading-text-share': 100 - readingPdfPercent } as React.CSSProperties} className={`reading-workspace-main flex-1 flex overflow-hidden relative ${isReadingWorkspaceLayout && !isImmersive && !isSidePanelCollapsed ? 'is-reading-layout' : ''} ${isReadingWorkspaceLayout && viewMode === 'skim' && skimStage === 'reading' && skimFocusMode && !isImmersive && !isSidePanelCollapsed ? 'is-reading-focus' : ''}`}>
           {isOpeningStudyFile && (
             <div className="absolute inset-0 z-[170] flex items-center justify-center bg-white/85 backdrop-blur-sm">
               <div className="flex flex-col items-center gap-3 rounded-2xl border border-stone-100 bg-white px-8 py-6 shadow-xl shadow-stone-200/60">
@@ -5311,6 +5314,32 @@ const App: React.FC = () => {
                 </>
               )}
           </div>
+
+          {isReadingWorkspaceLayout && !isImmersive && !isSidePanelCollapsed && (
+            <div
+              className="reading-column-divider"
+              role="separator"
+              tabIndex={0}
+              aria-label={uiText('调整 PDF 与领读的宽度', 'Resize PDF and reading columns')}
+              aria-orientation="vertical"
+              aria-valuemin={35} aria-valuemax={55} aria-valuenow={Math.round(readingPdfPercent)}
+              onKeyDown={event => {
+                if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                  event.preventDefault();
+                  setReadingPdfPercent(value => Math.max(35, Math.min(55, value + (event.key === 'ArrowLeft' ? -1 : 1))));
+                }
+              }}
+              onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); }}
+              onPointerMove={event => {
+                if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+                const left = leftPanelRef.current?.getBoundingClientRect();
+                const right = event.currentTarget.nextElementSibling?.getBoundingClientRect();
+                if (!left || !right) return;
+                setReadingPdfPercent(Math.max(35, Math.min(55, (event.clientX - left.left) / (left.width + right.width) * 100)));
+              }}
+              onPointerUp={event => { if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId); }}
+            />
+          )}
 
           {isImmersive && !isSidePanelCollapsed && (
             <div
