@@ -2643,15 +2643,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
   const recordCompletion = (
     <>{activeRecordCard && (
-              <div className="reader-completion flex flex-wrap items-center justify-between gap-2 rounded-lg border border-indigo-100 bg-indigo-50/45 px-3 py-2">
-                <div>
-                  <p className="text-xs font-black text-slate-800">
-                    {localizeText(activeRecordCard.status === 'completed' ? '这一分段已标记为学完' : '学完由你自己决定', activeRecordCard.status === 'completed' ? 'This section is marked as completed' : 'You decide when you are done', language)}
-                  </p>
-                  <p className="mt-0.5 text-[10px] font-semibold text-slate-500">
-                    {localizeText('这只代表学过了，不代表考试层面已经掌握。', 'Read does not mean mastered for an exam.', language)}
-                  </p>
-                </div>
+              <div className="reader-completion flex flex-wrap items-center justify-end gap-2 rounded-lg border border-indigo-100 bg-indigo-50/45 px-3 py-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {activeRecordCard.status === 'completed' ? (
                     <>
@@ -2668,7 +2660,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                     </>
                   ) : (
                     <>
-                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">{localizeText('返回分段目录', 'Back to sections', language)}</button>
+                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">{localizeText('返回目录', 'Back to sections', language)}</button>
                       <button type="button" disabled={isExplanationBusy} onClick={onCompleteRecord} className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-emerald-700">
                         <Check className="h-3.5 w-3.5" />{localizeText('我学完了', 'Mark as completed', language)}
                       </button>
