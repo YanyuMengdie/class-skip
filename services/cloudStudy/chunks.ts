@@ -48,6 +48,8 @@ export async function encodeFields(data: Record<string, unknown>) {
   return { fields, nodes };
 }
 export class CloudRecordError extends Error {
+  /** Only an explicit reader restore may display this backup, together with a conflict notice. */
+  recoveryData?: Record<string, unknown>;
   constructor(public readonly code: 'incomplete' | 'conflict' | 'local-backup', message: string) { super(message); }
 }
 export function validateManifest(raw: unknown): Manifest {

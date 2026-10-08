@@ -62,6 +62,9 @@ interface HeaderProps {
   user: User | null;
   localWorkspace?: boolean;
   saveError?: string;
+  onRetrySave?: () => void;
+  onSaveConflictCopy?: () => void;
+  saveRecoveryBusy?: boolean;
   onLogin: () => void;
   onLogout: () => void;
   isSyncing: boolean;
@@ -159,6 +162,9 @@ export const Header: React.FC<HeaderProps> = ({
   isSyncing,
   localWorkspace = false,
   saveError,
+  onRetrySave,
+  onSaveConflictCopy,
+  saveRecoveryBusy = false,
   onToggleSidebar,
   onOpenDashboard,
   isStudySessionActive = false,
@@ -454,7 +460,11 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {saveError && <p role="alert" className="px-4 py-2 text-sm bg-amber-50 text-amber-900">{saveError}</p>}
+      {saveError && <div role="alert" className="px-4 py-2 text-sm bg-amber-50 text-amber-900 flex flex-wrap items-center gap-3">
+        <span>{saveError}</span>
+        {onRetrySave && <button type="button" disabled={saveRecoveryBusy || isSyncing} onClick={onRetrySave} className="underline disabled:opacity-50">{language === 'en' ? 'Retry sync' : '重试同步'}</button>}
+        {onSaveConflictCopy && <button type="button" disabled={saveRecoveryBusy || isSyncing} onClick={onSaveConflictCopy} className="underline disabled:opacity-50">{language === 'en' ? 'Save a copy and continue' : '另存本页副本并继续'}</button>}
+      </div>}
 
       {/* 计时器弹层（Portal 到 body，避免被裁切或误关） */}
       {timerPopoverOpen && createPortal(

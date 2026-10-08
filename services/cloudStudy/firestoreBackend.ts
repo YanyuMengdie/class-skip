@@ -14,6 +14,11 @@ export function createFirestoreStudyRecord(db: Firestore, owner: string, session
       const snapshot = await getDocFromServer(at('state-v2'));
       return snapshot.exists() ? snapshot.data() : null;
     },
+    async readRevision(revision) {
+      assertOwner();
+      const snapshot = await getDocFromServer(at(`revision-${revision}`));
+      return snapshot.exists() ? snapshot.data() : null;
+    },
     async readLegacy() { assertOwner(); return readLegacy(); },
     async readChunk(hash) {
       assertOwner();
@@ -44,7 +49,7 @@ export function createFirestoreStudyRecord(db: Firestore, owner: string, session
         const current = await tx.get(at('state-v2'));
         if (!rootSnapshot.exists() || rootSnapshot.data().userId !== owner) throw new Error('资料已删除或当前账号无权保存。');
         const actualRevision = current.exists() ? validateManifest(current.data()).revision : null;
-        if (actualRevision !== expectedRevision) throw new CloudRecordError('conflict', '另一处刚保存了新进度。本机副本已保留，已暂停覆盖云端记录。');
+        if (actualRevision !== expectedRevision) throw new CloudRecordError('conflict', '云端版本在保存期间发生变化，正在重新比较内容。');
         tx.set(at(`revision-${manifest.revision}`), manifest);
         tx.set(at('state-v2'), manifest);
         if (Object.keys(meta).length) tx.update(root, meta);

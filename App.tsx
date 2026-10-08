@@ -1,3 +1,4 @@
+import { CloudRecordError } from '@/services/cloudStudy/chunks';
 import { studySaveFailure } from '@/services/cloudStudy/saveStatus';
 import { useBackgroundAudio } from '@/features/background-audio/useBackgroundAudio';
 import { useReviewCache } from '@/features/review/lib/useReviewCache';
@@ -80,7 +81,7 @@ import {
   type LectureTranscriptionOptions,
 } from '@/services/elevenLabsTranscriptionService';
 import { storageService } from '@/services/storageService';
-import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, deleteCloudSession, deleteSkimSessionFromCloud, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud, deleteTutorSessionFromCloud } from '@/services/firebase';
+import { auth, logoutUser, uploadPDF, createCloudSession, updateCloudSessionState, saveStudyRecoveryCopy, studyRecoverySnapshot, markStudyRecovered, deleteCloudSession, deleteSkimSessionFromCloud, fetchSessionDetails, isEmailLinkSignIn, completeEmailLinkSignIn, getUserSessions, listExamMaterialLinks, saveTutorSessionToCloud, getTutorSessionsFromCloud, deleteTutorSessionFromCloud } from '@/services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { LOCAL_WORKSPACE_USER, isLocalUser, isCloudUser, type WorkspaceUser as User } from '@/services/workspaceUser';
 import { Slide, ExplanationCache, ChatCache, ChatMessage, NotebookData, Note, AnnotationCache, SlideAnnotation, StudyMap, ViewMode, FileHistoryItem, SkimStage, QuizData, DocType, FilePersistedState, PersonaSettings, CloudSession, QuizRound, FlashCard, TrapItem, PageMarks, PageMark, StudyGuide, LectureRecord, LectureAudioRecording, LectureRealtimeLine, LectureRealtimeStatus, TurtleSoupState, PageCommentsCache, SlidePageComment, SavedArtifact, LSAPContentMap, LSAPState, LSAPBKTState, LSAPKnowledgeComponent, DailySegment, StudyFlowStep, ExamMaterialLink, AtomCoverageByKc, KcGlossaryEntry, TutorSession, SkimContentType, SkimAuxiliaryMaterial, SkimReadingRoute, SkimStudyStyle, SkimExplanationDepth, SkimExplanationStyle, SkimRecordDeck, SkimRecordCardState, LearnerProfileNotebook, ProfileNotebookUpdateSuggestion, StudyWitnessAwayEvent, StudyWitnessPageSegment, StudyWitnessPageSummary, StudyWitnessSession, LectureCaseLearningState } from '@/types';
@@ -777,6 +778,14 @@ const App: React.FC = () => {
   const [authLoading, setAuthLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState(false);
   const [storageError, setStorageError] = useState('');
+  const [storageConflict, setStorageConflict] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const recoveryCopy = useRef<{ source: string; owner: string; id: string } | null>(null);
+  const recoveryInFlight = useRef(false);
+  const reportStudySaveError = (error: unknown, local: boolean) => {
+    setStorageConflict(error instanceof CloudRecordError && error.code === 'conflict');
+    setStorageError(studySaveFailure(error, local));
+  };
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [studyCloudSessions, setStudyCloudSessions] = useState<CloudSession[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -1443,7 +1452,7 @@ const App: React.FC = () => {
   useEffect(() => {
     setCurrentSessionId(null); setTutorSessions([]); setActiveTutorIndex(0); setStudyCloudSessions([]);
     setQuickStudyId(null); setQuickStudyNotice(''); setQuickStudyAutoStart(null); setQuickStudyRecordPending(null); lastQuickStudyId.current = null;
-    setReviewPageOpen(false); setAppMode('study'); setStorageError('');
+    setReviewPageOpen(false); setAppMode('study'); setStorageError(''); setStorageConflict(false);
     setFileName(null); setFileHash(null); setPdfDataUrl(null); setSlides([]); setFullPdfText('');
     setShellMode('dashboard');
   }, [user.uid]);
@@ -1507,12 +1516,13 @@ const App: React.FC = () => {
     savesInFlight.current += 1;
     try {
     await saveCurrentStudyProgress();
-    await updateCloudSessionState(currentSessionId, {
+    const result = await updateCloudSessionState(currentSessionId, {
         // 完整阅读快照由分块存储发布；并发版本冲突时保留本机副本，不覆盖云端。
         // 「读旧不毁旧」复用本地同一套抑制：迁移未触碰前不写新字段、只续写旧扁平字段，不改写云端旧记录。
         ...(isUntouchedSkimMigration() ? {} : { skimSessions, activeSkimIndex }),
         explanations, chatCache, annotations, notebookData, pageComments, skimMessages, viewMode: viewMode === 'tutor' ? 'deep' : viewMode, studyMap: studyMap ? JSON.parse(JSON.stringify(studyMap)) : null, skimStage, quizData, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl: customAvatarUrl || undefined, customBackgroundUrl: customBackgroundUrl || undefined, personaSettings: personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap: lsapContentMap ?? undefined, lsapState: lsapState ?? undefined
       }, true);
+    if (result && result.reconciled) remoteRefreshPending.current = true;
     lastSyncedSave.current = saveWorkspaceProgress;
     } finally { savesInFlight.current -= 1; }
   }, [saveCurrentStudyProgress, isOpeningStudyFile, isProcessingFile, currentSessionId, user, explanations, chatCache, annotations, skimMessages, notebookData, pageComments, viewMode, studyMap, skimStage, quizData, skimSessions, activeSkimIndex, isUntouchedSkimMigration, docType, skimTopHeight, skimFocusMode, currentIndex, customAvatarUrl, customBackgroundUrl, personaSettings, reviewQuizRounds, reviewFlashCards, flashCardEstimate, pageMarks, studyGuide, savedArtifacts, lsapContentMap, lsapState]);
@@ -1539,7 +1549,7 @@ const App: React.FC = () => {
       setSkimSessions(sessions); setActiveSkimIndex(index); activeIdRef.current = sessions[index].id;
       migratedSkimBaselineRef.current = null;
     } else {
-      setSkimMessages(data.skimMessages ?? []); setStudyMap(data.studyMap ?? null); setSkimStage(data.skimStage ?? 'diagnosis'); setQuizData(data.quizData ?? null);
+      updateActiveSkimSession(session => ({ ...session, messages: data.skimMessages ?? [], studyMap: data.studyMap ?? null, stage: data.skimStage ?? 'diagnosis', quizData: data.quizData ?? null }));
     }
     setExplanations(data.explanations ?? {}); setChatCache(data.chatCache ?? {}); setAnnotations(data.annotations ?? {});
     if (data.notebookData !== undefined) setNotebookData(data.notebookData);
@@ -1551,7 +1561,7 @@ const App: React.FC = () => {
     if (data.personaSettings) setPersonaSettings(data.personaSettings);
     if (data.customAvatarUrl !== undefined) setCustomAvatarUrl(data.customAvatarUrl || null);
     if (data.customBackgroundUrl !== undefined) setCustomBackgroundUrl(data.customBackgroundUrl || null);
-    setStorageError(''); setIsSyncing(false);
+    setStorageError(''); setStorageConflict(false); setIsSyncing(false);
   };
   useEffect(() => {
     if (!currentSessionId || isLocalUser(user)) return;
@@ -1577,7 +1587,7 @@ const App: React.FC = () => {
           if (data) flushSync(() => applyRemoteStudy.current(data));
           if (latestWorkspaceSave.current === baseline) remoteRefreshPending.current = false;
         } catch (error) {
-          if (active) setStorageError(studySaveFailure(error, false));
+          if (active) reportStudySaveError(error, false);
           throw error;
         } finally {
           if (active) { readingRefreshingRef.current = false; setRefreshingReading(false); }
@@ -1588,7 +1598,7 @@ const App: React.FC = () => {
     refreshReadingRef.current = refresh;
     const refreshQuietly = () => { void refresh().catch(() => {}); };
     const changed = () => { remoteRefreshPending.current = true; refreshQuietly(); };
-    const stop = observeReading(id, changed, value => { if (active) setRemoteReadingBusy(value); }, error => { if (active) setStorageError(studySaveFailure(error, false)); });
+    const stop = observeReading(id, changed, value => { if (active) setRemoteReadingBusy(value); }, error => { if (active) reportStudySaveError(error, false); });
     const timer = window.setInterval(refreshQuietly, 5000);
     window.addEventListener('online', changed); document.addEventListener('visibilitychange', changed);
     return () => {
@@ -1611,11 +1621,11 @@ const App: React.FC = () => {
     setIsSyncing(true);
     const save = () => {
       void saveWorkspaceProgress().then(() => {
-        if (active) { setStorageError(''); setIsSyncing(false); }
+        if (active) { setStorageError(''); setStorageConflict(false); setIsSyncing(false); }
         void refreshReadingRef.current().catch(() => {});
       }).catch(error => {
         console.error('资料保存失败', error);
-        if (active) { setIsSyncing(false); setStorageError(studySaveFailure(error, isLocalUser(user))); }
+        if (active) { setIsSyncing(false); reportStudySaveError(error, isLocalUser(user)); }
       });
     };
     const timeout = window.setTimeout(save, 3000);
@@ -1918,7 +1928,7 @@ const App: React.FC = () => {
     const file = event.target.files?.[0]; if (!file) return; setIsProcessingFile(true);
     setIsOpeningStudyFile(true);
     setCurrentSessionId(null); // A failed new upload must never save into the previously open file.
-    setStorageError('');
+    setStorageError(''); setStorageConflict(false);
 
     try {
       const PROCESS_FILE_TIMEOUT_MS = 120000;
@@ -1941,23 +1951,30 @@ const App: React.FC = () => {
     }
   };
 
-  const handleRestoreCloudSession = async (session: CloudSession, options?: { initialPage?: number; quickStudy?: boolean; prepared?: CloudSession }) => {
+  const handleRestoreCloudSession = async (session: CloudSession, options?: { initialPage?: number; quickStudy?: boolean }) => {
     if (!user) return;
     if (quickStudyLock.current && !options?.quickStudy) return;
     if (!options?.quickStudy) { setQuickStudyId(null); setQuickStudyAutoStart(null); }
     const wasInDashboard = shellMode === 'dashboard';
     setCurrentSessionId(null);
-    setStorageError('');
+    setStorageError(''); setStorageConflict(false);
     setIsOpeningStudyFile(true);
     if (wasInDashboard) setShellMode('study');
     setIsProcessingFile(true);
     try {
       if (!session.fileUrl) throw new Error('File URL missing');
-      const heavyDetails = options?.prepared ?? await fetchSessionDetails(session.id);
+      let heavyDetails: Partial<CloudSession>;
+      try { heavyDetails = await fetchSessionDetails(session.id, true); }
+      catch (error) {
+        if (!(error instanceof CloudRecordError && error.code === 'conflict' && error.recoveryData)) throw error;
+        // Open the durable local backup with an explicit warning, never silently fall back or overwrite.
+        heavyDetails = error.recoveryData;
+        reportStudySaveError(error, isLocalUser(user));
+      }
       const file = await fetchFileFromUrl(session.fileUrl, session.fileName);
       if (options?.quickStudy && quickStudyOwner.current !== user.uid) return;
       const restored = { ...session, ...heavyDetails };
-      const fullData = isMobileReader && !options?.prepared ? prepareQuickStudy(restored, createEmptySkimSession()) : restored;
+      const fullData = isMobileReader || options?.quickStudy ? prepareQuickStudy(restored, createEmptySkimSession()) : restored;
       const restoreData: Partial<FilePersistedState> = {
         explanations: fullData.explanations,
         chatCache: fullData.chatCache,
@@ -2050,8 +2067,7 @@ const App: React.FC = () => {
       }
       const pool = alternatives.length ? alternatives : unfinished;
       const chosen = pool[Math.floor(Math.random() * pool.length)];
-      const prepared = prepareQuickStudy(chosen, createEmptySkimSession());
-      await handleRestoreCloudSession(chosen, { quickStudy: true, prepared });
+      await handleRestoreCloudSession(chosen, { quickStudy: true });
       if (quickStudyOwner.current === owner) lastQuickStudyId.current = chosen.id;
     } catch (error) {
       console.error('Quick study could not open a PDF:', error);
@@ -3840,6 +3856,48 @@ const App: React.FC = () => {
     );
   };
 
+  const retryStudySave = async () => {
+    if (recoveryInFlight.current || liveReadingContext.current.busy) return;
+    const source = liveReadingContext.current.id, owner = user.uid;
+    const stillCurrent = () => liveReadingContext.current.id === source && (isLocalUser(user) || auth.currentUser?.uid === owner);
+    recoveryInFlight.current = true; setRecoveryBusy(true); setIsSyncing(true);
+    try {
+      await latestWorkspaceSave.current();
+      if (!stillCurrent()) return;
+      await refreshReadingRef.current();
+      if (!stillCurrent()) return;
+      setStorageError(''); setStorageConflict(false);
+    } catch (error) { if (stillCurrent()) reportStudySaveError(error, isLocalUser(user)); }
+    finally { recoveryInFlight.current = false; setRecoveryBusy(false); setIsSyncing(false); }
+  };
+  const saveConflictingStudyCopy = async () => {
+    if (!currentSessionId || !isCloudUser(authUser) || recoveryInFlight.current || liveReadingContext.current.busy) return;
+    const source = currentSessionId, owner = user.uid;
+    recoveryInFlight.current = true; setRecoveryBusy(true);
+    try {
+      // Capture every current edit through the normal durable backup before making a copy.
+      try { await latestWorkspaceSave.current(); }
+      catch (error) { if (!(error instanceof CloudRecordError && error.code === 'conflict')) throw error; }
+      const data = await studyRecoverySnapshot(source);
+      if (!recoveryCopy.current || recoveryCopy.current.source !== source || recoveryCopy.current.owner !== owner)
+        recoveryCopy.current = { source, owner, id: `recovery-${crypto.randomUUID()}` };
+      const copyId = recoveryCopy.current.id;
+      await saveStudyRecoveryCopy(source, copyId, data);
+      if (auth.currentUser?.uid !== owner || liveReadingContext.current.id !== source) return;
+      await markStudyRecovered(source, copyId, data);
+      if (auth.currentUser?.uid !== owner || liveReadingContext.current.id !== source) return;
+      setCurrentSessionId(copyId);
+      setFileName(name => `${name}（本机进度副本）`);
+      setStorageError(''); setStorageConflict(false); setIsSyncing(false);
+      await reloadStudyCloudSessions();
+    } catch (error) {
+      if (auth.currentUser?.uid === owner && liveReadingContext.current.id === source) {
+        reportStudySaveError(error, false); setStorageConflict(true);
+      }
+    }
+    finally { recoveryInFlight.current = false; setRecoveryBusy(false); }
+  };
+
   const commonHeader = (
     <Header
       fileName={fileName}
@@ -3848,7 +3906,7 @@ const App: React.FC = () => {
       onUpload={handleFileUpload}
       onNext={handleNext}
       onPrev={handlePrev}
-      isProcessing={isProcessingFile}
+      isProcessing={isProcessingFile || recoveryBusy}
       studyTime={studyTime}
       isTimerRunning={isTimerRunning}
       onToggleTimer={handleToggleTimer}
@@ -3877,6 +3935,9 @@ const App: React.FC = () => {
       user={authUser}
       localWorkspace={isLocalUser(user)}
       saveError={storageError}
+      onRetrySave={() => void retryStudySave()}
+      onSaveConflictCopy={storageConflict && isCloudUser(authUser) ? () => void saveConflictingStudyCopy() : undefined}
+      saveRecoveryBusy={recoveryBusy || liveReadingContext.current.busy}
       onLogin={handleLogin}
       onLogout={handleLogout}
       isSyncing={isSyncing}
@@ -4172,13 +4233,13 @@ const App: React.FC = () => {
         : remoteReadingBusy ? uiText('这份资料已有生成请求尚未结束，请稍后再试。', 'A generation request for this material is still active. Please wait.')
         : uiText('正在同步云端领读记录…', 'Syncing cloud reading records…')}</div>}
       <div className="flex-1 min-h-0">
-        <fieldset disabled={remoteReadingBusy || refreshingReading} className="h-full min-w-0 border-0 m-0 p-0">
+        <fieldset disabled={remoteReadingBusy || refreshingReading || recoveryBusy} className="h-full min-w-0 border-0 m-0 p-0">
         {!(quickStudyBusy && isOpeningStudyFile) && <SkimPanel
           mobile={isMobileReader}
           pdfPanelPercent={readingPdfPercent}
           onPdfPanelPercentChange={isMobileReader ? undefined : setReadingPdfPercent}
           onOpenRecord={handleOpenSkimRecord}
-          externalBusy={remoteReadingBusy || refreshingReading}
+          externalBusy={remoteReadingBusy || refreshingReading || recoveryBusy}
           beforeReadingTurn={async () => {
             const baseline = remoteReadingVersion.current;
             await refreshReadingRef.current();
@@ -4189,7 +4250,7 @@ const App: React.FC = () => {
               readingGenerationGate.current = true;
               try {
                 try { await latestWorkspaceSave.current(); }
-                catch (error) { setStorageError(studySaveFailure(error, isLocalUser(user))); throw error; }
+                catch (error) { reportStudySaveError(error, isLocalUser(user)); throw error; }
                 if (liveReadingContext.current.id !== currentSessionId) throw new ReadingSyncError('scope-changed');
                 const lease = await acquireReadingLease(currentSessionId);
                 return {
@@ -4202,7 +4263,7 @@ const App: React.FC = () => {
             }
             return { assert: async () => {}, release: async () => {} };
           }}
-          persistReadingTurn={async () => { await latestWorkspaceSave.current(); setIsSyncing(false); setStorageError(''); }}
+          persistReadingTurn={async () => { await latestWorkspaceSave.current(); setIsSyncing(false); setStorageError(''); setStorageConflict(false); }}
           autoStartRequest={!isOpeningStudyFile && quickStudyId === currentSessionId ? quickStudyAutoStart : null}
           onAutoStartConsumed={() => setQuickStudyAutoStart(null)}
           readingSessionKey={JSON.stringify([user.uid, fileHash, currentSessionId, activeSkim.id, activeRecordCard?.id ?? 'continuous'])}
@@ -4457,6 +4518,10 @@ const App: React.FC = () => {
           onBack={() => { void saveCurrentStudyProgress(); setShellMode('dashboard'); }} onFull={() => void changeReaderDevice()}
           status={!online ? uiText('离线 · 待同步', 'Offline · sync pending') : storageError || (isSyncing ? uiText('待同步…', 'Sync pending…') : isLocalUser(user) ? uiText('本机记录', 'On this device') : uiText('已同步', 'Synced'))}
           file={openedPdfFile.current} sourcePage={mobileSourcePage} onSourcePage={page => setMobileSourcePage(Math.max(1, Math.min(slides.length, page)))} onCloseSource={() => setMobileSourcePage(null)}>
+          {storageError && <div role="alert" className="px-4 py-2 text-sm bg-amber-50 text-amber-900 flex flex-wrap gap-2">
+            <button disabled={recoveryBusy || liveReadingContext.current.busy} onClick={() => void retryStudySave()} className="underline">{uiText('重试同步', 'Retry sync')}</button>
+            {storageConflict && isCloudUser(authUser) && <button disabled={recoveryBusy || liveReadingContext.current.busy} onClick={() => void saveConflictingStudyCopy()} className="underline">{uiText('另存本页副本并继续', 'Save a copy and continue')}</button>}
+          </div>}
           {studyRightPanel}
         </MobileReader>}
     </>;

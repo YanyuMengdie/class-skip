@@ -1,3 +1,5 @@
+import { readingCloudPatch } from './cloudStudy/readingPatch';
+import { saveRecoveryCopy } from './cloudStudy/recovery';
 import { createFirestoreStudyRecord } from './cloudStudy/firestoreBackend';
 import type { CloudStudyRecord } from './cloudStudy/recordStore';
 import { isLocalUser, type WorkspaceUser as User } from './workspaceUser';
@@ -335,10 +337,11 @@ const cloudStudyRecord = (sessionId: string): CloudStudyRecord => {
     return record;
 };
 
-export const fetchSessionDetails = async (sessionId: string): Promise<Partial<CloudSession>> => {
+export const fetchSessionDetails = async (sessionId: string, activate = false): Promise<Partial<CloudSession>> => {
     if (isLocalId(sessionId)) return (await localGet<CloudSession>('sessions', sessionId)) ?? {};
     // New manifests are authoritative; missing/corrupt chunks fail closed, never revert to stale legacy data.
-    return cloudStudyRecord(sessionId).read();
+    const record = cloudStudyRecord(sessionId);
+    return activate ? record.read() : record.inspect();
 };
 
 export const currentStudyRevision = (sessionId: string) => isLocalId(sessionId) ? null : cloudStudyRecord(sessionId).revision;
@@ -373,13 +376,40 @@ export const writeSkimSessions = async (sessionId: string, skimSessions: Persist
 export const updateCloudSessionState = async (sessionId: string, data: Partial<CloudSession>, strict = false) => {
     if (isLocalId(sessionId)) return localPatch('sessions', sessionId, Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined)));
     try {
-        const { metaUpdates, heavyUpdates } = splitUpdateData(data);
+        const { metaUpdates, heavyUpdates } = splitUpdateData(readingCloudPatch(data));
         if (Object.keys(metaUpdates).length) metaUpdates.updatedAt = Date.now();
-        await cloudStudyRecord(sessionId).save(heavyUpdates, metaUpdates);
+        return await cloudStudyRecord(sessionId).save(heavyUpdates, metaUpdates);
     } catch (error) {
         console.error('[Sync] Update Failed:', error);
         if (strict) throw error;
     }
+};
+
+export const studyRecoverySnapshot = (sessionId: string) => cloudStudyRecord(sessionId).localSnapshot();
+export const markStudyRecovered = (sessionId: string, copyId: string, data: Record<string, unknown>) => cloudStudyRecord(sessionId).markRecovered(copyId, data);
+
+/** Explicit recovery creates a separate library entry; the conflicting original stays untouched. */
+export const saveStudyRecoveryCopy = async (sourceId: string, copyId: string, data: Partial<CloudSession>): Promise<void> => {
+    if (isLocalId(sourceId)) throw new Error('本机资料不需要创建云端进度副本。');
+    await saveRecoveryCopy({
+        owner: () => auth.currentUser?.uid,
+        source: async id => {
+            const source = await getDocFromServer(doc(db, 'sessions', id));
+            return source.exists() ? source.data() as { userId: string; fileName: string; fileUrl: string; parentId?: string | null } : null;
+        },
+        create: async (id, origin, original) => {
+            await setDoc(doc(db, 'sessions', id), {
+                userId: original.userId, fileName: `${original.fileName}（本机进度副本）`, fileUrl: original.fileUrl,
+                parentId: original.parentId ?? null, type: 'file', recoverySourceId: origin,
+                createdAt: Timestamp.now(), updatedAt: Timestamp.now(), sortIndex: Date.now(),
+            });
+            const key = `${original.userId}:${id}`;
+            if (!studyRecords.has(key)) studyRecords.set(key, createFirestoreStudyRecord(db, original.userId, id, () => {
+                if (auth.currentUser?.uid !== original.userId) throw new Error('账号已切换，副本保存已停止。');
+            }, async () => ({})));
+        },
+        save: async (id, snapshot) => { await updateCloudSessionState(id, snapshot, true); },
+    }, sourceId, copyId, data);
 };
 
 /** Explicit deletion removes a tab from the current snapshot, preserving all other fields and legacy backups. */

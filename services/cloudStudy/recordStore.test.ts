@@ -12,6 +12,7 @@ function fixture(legacy: Record<string, unknown> = {}) {
   let fail: 'chunks' | 'commit' | 'backup' | 'head' | 'after-commit' | undefined;
   const backend: RecordBackend = {
     async readHead() { if (fail === 'head') throw new Error('offline'); return structuredClone(head); },
+    async readRevision(revision) { return structuredClone(revisions.find(item => item.revision === revision) ?? null); },
     async readLegacy() { return structuredClone(legacy); },
     async readChunk(hash) { return structuredClone(chunks.get(hash)); },
     async writeChunks(nodes) {
@@ -156,6 +157,114 @@ describe('chunked study records', () => {
     await expect(record.save({ text: 'offline notes' })).rejects.toThrow();
     expect(await new CloudStudyRecord(f.backend).read()).toEqual({ text: 'offline notes' });
     f.drafts.clear(); await expect(new CloudStudyRecord(f.backend).read()).rejects.toThrow('offline');
+  });
+
+  it('reconciles an unrelated cloud update instead of blocking a new reading answer', async () => {
+    const old = { id: 'reading', messages: [{ id: 'm1', text: 'original' }] };
+    const f = fixture({ currentIndex: 0, skimSessions: [old] });
+    const page = new CloudStudyRecord(f.backend), background = new CloudStudyRecord(f.backend);
+    await page.read(); await background.read();
+    await background.save({ currentIndex: 2 });
+    await page.save({ skimSessions: [{ ...old, messages: [...old.messages, { id: 'm2', text: 'my answer' }] }] });
+    expect(await new CloudStudyRecord(f.backend).read()).toEqual({ currentIndex: 2, skimSessions: [{ ...old, messages: [...old.messages, { id: 'm2', text: 'my answer' }] }] });
+  });
+
+  it('accepts a newer revision containing exactly the same content', async () => {
+    const f = fixture({ notes: 'original' });
+    const page = new CloudStudyRecord(f.backend), background = new CloudStudyRecord(f.backend);
+    await page.read(); await background.read();
+    await background.save({ notes: 'original' }, { updatedAt: 1 });
+    await page.save({ notes: 'original' });
+    expect(await new CloudStudyRecord(f.backend).read()).toEqual({ notes: 'original' });
+  });
+
+  it('keeps merged cloud changes on later full-page saves before the UI has received them', async () => {
+    const f = fixture({ explanations: { one: 'old' }, notebookData: { notes: [] } });
+    const page = new CloudStudyRecord(f.backend), background = new CloudStudyRecord(f.backend);
+    await page.read(); await background.read();
+    await background.save({ explanations: { one: 'old', two: 'remote lecture' } });
+    expect(await page.save({ explanations: { one: 'old' }, notebookData: { notes: [{ id: 'n1', text: 'my note' }] } })).toEqual({ reconciled: true });
+    await page.save({ explanations: { one: 'old' }, notebookData: { notes: [{ id: 'n1', text: 'edited note' }] } });
+    expect(await page.refreshIfClean(() => false)).toBeNull();
+    const received = await page.refreshIfClean(() => true);
+    expect(received).toEqual({ explanations: { one: 'old', two: 'remote lecture' }, notebookData: { notes: [{ id: 'n1', text: 'edited note' }] } });
+    expect(await page.refreshIfClean(() => true)).toBeNull();
+  });
+
+  it('retries a publish race and retains both non-overlapping updates', async () => {
+    const f = fixture({ explanations: {} });
+    const other = new CloudStudyRecord(f.backend); await other.read();
+    const backend = { ...f.backend, commit: async (...args: Parameters<RecordBackend['commit']>) => {
+      backend.commit = f.backend.commit;
+      await other.save({ explanations: { two: 'remote' } });
+      return f.backend.commit(...args);
+    } };
+    const page = new CloudStudyRecord(backend); await page.read();
+    await page.save({ explanations: { one: 'local' } });
+    expect(await new CloudStudyRecord(f.backend).read()).toEqual({ explanations: { one: 'local', two: 'remote' } });
+  });
+
+  it('recovers an older pending backup against compatible newer cloud content, including legacy drafts', async () => {
+    const f = fixture({ notes: 'old', explanations: {} });
+    const page = new CloudStudyRecord(f.backend), other = new CloudStudyRecord(f.backend);
+    await page.save({ currentIndex: 1 }); await other.read();
+    f.setFailure('chunks'); await expect(page.save({ notes: 'local note' })).rejects.toThrow(); f.setFailure(undefined);
+    for (const draft of f.drafts.values()) delete draft.baseData; // previous app versions
+    await other.save({ explanations: { two: 'remote' } });
+    const resumed = new CloudStudyRecord(f.backend);
+    expect(await resumed.read()).toEqual({ notes: 'local note', explanations: { two: 'remote' }, currentIndex: 1 });
+    await resumed.save({ currentIndex: 2 });
+    expect([...f.drafts.values()].some(draft => draft.pending)).toBe(false);
+    expect(await new CloudStudyRecord(f.backend).read()).toEqual({ notes: 'local note', explanations: { two: 'remote' }, currentIndex: 2 });
+  });
+
+  it('can continue after a lost acknowledgement of a reconciled commit', async () => {
+    const f = fixture({ notes: 'old', explanations: {} });
+    const page = new CloudStudyRecord(f.backend), other = new CloudStudyRecord(f.backend);
+    await page.read(); await other.read(); await other.save({ explanations: { two: 'remote' } });
+    f.setFailure('after-commit'); await expect(page.save({ notes: 'first' })).rejects.toThrow(); f.setFailure(undefined);
+    await page.save({ notes: 'second' });
+    expect(await new CloudStudyRecord(f.backend).read()).toEqual({ notes: 'second', explanations: { two: 'remote' } });
+  });
+
+  it('keeps a background library lookup from replacing the open reader baseline', async () => {
+    const f = fixture({ explanations: { one: 'old' }, currentIndex: 0 });
+    const page = new CloudStudyRecord(f.backend), other = new CloudStudyRecord(f.backend);
+    await page.read(); await other.read();
+    await other.save({ explanations: { one: 'remote edit' } });
+    expect((await page.inspect()).explanations).toEqual({ one: 'remote edit' });
+    await page.save({ explanations: { one: 'old' }, currentIndex: 1 });
+    expect(await new CloudStudyRecord(f.backend).read()).toEqual({ explanations: { one: 'remote edit' }, currentIndex: 1 });
+  });
+
+  it('archives a recovered local draft only after its exact snapshot has been copied', async () => {
+    const f = fixture({ notes: 'old' });
+    const page = new CloudStudyRecord(f.backend), other = new CloudStudyRecord(f.backend);
+    await page.read(); await other.read(); await other.save({ notes: 'remote' });
+    await expect(page.save({ notes: 'local' })).rejects.toMatchObject({ code: 'conflict' });
+    await page.markRecovered('copy', { notes: 'wrong snapshot' });
+    expect([...f.drafts.values()].some(d => d.pending)).toBe(true);
+    const saved = await page.localSnapshot();
+    await page.markRecovered('copy', saved);
+    expect([...f.drafts.values()].find(d => d.recoveredCopyId === 'copy')?.data).toEqual({ notes: 'local' });
+    expect([...f.drafts.values()].some(d => d.pending)).toBe(false);
+    expect(await new CloudStudyRecord(f.backend).read()).toEqual({ notes: 'remote' });
+  });
+
+  it('exposes a conflicting reopen backup explicitly so the reader can recover it without overwriting cloud', async () => {
+    const f = fixture({ notes: 'old' });
+    const page = new CloudStudyRecord(f.backend), other = new CloudStudyRecord(f.backend);
+    await page.read(); await other.read(); await other.save({ notes: 'remote' });
+    await expect(page.save({ notes: 'local' })).rejects.toMatchObject({ code: 'conflict' });
+    const restored = new CloudStudyRecord(f.backend);
+    await expect(restored.read()).rejects.toMatchObject({ code: 'conflict', recoveryData: { notes: 'local' } });
+    expect(await restored.localSnapshot()).toEqual({ notes: 'local' });
+    await expect(restored.save({ currentIndex: 3 })).rejects.toMatchObject({ code: 'conflict' });
+    const current = await decodeFields(f.head!.fields, hash => Promise.resolve(f.chunks.get(hash)));
+    expect(current).toEqual({ notes: 'remote' });
+    await restored.markRecovered('copy', await restored.localSnapshot());
+    expect([...f.drafts.values()].some(d => d.pending)).toBe(false);
+    expect(await new CloudStudyRecord(f.backend).read()).toEqual({ notes: 'remote' });
   });
 
   it('never displays synced after an error and distinguishes size, conflict and permission failures', () => {
