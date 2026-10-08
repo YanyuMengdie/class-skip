@@ -2643,7 +2643,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
   const recordCompletion = (
     <>{activeRecordCard && (
-              <div className="reader-completion flex flex-wrap items-center justify-end gap-2 rounded-lg border border-indigo-100 bg-indigo-50/45 px-3 py-2">
+              <div className="reader-completion flex flex-wrap items-center justify-end gap-2 px-3 py-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {activeRecordCard.status === 'completed' ? (
                     <>
