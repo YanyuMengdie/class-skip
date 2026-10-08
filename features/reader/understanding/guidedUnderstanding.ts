@@ -1,5 +1,18 @@
 import type { UnderstandingAction, UnderstandingSession } from './readingUnderstanding';
-import type { UnderstandingTopic } from './understandingPlan';
+import type { UnderstandingPlan, UnderstandingTopic } from './understandingPlan';
+
+/** Replacing an old heading-based picker must not discard its saved topic conversations. */
+export function saveUnderstandingPlan(session: UnderstandingSession, plan: UnderstandingPlan): UnderstandingSession {
+  const archivedSessions = [...(session.archivedSessions ?? [])];
+  const seen = new Set(archivedSessions.map(item => item.id));
+  session.plan?.topics.forEach(topic => {
+    if (topic.conversation && !seen.has(topic.conversation.id)) {
+      archivedSessions.push(topic.conversation);
+      seen.add(topic.conversation.id);
+    }
+  });
+  return { ...session, plan, ...(archivedSessions.length ? { archivedSessions } : {}) };
+}
 
 export function createGuidedUnderstanding(parent: UnderstandingSession, topic?: UnderstandingTopic, question = ''): UnderstandingSession {
   return {
@@ -7,6 +20,7 @@ export function createGuidedUnderstanding(parent: UnderstandingSession, topic?: 
     teachingFlow: 'case-reasoning-v2', entryPath: topic || question.trim() ? 'specific' : 'whole',
     topic: topic?.title || '从刚才这一段开始',
     sourceText: topic?.summary || parent.sourceText,
+    ...(topic?.supportingText ? { supportingText: topic.supportingText } : {}),
     pageRefs: [...(topic?.pageRefs ?? parent.pageRefs)],
     ...(question.trim() ? { focusQuestion: question.trim() } : {}),
     turns: [], mode: 'acquisition', phase: 'question', createdAt: Date.now(),
@@ -20,7 +34,7 @@ export function savedUnderstandingDiscussions(session: UnderstandingSession): Un
   const visit = (item: UnderstandingSession) => {
     if (seen.has(item.id)) return;
     seen.add(item.id);
-    if (item.turns.length) result.push(item);
+    if (item.turns.length || item.coverage) result.push(item);
     item.plan?.topics.forEach(topic => { if (topic.conversation) visit(topic.conversation); });
     item.guidedDiscussions?.forEach(visit);
     item.archivedSessions?.forEach(visit);

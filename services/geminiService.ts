@@ -4,6 +4,7 @@ import { assertLectureCaseGenerationEnabled } from '@/features/reader/skim/lectu
 import { READING_MEDIA_INSTRUCTION, readingMediaSchema, parseReadingMedia } from '@/features/reader/skim/readingAids';
 import { STUDY_TERMS_INSTRUCTION, studyTermsSchema } from '@/features/reluctant/studyTerms';
 import { prepareUnderstandingSource } from '@/features/reader/understanding/understandingSource';
+import { understandingBlocks, TOPIC_SELECTION_RULES, normalizeTopicSelection } from '@/features/reader/understanding/topicSelection';
 
 import { Type, type GenerateContentParameters } from "@google/genai";
 import { generateReadingContent } from "@/services/readingAstraClient";
@@ -5632,6 +5633,32 @@ ${source}
         config: { temperature: 0.15 },
     }, { outputLanguage: 'zh-CN' });
     return (response.text || '').trim();
+};
+
+/** One cached semantic selection per clicked message; never reads chat history or the full PDF. */
+export const generateUnderstandingTopics = async (input: { sourceText: string; allowedPages: number[]; abortSignal?: AbortSignal }) => {
+  if (!input.sourceText.trim() || input.sourceText.length > 120_000) throw new Error('这条讲解暂时无法整理，请选择具体段落。');
+  const response = await readingAI.models.generateContent({
+    model: 'gemini-3.8-flash',
+    contents: [{ role: 'user', parts: [{ text: JSON.stringify({ blocks: understandingBlocks(input.sourceText) }) }] }],
+    config: {
+      systemInstruction: TOPIC_SELECTION_RULES,
+      ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          groups: { type: Type.ARRAY, items: { type: Type.OBJECT, properties: {
+            title: { type: Type.STRING }, knowledgeIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+            supportIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+          }, required: ['title', 'knowledgeIds', 'supportIds'] } },
+          excludedIds: { type: Type.ARRAY, items: { type: Type.STRING } },
+        }, required: ['groups', 'excludedIds'],
+      },
+    },
+  });
+  input.abortSignal?.throwIfAborted();
+  return normalizeTopicSelection(parseCaseJson<unknown>(response.text), input.sourceText, input.allowedPages);
 };
 
 /** Optional, message-scoped understanding conversation; never advances the reading route. */

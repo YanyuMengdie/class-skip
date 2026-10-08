@@ -32,6 +32,14 @@ export interface UnderstandingResult {
 }
 
 export interface UnderstandingSession {
+  /** A whole-message round owns independent, narrowly scoped conversations. */
+  coverage?: {
+    version: 1;
+    activePartId: string | null;
+    finished?: boolean;
+    parts: { id: string; title: string; conversation: UnderstandingSession }[];
+  };
+  partScope?: { index: number; total: number; title: string };
   teachingFlow?: 'guided-step-v1' | 'case-reasoning-v2';
   entryPath?: 'whole' | 'specific';
   focusQuestion?: string;
@@ -41,6 +49,8 @@ export interface UnderstandingSession {
   id: string;
   topic: string;
   sourceText: string;
+  /** Attached examples/background cannot add new topics to the checked scope. */
+  supportingText?: string;
   pageRefs: number[];
   turns: UnderstandingTurn[];
   mode: UnderstandingMode;
@@ -132,11 +142,13 @@ export function buildUnderstandingPrompt(input: {
     topic: session.topic,
     selectedFocus: session.focus,
     entryPath: session.entryPath,
+    currentPart: session.partScope,
     focusQuestion: session.focusQuestion,
     mode: session.mode,
     phase: session.phase,
     allowedPageRefs: [...new Set(session.pageRefs.filter(validPage))],
     sourceText: session.sourceText,
+    supportingText: session.supportingText,
     turns: session.turns.map(({ role, text, action: turnAction, phase, question }) => ({ role, text, action: turnAction, phase, question })),
     reflection: session.reflection,
     reasoning: session.reasoning,
@@ -149,12 +161,14 @@ export function buildUnderstandingPrompt(input: {
 【本次安排】
 ${session.scopePolicy ? `【严格的消息与知识点边界】
 sourceText 是用户点击的那条领读消息中选中的具体段落，也是本轮唯一教学范围。selectedFocus.summary 不得扩展它。提供的 PDF 页仅用于核对，不意味着页内其余内容也是本轮知识点。
+supportingText 仅是帮助理解 sourceText 的例子、类比或必要背景；只使用与当前关系有关的部分，不根据支持文字创建额外知识点或检查其中的其他关系。
 当前选择是一组完整内容：同一主要标题下的小点、例子和引文共同解释这一个问题。先串清这一组的关系，不把每个编号拆成新的课程或逐项考问；用户追问某一句时再局部展开。不要自动进入其他未选标题。
 只讲这段已出现的概念和关系。不要从整篇文章、整份讲义或整个 Module 引入其他主张、结论或后文案例。必要基础最多简短说明；需要展开新知识点时先询问用户，不自行扩展。
 此前回合仅用于接续当前知识点的问答，不定义教学范围；若此前模型已经讲偏，忽略越界内容并回到 sourceText，不沿着错误范围继续。不得因为历史回合提过某内容，就把它当作本次已选知识点。
 用户选“整体没懂”仅指点击的那条消息；3 分钟、5 分钟、慢慢想只改变当前知识点的解释深度，不扩大内容范围。
 如果没有核对原文，明确说当前依据领读段落解释、原文尚未核对，不把领读内容当作已经证实的原文。不猜页码。不因背景知识相关就引用后文。` : ''}
 时间预算：${minutes} 分钟。这是用户可调整的覆盖/深度偏好，不是计时完成判据。预算较短时简洁解释当前选中的知识点，不擅自换题或跳过必要前提，不为赶时间宣称掌握。
+${session.partScope ? `当前是第 ${session.partScope.index}/${session.partScope.total} 部分：「${session.partScope.title}」。只核对当前 sourceText 的主要知识关系；complete 仅代表当前部分有真实回答支持，不能宣称整条讲解已理解。程序会在用户选择继续后启动下一部分；不要替程序出下一部分的问题。` : ''}
 ${session.focus ? `本次范围：${session.focus.scopeTitle}。当前只处理用户选定的「${session.focus.title}」。${session.scopePolicy ? 'selectedFocus.summary 与 sourceText 共同限定所选段落；有原文时用其核对，无原文时说明核对缺口。' : 'selectedFocus.summary 用于确定问题，sourceText 是背景，事实必须核对原文。'}
 ${session.focus.path === 'essentials' ? '用户表示整体没懂：本轮是重点入门，先补必要基础、核心关系和一个具体例子；“重点”只指理解主线，不是考试预测。' : '用户选择了具体疑惑：围绕这一点解释，其他内容只作必要背景。'}
 这一轮共选 ${session.focus.roundTopicCount ?? 1} 个知识点，${minutes} 分钟是整轮节奏参考，每个知识点只占其中一部分；慢慢想可以更深入。用户追问时按需要继续，不用时间强行结束。

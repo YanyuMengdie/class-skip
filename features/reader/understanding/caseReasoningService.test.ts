@@ -19,3 +19,22 @@ it('requests the case contract through the actual service and carries the last q
  expect(JSON.stringify(request)).not.toContain('ENTIRE_DOCUMENT_MUST_NOT_BE_SENT');
  expect(JSON.stringify(request)).not.toContain('绝对不要在开场给用户出题');
 });
+
+it('organizes only the clicked message into exact knowledge and support excerpts through the service', async () => {
+ const { generateUnderstandingTopics } = await import('@/services/geminiService');
+ const source = '## 模块导读\n欢迎来到本模块。\n\n## 多元回归\n控制重叠信息，第 2 页。\n\n## 类比\n跟班和真凶。';
+ generate.mockClear();
+ generate.mockResolvedValue({ text: JSON.stringify({ groups: [{ title: '多元回归', knowledgeIds: ['block-1'], supportIds: ['block-2'] }], excludedIds: ['block-0'] }) });
+ const plan = await generateUnderstandingTopics({ sourceText: source, allowedPages: [1, 2, 3] });
+ const request = generate.mock.calls[0][0];
+ expect(JSON.stringify(request.contents)).toContain('控制重叠信息');
+ expect(JSON.stringify(request)).not.toContain('ENTIRE_DOCUMENT_MUST_NOT_BE_SENT');
+ expect(JSON.stringify(request.config.systemInstruction)).toContain('不能只按标题筛选');
+ expect(request.config.responseSchema.required).toContain('excludedIds');
+ expect(plan.topics).toHaveLength(1);
+ expect(plan.topics[0].pageRefs).toEqual([2]);
+ expect(plan.topics[0].summary).not.toContain('欢迎');
+ expect(plan.topics[0].supportingText).toContain('跟班');
+ generate.mockResolvedValue({ text: JSON.stringify({ groups: [{ title: '另一个知识', knowledgeIds: ['invented'], supportIds: [] }], excludedIds: ['block-0'] }) });
+ await expect(generateUnderstandingTopics({ sourceText: source, allowedPages: [1, 2, 3] })).rejects.toThrow('整理未完成');
+});

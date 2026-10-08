@@ -3,7 +3,7 @@ import { useSupportSurface } from '@/features/studySupport/StudySupportContext';
 import { useStudyDraft } from '@/features/studySupport/useStudyDraft';
 import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
 import React, { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
+import ReactMarkdown, { ExplanationText } from '@/shared/i18n/ExplanationMarkdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
@@ -31,6 +31,11 @@ export interface UnderstandingConversationProps {
   onBusyChange: (busy: boolean) => void;
   onJumpToPage?: (page: number) => void;
   generateTurn?: typeof generateReadingUnderstandingTurn;
+  progressLabel?: string;
+  nextPartTitle?: string;
+  onNextPart?: () => void;
+  onDeferPart?: () => void;
+  onViewRound?: () => void;
 }
 
 const ACTION_LABELS: Partial<Record<UnderstandingAction, string>> = {
@@ -39,7 +44,7 @@ const ACTION_LABELS: Partial<Record<UnderstandingAction, string>> = {
 
 export const UnderstandingConversation: React.FC<UnderstandingConversationProps> = ({
   session, minutes, autoStart = false, expanded = false, onToggleExpanded, needsReview = false, onMinutesChange, onFinish, onReview, documentContent, pageTexts = [], onUpdate, onClose, onBusyChange, onJumpToPage,
-  generateTurn = generateReadingUnderstandingTurn,
+  generateTurn = generateReadingUnderstandingTurn, progressLabel, nextPartTitle, onNextPart, onDeferPart, onViewRound,
 }) => {
   const { text: t } = useAppLanguage();
   const guided = isCaseUnderstanding(session);
@@ -133,7 +138,8 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
         ...(result.reasoning?.question ? { question: result.reasoning.question } : {}),
       };
       onUpdate(previous => ({
-        ...previous, topic: previous.focus?.title || result.topic, mode: result.mode, phase: result.phase,
+        ...previous, topic: previous.partScope?.title || previous.focus?.title || result.topic, mode: result.mode, phase: result.phase,
+        ...(guided && result.phase === 'complete' ? { reviewRequested: false } : {}),
         explained: Boolean(previous.explained) || (result.phase === 'explanation' && ['start', 'explain', 'foundation'].includes(action)),
         turns: [...previous.turns, reply],
         ...(result.reflection ? { reflection: result.reflection } : {}),
@@ -191,8 +197,8 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
           aria-label={guided ? t('回到刚才的位置', 'Back to reading') : t('返回知识点清单', 'Back to topics')}
           title={guided ? t('回到刚才的位置', 'Back to reading') : t('返回知识点清单', 'Back to topics')}><ArrowLeft size={16} /></button>
         <div className="understanding-compact-topic">
-          <span>{localizeUiText("陪我想通这个")}</span>
-          <h2>{session.topic || localizeUiText("从刚才这一段开始")}</h2>
+          <span>{localizeUiText("陪我想通这个")}{progressLabel && <> · {progressLabel}</>}</span>
+          <h2><ExplanationText>{session.topic || localizeUiText("从刚才这一段开始")}</ExplanationText></h2>
           {session.scopePolicy && !session.pageRefs.length && <small role="status">{t('对应页码待定位 · 原文尚未核对', 'Source pages not located · Original not verified')}</small>}
         </div>
         <div className="understanding-compact-tools">
@@ -205,6 +211,8 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
         </div>
         {menu && <div className="understanding-context-popover" aria-label={t('范围与更多操作', 'Scope and more options')}>
           {menu === 'tools' ? <>
+            {onViewRound && <button type="button" disabled={busy} onClick={onViewRound}>{t('查看本轮进度 / 暂停', 'View round progress / pause')}</button>}
+            {onDeferPart && session.phase !== 'complete' && <button type="button" disabled={busy} onClick={onDeferPart}>{t('这一部分先放下，接着下一步', 'Set this part aside and continue')}</button>}
             <button type="button" onClick={() => setMenu('scope')}><BookOpen size={15} />{localizeUiText("这次围绕哪段内容")}</button>
             {onJumpToPage && session.pageRefs.length > 0 && <button type="button" onClick={() => setMenu('sources')}><BookOpen size={15} />{t('查看原文', 'View source')} · {session.pageRefs.length === 1 ? session.pageRefs[0] : t(`${session.pageRefs.length} 页`, `${session.pageRefs.length} pages`)}</button>}
             <button type="button" disabled={busy} aria-pressed={needsReview} onClick={() => { onReview(!needsReview); setMenu(null); }}><Bookmark size={15} />{needsReview ? t('已留待回顾 · 我现在懂了', 'Saved for later · I understand now') : t('还没懂，先记下', 'Still unclear — save for later')}</button>
@@ -219,6 +227,7 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
             {menu === 'scope' ? <>
               <h3>{localizeUiText("这次围绕哪段内容")}</h3>
               <p className="understanding-context-source" data-preserve-language="true">{session.sourceText}</p>
+              {session.supportingText && <details><summary>{t('对应的例子与必要背景', 'Related examples and background')}</summary><p className="understanding-context-source" data-preserve-language="true">{session.supportingText}</p></details>}
               {guided ? <p>{t('从一个具体情境开始，用你的判断找到卡住的那一步。', 'Use a concrete situation and your reasoning to find where you get stuck.')}</p> : session.scopePolicy && <p>{t('仅讲解所选知识点；改变节奏不会扩大范围。', 'Only the selected topic; pace does not expand its scope.')}</p>}
               {session.scopePolicy && !session.pageRefs.length && <p role="status">{t('当前依据领读段落解释，原文尚未核对。', 'This explanation uses the reading excerpt and has not been checked against the original.')}</p>}
             </> : <>
@@ -236,6 +245,7 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
             {turn.role === 'model' && turn.question && <div className="understanding-reasoning-question"><ReactMarkdown userRequest={previousLearnerRequest(session.turns, turnIndex)} remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{turn.question}</ReactMarkdown></div>}
             {turnIndex === lastModelIndex && <div className="understanding-question-help">
               {guided && session.phase === 'explanation' && <button type="button" disabled={busy} onClick={() => void run('reason')}>{t('继续推理', 'Continue reasoning')}</button>}
+              {onDeferPart && session.phase === 'explanation' && <button type="button" disabled={busy} onClick={onDeferPart}>{t('先保留疑问，接着下一步', 'Save the uncertainty and continue')}</button>}
               <button type="button" disabled={busy} onClick={() => void run('hint')}><Lightbulb size={14} />{actionLabel('hint')}</button>
               <div className="understanding-help-anchor" ref={helpRef}>
                 <button ref={helpButtonRef} type="button" disabled={busy} aria-expanded={helpOpen} onClick={() => { setMenu(null); setHelpOpen(value => !value); }}>{t('更多帮助', 'More help')}<ChevronDown size={13} /></button>
@@ -252,9 +262,11 @@ export const UnderstandingConversation: React.FC<UnderstandingConversationProps>
         {interrupted && <p className="understanding-status">{localizeUiText("已停止。")}<button type="button" onClick={() => retry && void run(retry.action, retry.text, retry.before)}>{localizeUiText("接着这一轮")}</button></p>}
         {!hasReply && !busy && !retry && <div className="understanding-question-help"><button type="button" onClick={() => void run('start')}>{t('开始一起推理', 'Start reasoning together')}</button></div>}
         {session.phase === 'complete' && <div className="understanding-reflection">
-          <h3>{localizeUiText("这次想通的这一点")}</h3>
-          {session.reflection ? <dl><dt>{localizeUiText("原来的想法")}</dt><dd>{session.reflection.before}</dd><dt>{localizeUiText("让我重新想的例子")}</dt><dd>{session.reflection.trigger}</dd><dt>{localizeUiText("现在的理解")}</dt><dd>{session.reflection.after}</dd></dl> : <p>{localizeUiText("这一轮已经核对过，可以回到领读；之后也能再来换个例子。")}</p>}
-          <div className="understanding-reflection-actions"><button type="button" onClick={close}>{guided ? t('回到刚才的位置', 'Back to reading') : t('返回知识点清单', 'Back to topics')}</button><button type="button" disabled={busy} onClick={() => void run('revisit')}>{localizeUiText("换个例子再试")}</button>
+          <h3>{onNextPart ? t('这一部分已核对', 'This part has been checked') : localizeUiText("这次想通的这一点")}</h3>
+          {session.reflection ? <dl><dt>{localizeUiText("原来的想法")}</dt><dd>{session.reflection.before}</dd><dt>{localizeUiText("让我重新想的例子")}</dt><dd>{session.reflection.trigger}</dd><dt>{localizeUiText("现在的理解")}</dt><dd>{session.reflection.after}</dd></dl> : <p>{onNextPart ? t('当前部分已核对，接下来可以继续下一部分或查看本轮进度。', 'This part has been checked. Continue to the next part or view the round’s progress.') : localizeUiText("这一轮已经核对过，可以回到领读；之后也能再来换个例子。")}</p>}
+          <div className="understanding-reflection-actions">
+            {onNextPart && <button type="button" disabled={busy} onClick={onNextPart}>{nextPartTitle ? <>{t('接着看：', 'Next: ')}<ExplanationText>{nextPartTitle}</ExplanationText></> : t('查看本轮检查结果', 'View this round’s results')}</button>}
+            <button type="button" onClick={onViewRound ?? close}>{onViewRound ? t('先暂停，看看进度', 'Pause and view progress') : guided ? t('回到刚才的位置', 'Back to reading') : t('返回知识点清单', 'Back to topics')}</button><button type="button" disabled={busy} onClick={() => void run('revisit')}>{localizeUiText("换个例子再试")}</button>
             
           </div>
         </div>}

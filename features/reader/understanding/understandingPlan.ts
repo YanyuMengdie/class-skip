@@ -6,6 +6,7 @@ export interface UnderstandingTopic {
   title: string;
   titleEn?: string;
   summary: string;
+  supportingText?: string;
   /** Short excerpt from this group's own subheadings or explanation. */
   preview?: string;
   pageRefs: number[];
@@ -16,6 +17,8 @@ export interface UnderstandingTopic {
 }
 
 export interface UnderstandingPlan {
+  /** Semantic selection from this exact message, not a heading-only list. */
+  selectionVersion?: 1;
   scopePolicy?: 'message-topic-v1';
   groupingVersion?: 2;
   scopeTitle: string;
