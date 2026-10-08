@@ -2,12 +2,15 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import './readingWaitingCat.css';
 
-/** A companion for a real pending request, never a simulated progress indicator. */
-export function ReadingWaitingCat({ compact = false, preparing = false }: {
+/** Empty and pending reading states share the companion; only real requests show waiting status. */
+export function ReadingWaitingCat({ compact = false, preparing = false, preparingSections = false, idleMessage }: {
   compact?: boolean;
   preparing?: boolean;
+  preparingSections?: boolean;
+  idleMessage?: string;
 }) {
   const { text } = useAppLanguage();
+  const idle = idleMessage !== undefined;
   const startedAt = useRef(Date.now());
   const greetingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -19,18 +22,18 @@ export function ReadingWaitingCat({ compact = false, preparing = false }: {
       if (!document.hidden) setElapsed(Math.floor((Date.now() - startedAt.current) / 1000));
     };
     const updateNetwork = () => setOffline(!navigator.onLine);
-    const timer = setInterval(updateTime, 1000);
+    const timer = idle ? null : setInterval(updateTime, 1000);
     document.addEventListener('visibilitychange', updateTime);
     window.addEventListener('online', updateNetwork);
     window.addEventListener('offline', updateNetwork);
     return () => {
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
       if (greetingTimer.current) clearTimeout(greetingTimer.current);
       document.removeEventListener('visibilitychange', updateTime);
       window.removeEventListener('online', updateNetwork);
       window.removeEventListener('offline', updateNetwork);
     };
-  }, []);
+  }, [idle]);
 
   const greet = () => {
     if (greetingTimer.current) clearTimeout(greetingTimer.current);
@@ -42,7 +45,11 @@ export function ReadingWaitingCat({ compact = false, preparing = false }: {
     text('让我想想，从哪里讲比较好懂。', 'Hmm… where would be a good place to start?'),
     text('你先伸个懒腰，我还在这里。', 'Have a little stretch. I’m right here.'),
   ];
-  const title = compact
+  const title = idle
+    ? text('小猫在这里陪你。', 'Your little companion is here.')
+    : preparingSections
+      ? text('小猫正在整理这一讲的分段。', 'Your little companion is organizing this lecture’s sections.')
+      : compact
     ? text('小猫陪你等下一条讲解。', 'Waiting for the next explanation, together.')
     : text('小猫正在替你先读这一段。', 'Your little companion is reading ahead.');
 
@@ -103,19 +110,23 @@ export function ReadingWaitingCat({ compact = false, preparing = false }: {
       </button>
       <div className="reading-waiting-cat__copy">
         <p className="reading-waiting-cat__title" role="status">{title}</p>
-        {!compact && <p className="reading-waiting-cat__subtitle">{text('等一下，我们把它讲明白。', 'A moment, then we’ll make sense of it together.')}</p>}
+        {!compact && <p className="reading-waiting-cat__subtitle">{idle ? text('准备好了，我们就开始。', 'We’ll start whenever you’re ready.') : text('等一下，我们把它讲明白。', 'A moment, then we’ll make sense of it together.')}</p>}
         <p className="reading-waiting-cat__chatter">{greeting
-          ? text('在读啦，在读啦。', 'Reading, reading!')
-          : chatter[Math.floor(elapsed / 12) % chatter.length]}</p>
+          ? idle ? text('喵，准备好了就叫我。', 'Meow. Let me know when you’re ready.') : text('在读啦，在读啦。', 'Reading, reading!')
+          : idle ? text('慢慢来，我先陪你待一会儿。', 'Take your time. I’ll keep you company.')
+            : chatter[Math.floor(elapsed / 12) % chatter.length]}</p>
         <p className="reading-waiting-cat__status" role="status">
           <span className="reading-waiting-cat__dot" aria-hidden="true" />
-          {offline ? text('网络已断开，请检查连接。', 'Connection lost. Please check your network.')
-            : preparing ? text('正在分析资料', 'Analyzing the material')
+          {idle ? idleMessage : offline ? text('网络已断开，请检查连接。', 'Connection lost. Please check your network.')
+            : preparingSections ? text('正在准备分段目录', 'Preparing the section list')
+              : preparing ? text('正在分析资料', 'Analyzing the material')
               : text('正在准备讲解', 'Preparing the explanation')}
         </p>
-        {elapsed >= 45 && <p className="reading-waiting-cat__slow">
+        {!idle && elapsed >= 45 && <p className="reading-waiting-cat__slow">
           {offline ? text('这次请求尚未结束，页面会保留已有内容。', 'This request has not finished. Your existing content stays on the page.')
-            : preparing
+            : preparingSections
+              ? text(`已等待 ${elapsed} 秒，分段目录尚未返回结果。`, `Waiting ${elapsed}s; the section list has not returned yet.`)
+              : preparing
               ? text(`已等待 ${elapsed} 秒，资料分析尚未返回结果。`, `Waiting ${elapsed}s; the material analysis has not returned yet.`)
               : text(`已等待 ${elapsed} 秒，内容尚未返回。你可以继续等，也可以停止后重试。`,
                   `Waiting ${elapsed}s; the content has not arrived yet. You can wait, or stop and retry.`)}

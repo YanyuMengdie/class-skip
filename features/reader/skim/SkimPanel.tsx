@@ -3364,18 +3364,14 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
         <div ref={chatContainerRef} className="reading-chat flex-1 min-w-0 overflow-y-auto custom-scrollbar bg-white">
              {messages.length === 0 ? (
-               isChatLoading ? <ReadingWaitingCat key={readingSessionKey} /> : (
-                 <div className="flex flex-col items-center justify-center h-full text-stone-300 space-y-4 opacity-70">
-                     <div className="p-4 bg-stone-50 rounded-full">
-                         <MessageCircle className="w-10 h-10" />
-                     </div>
-                     <p className="text-xs font-bold text-stone-400">
-                       {activeRecordCard
-                         ? localizeText('这里还没有讲解。输入“开始领读”即可开始。', 'No explanation yet. Send “Start reading” to begin.', language)
-                         : localizeText('请先在上方完成【知识准备】', 'Complete the preparation above to begin.', language)}
-                     </p>
-                 </div>
-               )
+               <ReadingWaitingCat
+                 key={`${readingSessionKey}:${isChatLoading ? 'reading' : isGeneratingRoute || isRegeneratingMap ? 'preparing' : 'idle'}`}
+                 preparingSections={!isChatLoading && isGeneratingRoute}
+                 preparing={!isChatLoading && isRegeneratingMap}
+                 idleMessage={isChatLoading || isGeneratingRoute || isRegeneratingMap ? undefined : activeRecordCard
+                   ? localizeText('这里还没有讲解。输入“开始领读”即可开始。', 'No explanation yet. Send “Start reading” to begin.', language)
+                   : localizeText('请先在上方完成【知识准备】', 'Complete the preparation above to begin.', language)}
+               />
              ) : (
                  <>
                  {messages.map((msg, idx) => {
