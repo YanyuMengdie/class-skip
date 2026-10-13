@@ -248,9 +248,28 @@
 .is-compact-reading .reader-input-row { margin-top: 0 !important; padding: 3px 5px; }
 .is-compact-reading .reader-input-row textarea { padding: 5px 6px; }
 .reading-chat > .reader-completion {
-  max-width: 76ch; margin: 28px auto 0; padding: 18px 0 8px;
-  border: 0; border-top: 1px solid var(--reader-line); border-radius: 0; background: transparent;
+  max-width: 76ch; margin: 16px auto 0; padding: 0 0 4px;
+  border: 0; background: transparent;
 }
+.reader-completion.is-unfinished { justify-content: center; }
+.reader-completion.is-unfinished > div { gap: 16px; }
+.reading-conversation .reader-return-sections,
+.reading-conversation .reader-finish-reading {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 40px; padding: 7px 14px; border-radius: 20px;
+  font-size: 13px; font-weight: 500; line-height: 1.5; box-shadow: none;
+  transition: background-color .15s, color .15s;
+}
+.reading-conversation .reader-return-sections {
+  padding-inline: 4px; color: var(--reader-muted); border: 0; background: transparent;
+}
+.reading-conversation .reader-return-sections:hover { color: var(--reader-green); text-decoration: underline; text-underline-offset: 4px; }
+.reading-conversation .reader-finish-reading {
+  color: var(--reader-green); border: 1px solid #cbd7c9; background: transparent;
+}
+.reading-conversation .reader-finish-reading:hover { background: var(--reader-sage); }
+.reading-conversation .reader-return-sections:focus-visible,
+.reading-conversation .reader-finish-reading:focus-visible { outline: 2px solid var(--reader-green); outline-offset: 3px; }
 @container (max-width: 380px) {
   .is-compact-reading .reader-compact-bar { padding: 8px 12px; gap: 6px; flex-wrap: wrap; }
   .reader-compact-actions { margin-left: auto; }
