@@ -9,6 +9,7 @@ import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { cachedArticles, loadReadArticles, loadReadingPositions, prepareLecture, prepareRecentLectures, saveReadingPosition, watchLittleReading } from '@/services/littleReadingService';
 import { recentPdfs, selectArticle, type LittleArticle, type ReadingJob, type ReadingPosition } from './model';
 import './littleReading.css';
+import { ReadingRoomScenery } from './ReadingRoomScenery';
 
 export function LittleReadingPage({user,onBack,onLogin,onUseCloud,cloudAvailable,onSource}: {
   user:WorkspaceUser;onBack:()=>void;onLogin:()=>void;onUseCloud:()=>void;cloudAvailable:boolean;
@@ -121,6 +122,9 @@ export function LittleReadingPage({user,onBack,onLogin,onUseCloud,cloudAvailable
     <header className="little-reading-header"><button onClick={()=>{flush();onBack();}}><ArrowLeft size={17}/>{text('返回','Back')}</button>
       <span>{text('读一会儿','Read a little')}</span>
       <button disabled={!selected || articles.length<2} onClick={()=>change('change')}>{text('换一篇','Another story')}<RefreshCw size={15}/></button></header>
+    <div className="little-reading-cozy-layout">
+    <ReadingRoomScenery side="left" />
+    <div className="little-reading-content">
     {!isCloudUser(user)?<main className="little-reading-empty"><BookOpen size={32}/><h1>{text('给这一点空闲，留一篇好读的。','A good story for a spare moment.')}</h1>
       <p>{text('登录后，从你上传的 lecture 中提前准备文章。手机和电脑都能接着读。','Sign in to read stories prepared from your lectures, and continue on your phone or computer.')}</p>
       <button className="little-reading-primary" onClick={cloudAvailable?onUseCloud:onLogin}>{text(cloudAvailable?'打开账号文章':'登录逃课神器',cloudAvailable?'Open account stories':'Sign in')}</button></main>
@@ -142,5 +146,8 @@ export function LittleReadingPage({user,onBack,onLogin,onUseCloud,cloudAvailable
       <p>{loading?text('先找已经准备好的文章。','Looking for a ready story.'):working?text('准备好后会直接出现在这里。你可以先离开，后台会继续。','It will appear here when ready. You can leave while preparation continues.'):files.length?text('从最近的 lecture 开始准备，写好一篇就能读。','We will start with your recent lectures. Each story becomes readable as soon as it is ready.'):text('先在资料库上传一份 PDF，我们会提前准备文章。','Upload a lecture PDF in your library to start preparing stories.')}</p>
       {(error||jobs.some(j=>j.status==='failed'||j.status==='unsupported'))&&<p role="status">{error||text('部分资料暂未准备成功。自动准备支持 32 MB 以内的可读 PDF；已完成的文章会保留。','Some lectures could not be prepared. Automatic preparation supports readable PDFs up to 32 MB. Completed stories are retained.')}</p>}
       <button className="little-reading-primary" onClick={()=>setRetry(n=>n+1)}>{text('重试准备','Retry preparation')}</button><button onClick={onBack}>{text('回到书房','Back to the study')}</button></main>}
+    </div>
+    <ReadingRoomScenery side="right" />
+    </div>
   </div>;
 }
