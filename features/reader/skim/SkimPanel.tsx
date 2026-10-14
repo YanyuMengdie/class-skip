@@ -1946,6 +1946,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       });
       resetReadingModuleArtifacts();
       setInput(textToEdit);
+      if (mobileImmersive) setMobileAskOpen(true);
       requestAnimationFrame(() => {
           chatInputRef.current?.focus();
       });
@@ -2556,7 +2557,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
     actions: (stage === 'reading' || stage === 'tutoring') ? [
       { id: 'hint', label: localizeText('给我一点提示', 'A small hint'), run: () => { void handleSend('刚才这部分我还没看懂。请结合原文给我一点提示，先不要直接给完整答案。', undefined, undefined, { appendUserWhenOverride: true }); } },
       { id: 'example', label: localizeText('换个例子讲讲', 'Explain with an example'), run: () => { void handleSend('请用一个简单的例子解释刚才这部分，区分原文事实和你举的例子。', undefined, undefined, { appendUserWhenOverride: true }); } },
-      { id: 'question', label: localizeText('我想说说哪里没懂', 'Let me describe the tricky part'), run: () => { requestAnimationFrame(() => chatInputRef.current?.focus()); } },
+      { id: 'question', label: localizeText('我想说说哪里没懂', 'Let me describe the tricky part'), run: () => { if (mobileImmersive) setMobileAskOpen(true); requestAnimationFrame(() => chatInputRef.current?.focus()); } },
     ] : [],
     pause: () => { if (isChatLoading) handleStopSkimChat(); saveInputDraft(); },
   }, studyStyle !== 'case' && !isLoading && Boolean(pdfDataUrl || fullText) && !activeUnderstanding);
