@@ -118,6 +118,7 @@ interface DashboardScreenProps {
   onLogout: () => void;
   onRestoreSession: (session: CloudSession, options?: { initialPage?: number }) => void | Promise<void>;
   onQuickStudy: () => void;
+  onReadALittle: () => void;
   quickStudyBusy: boolean;
   quickStudyNotice: string;
   onLibraryFileDeleted?: (fileId: string) => void;
@@ -310,6 +311,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   onLogout,
   onRestoreSession,
   onQuickStudy,
+  onReadALittle,
   quickStudyBusy,
   quickStudyNotice,
   onLibraryFileDeleted,
@@ -1562,6 +1564,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       </aside>
 
       <section className="min-w-0">
+        <button type="button" onClick={onReadALittle} className="mb-5 flex w-full items-center justify-between gap-4 rounded-xl border border-[#CCD8CB] bg-[#FFFCF4] px-5 py-4 text-left text-[#294C3D]">
+          <span><span className="block text-lg">{text('读一会儿', 'Read a little')}</span><span className="mt-1 block text-sm text-[#6C796C]">{text('有一点空闲？翻开就是一篇。', 'A spare moment? Open a story.')}</span></span><BookOpen className="h-5 w-5 shrink-0" />
+        </button>
         <div className="mb-6 rounded-2xl border border-[#CCD8CB] bg-[#EDF1E8] p-5 sm:p-6">
           <button type="button" onClick={onQuickStudy} disabled={quickStudyBusy || isProcessing || !!openingSessionId}
             className="flex w-full items-center justify-between gap-4 text-left text-[#294C3D] disabled:opacity-60">

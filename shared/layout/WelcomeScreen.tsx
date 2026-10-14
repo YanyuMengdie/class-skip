@@ -4,6 +4,7 @@ import { useAppLanguage } from '@/shared/i18n/appLanguage';
 
 interface WelcomeScreenProps {
   onStart: () => void;
+  onReadALittle: () => void;
 }
 
 const QUOTES = [
@@ -24,7 +25,7 @@ const QUOTES_EN = [
   'Open the door, and today has already begun.',
 ];
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart, onReadALittle }) => {
   const { language, text } = useAppLanguage();
   const [timeString, setTimeString] = useState('');
   const [quote, setQuote] = useState('');
@@ -67,10 +68,13 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ onStart }) => {
           <p className="editorial-meta">The reading room — 01</p>
           <h1>{quote}</h1>
           <div className="editorial-welcome-rule" aria-hidden="true" />
-          <button onClick={onStart} className="editorial-primary-button group">
+          <div className="editorial-welcome-actions"><button onClick={onStart} className="editorial-primary-button group">
             <span>{text('进入书房', 'Enter the study')}</span>
             <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
           </button>
+          <div><button onClick={onReadALittle} className="editorial-little-reading">
+            <span>{text('读一会儿', 'Read a little')}</span><ArrowRight size={17} />
+          </button><p>{text('不用选，打开就有得看。', 'No choosing. Just open and read.')}</p></div></div>
         </section>
 
         <span className="editorial-welcome-folio" aria-hidden="true">01</span>

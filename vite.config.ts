@@ -5,6 +5,7 @@ import { examAstraProxy } from './server/examAstraProxy';
 import { readingAstraProxy } from './server/readingAstra';
 import { imagesAstraProxy } from './server/imagesAstra';
 import { canvasApiProxy } from './server/canvasProxy';
+import { littleReadingHandler } from './server/littleReadingApi';
 import {
   createElevenLabsRealtimeToken,
   ElevenLabsTranscriptionError,
@@ -96,6 +97,17 @@ export default defineConfig(({ mode }) => {
         host: '127.0.0.1',
       },
       plugins: [
+        { name: 'class-skip-little-reading', configureServer(server) {
+          const handler = littleReadingHandler({ key: () => loadEnv(mode, path.resolve(__dirname), '').GEMINI_API_KEY || '',
+            origin: () => server.resolvedUrls?.local[0] || 'http://127.0.0.1:3001', schedule: promise => { void promise; } });
+          server.middlewares.use('/api/little-reading/prepare', async (request, response) => {
+            try {
+              const bytes = await readRequestBody(request);
+              if (bytes.length > 4096) { response.statusCode = 413; response.end(); return; }
+              await handler(Object.assign(request, { body: JSON.parse(Buffer.from(bytes).toString()) }), response);
+            } catch { response.statusCode = 400; response.end(JSON.stringify({ error: 'Invalid reading request.' })); }
+          });
+        } },
         // Keep provider credentials server-side; text requests never fall back to OpenAI.
         examAstraProxy(() => loadEnv(mode, path.resolve(__dirname), '').GEMINI_API_KEY || ''),
         readingAstraProxy(() => loadEnv(mode, path.resolve(__dirname), '').GEMINI_API_KEY || ''),

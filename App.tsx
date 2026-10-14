@@ -36,6 +36,8 @@ import { HistoryModal } from '@/shared/history/HistoryModal';
 import { GalgameOverlay } from '@/components/GalgameOverlay';
 import { GalgameSettings } from '@/components/GalgameSettings';
 import { WelcomeScreen } from '@/shared/layout/WelcomeScreen';
+import { LittleReadingPage } from '@/features/littleReading/LittleReadingPage';
+import { prepareRecentLectures } from '@/services/littleReadingService';
 import { DashboardScreen } from '@/shared/layout/DashboardScreen';
 import { QuizReviewPanel } from '@/features/review/tools/QuizReviewPanel';
 import { FlashCardReviewPanel } from '@/features/review/tools/FlashCardReviewPanel';
@@ -441,6 +443,7 @@ const App: React.FC = () => {
   const { language: appLanguage, setLanguage: setAppLanguage, text: uiText } = useAppLanguage();
   // --- STATE DECLARATIONS ---
   const [hasStarted, setHasStarted] = useState(false);
+  const [littleReadingOpen, setLittleReadingOpen] = useState(() => new URLSearchParams(window.location.search).get('read') === '1');
   const [shellMode, setShellMode] = useState<'dashboard' | 'study'>('dashboard');
   const [quickStudyBusy, setQuickStudyBusy] = useState(false);
   const [quickStudyNotice, setQuickStudyNotice] = useState('');
@@ -776,6 +779,11 @@ const App: React.FC = () => {
   const quickStudyOwner = useRef(user.uid);
   quickStudyOwner.current = user.uid;
   const [authLoading, setAuthLoading] = useState(true);
+  useEffect(() => {
+    if (authLoading || !isCloudUser(user)) return;
+    const timer = setTimeout(() => void prepareRecentLectures(user, appLanguage).catch(() => {}), 4000);
+    return () => clearTimeout(timer);
+  }, [authLoading, user.uid, appLanguage]);
   const [isSyncing, setIsSyncing] = useState(false);
   const [storageError, setStorageError] = useState('');
   const [storageConflict, setStorageConflict] = useState(false);
@@ -4494,8 +4502,16 @@ const App: React.FC = () => {
   };
   const deviceSwitch = <button className="reader-device-switch" disabled={skimActiveLoading || isOpeningStudyFile} onClick={() => void changeReaderDevice()}>{uiText('手机版', 'Mobile version')}</button>;
 
-  if (!hasStarted && !isMobileReader) {
-    return <>{deviceSwitch}<WelcomeScreen onStart={() => { setHasStarted(true); setDashboardInitialTab('library'); setShellMode('dashboard'); }} /></>;
+  const openLittleReading = () => {
+    const url = new URL(window.location.href); url.searchParams.set('read', '1'); window.history.replaceState(null, '', url);
+    setLittleReadingOpen(true);
+  };
+  const closeLittleReading = () => {
+    const url = new URL(window.location.href); url.searchParams.delete('read'); window.history.replaceState(null, '', url);
+    setLittleReadingOpen(false);
+  };
+  if (!hasStarted && !isMobileReader && !littleReadingOpen) {
+    return <>{deviceSwitch}<WelcomeScreen onReadALittle={openLittleReading} onStart={() => { setHasStarted(true); setDashboardInitialTab('library'); setShellMode('dashboard'); }} /></>;
   }
 
   if (authLoading) {
@@ -4507,11 +4523,18 @@ const App: React.FC = () => {
     );
   }
 
+  if (littleReadingOpen) {
+    return <><LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
+      <LittleReadingPage key={`${user.uid}:${appLanguage}`} user={user} onBack={closeLittleReading} onLogin={handleLogin}
+        cloudAvailable={isCloudUser(authUser)} onUseCloud={() => setUseLocalWorkspace(false)}
+        onSource={(session, page) => { closeLittleReading(); setHasStarted(true); void handleRestoreCloudSession(session, { initialPage: page }); }} />
+    </>;
+  }
   if (isMobileReader) {
     return <><LoginModal open={loginModalOpen} onClose={() => setLoginModalOpen(false)} />
       {shellMode === 'dashboard' ? <MobileLibrary user={user} cloudAvailable={isCloudUser(authUser)} onUseCloud={() => setUseLocalWorkspace(false)} onLogin={handleLogin}
         onOpen={session => { setHasStarted(true); void handleRestoreCloudSession(session); }} busy={isOpeningStudyFile || quickStudyBusy}
-        onFull={() => void changeReaderDevice()} onQuickStudy={() => { setHasStarted(true); void handleQuickStudy(); }} notice={quickStudyNotice || storageError} />
+        onFull={() => void changeReaderDevice()} onReadALittle={openLittleReading} onQuickStudy={() => { setHasStarted(true); void handleQuickStudy(); }} notice={quickStudyNotice || storageError} />
         : <MobileReader title={fileName || uiText('领读', 'Guided reading')} sessions={skimSessions} activeIndex={activeSkimIndex}
           onSelect={index => { setActiveSkimIndex(index); setViewMode('skim'); }} onAdd={handleAddSkimSession}
           busy={skimActiveLoading || isOpeningStudyFile || refreshingReading || remoteReadingBusy} loading={isOpeningStudyFile}
@@ -4548,6 +4571,7 @@ const App: React.FC = () => {
           onLogout={handleLogout}
           onRestoreSession={handleRestoreCloudSession}
           onQuickStudy={() => void handleQuickStudy()}
+          onReadALittle={openLittleReading}
           quickStudyBusy={quickStudyBusy || skimActiveLoading || tutorActiveLoading || isGeneratingAI || isChatLoading}
           quickStudyNotice={quickStudyNotice}
           onUpload={handleFileUpload}

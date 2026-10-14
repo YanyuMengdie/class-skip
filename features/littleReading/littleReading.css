@@ -1,0 +1,43 @@
+.little-reading { background:#fffdf7;color:#28392e;min-height:100dvh;font-family:-apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif;overflow-wrap:anywhere; }
+.little-reading * { box-sizing:border-box; }
+.little-reading button { cursor:pointer;min-height:44px;touch-action:manipulation; }
+.little-reading button:disabled { opacity:.45;cursor:default; }
+.little-reading button:focus-visible { outline:2px solid #305440;outline-offset:4px; }
+.little-reading-header { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:18px max(18px,5%);border-bottom:1px solid #dfdfd4; }
+.little-reading-header>span { letter-spacing:3px; }
+.little-reading-header button { display:flex;align-items:center;gap:8px;color:#647367;font-size:13px; }
+.little-reading-essay { max-width:660px;margin:0 auto;padding:58px 28px 24px; }
+.little-reading-meta { display:flex;justify-content:space-between;gap:16px;color:#758071;font-size:12px;margin-bottom:22px; }
+.little-reading-essay h1 { font-family:'Songti SC','Noto Serif CJK SC',serif;font-weight:400;font-size:34px;line-height:1.55;margin:0 0 34px; }
+.little-reading-body { font-size:18px;line-height:1.95; }
+.little-reading-body p { margin-bottom:24px; }
+.little-reading-body h2,.little-reading-body h3 { font-size:22px;margin:24px 0 18px;font-weight:500; }
+.little-reading-body table { display:block;overflow-x:auto;border-collapse:collapse;max-width:100%;font-size:16px; }
+.little-reading-body td,.little-reading-body th { padding:10px;border-bottom:1px solid #dfdfd4; }
+.little-reading-body a { text-decoration:underline;color:#305440; }
+.little-reading-source { margin-top:30px;font-size:13px;color:#687467; }
+.little-reading-source summary { padding:12px 0;cursor:pointer;min-height:44px; }
+.little-reading-source>p { margin:8px 0; }
+.little-reading-source>div { display:flex;gap:10px;flex-wrap:wrap; }
+.little-reading-source button { padding:6px 12px;border:1px solid #dfdfd4;border-radius:5px; }
+.little-reading-next { border-top:1px solid #dfdfd4;margin-top:30px;padding-top:27px; }
+.little-reading-next>p { font-size:12px;letter-spacing:2px;color:#758071;margin-bottom:12px; }
+.little-reading-next>button { width:100%;display:flex;align-items:center;justify-content:space-between;text-align:left;gap:20px;font:400 25px/1.55 'Songti SC',serif; }
+.little-reading-next>button svg { flex-shrink:0; }
+.little-reading-next>div { display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:14px;font-size:12px;color:#758071; }
+.little-reading-status { max-width:660px;padding:0 28px;margin:auto;font-size:12px;color:#896341; }
+.little-reading-status>span { display:block;margin-bottom:12px; }
+.little-reading-status button { text-decoration:underline; }
+.little-reading-history { max-width:660px;margin:auto;padding:16px 28px 36px;color:#758071;font-size:12px; }
+.little-reading-history>div { display:grid;gap:8px;margin-top:10px; }
+.little-reading-history>div button { text-align:left;border-bottom:1px solid #dfdfd4; }
+.little-reading-empty { max-width:660px;margin:auto;padding:90px 28px;text-align:center; }
+.little-reading-empty>svg { margin:0 auto 24px;color:#658068; }
+.little-reading-empty h1 { font:400 30px/1.6 'Songti SC',serif;margin-bottom:22px; }
+.little-reading-empty p { font-size:15px;line-height:1.8;color:#6b796c;margin-bottom:24px; }
+.little-reading-empty button { display:block;margin:16px auto; }
+.little-reading-primary { background:#305440;color:#fffdf7;padding:10px 24px;border-radius:5px; }
+.editorial-welcome-actions { display:flex;gap:24px;align-items:flex-start;flex-wrap:wrap; }
+.editorial-welcome-actions .editorial-little-reading { display:flex;align-items:center;justify-content:space-between;gap:24px;padding:18px 25px;border:1px solid #305440;color:#305440;min-height:64px;border-radius:4px; }
+.editorial-welcome-actions p { font-size:12px;color:#697567;margin-top:10px; }
+@media(max-width:600px) { .little-reading-header { padding:12px 18px;padding-top:max(12px,env(safe-area-inset-top)); } .little-reading-essay { padding:34px 24px 20px; } .little-reading-essay h1 { font-size:29px;margin-bottom:26px; } .little-reading-body { font-size:17px; } .little-reading-next>button { font-size:23px; } .little-reading-empty { padding-top:70px; } }

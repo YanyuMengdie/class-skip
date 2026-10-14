@@ -13,6 +13,7 @@ export function MobileLibrary({
   busy,
   onFull,
   onQuickStudy,
+  onReadALittle,
   notice,
   onUseCloud,
   cloudAvailable,
@@ -23,6 +24,7 @@ export function MobileLibrary({
   busy: boolean;
   onFull: () => void;
   onQuickStudy: () => void;
+  onReadALittle: () => void;
   notice: string;
   cloudAvailable: boolean;
   onUseCloud: () => void;
@@ -132,6 +134,12 @@ export function MobileLibrary({
             {user.displayName || user.email} · {text('账号资料', 'Account library')}
           </p>
         )}
+        <button
+          className="mobile-quick"
+          onClick={onReadALittle}
+        >
+          {text('读一会儿', 'Read a little')}<BookOpen size={18} />
+        </button>
         <button
           className="mobile-quick"
           onClick={onQuickStudy}

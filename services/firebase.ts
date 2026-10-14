@@ -260,6 +260,11 @@ export const createCloudSession = async (
 
     console.log("✅ Created Session:", sessionId);
     console.groupEnd();
+    if (/\.pdf$/i.test(fileName)) {
+      // Preparation has its own persisted records and cannot turn a successful upload into a failure.
+      void import('./littleReadingService').then(({ prepareLecture }) => prepareLecture(user, sessionId))
+        .catch(() => console.warn('[Read a little] Upload saved; article preparation will retry on the next visit.'));
+    }
     return sessionId;
   } catch (error: any) {
     console.error("❌ [Firestore] Write Failed:", error);
