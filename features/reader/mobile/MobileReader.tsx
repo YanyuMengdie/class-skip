@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, ChevronLeft, ChevronRight, FileText, Loader2, X } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, FileText, Loader2, MoreHorizontal, X } from 'lucide-react';
+import { MobileReadingSheet, MobileReadingToolsContext } from './MobileReadingTools';
 import { renderPdfPagePreview } from '@/lib/pdf/pdfUtils';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 
@@ -37,7 +38,9 @@ export function MobileReader({
   onCloseSource: () => void;
 }) {
   const { text } = useAppLanguage();
-  const [switcher, setSwitcher] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsTarget, setToolsTarget] = useState<HTMLDivElement | null>(null);
+  useEffect(() => { setToolsOpen(false); }, [activeIndex, title]);
   const [image, setImage] = useState('');
   const [sourceError, setSourceError] = useState(false);
   useEffect(() => {
@@ -58,48 +61,30 @@ export function MobileReader({
   }, [file, sourcePage]);
   return (
     <div className="mobile-reading mobile-reader">
-      <header className="mobile-header">
-        <button onClick={onBack} disabled={busy} aria-label={text('回到资料库', 'Back to library')}>
-          <ArrowLeft size={21} />
-        </button>
-        <div className="mobile-reader-title">
-          <strong>{title}</strong>
-          <small role="status">{status}</small>
-        </div>
-        <button onClick={() => setSwitcher((value) => !value)} disabled={loading}>
-          {text('切换领读', 'Readings')}
-        </button>
+      <header className="mobile-reader-top">
+        <span className="mobile-reader-short-title" data-preserve-language="true">{title.replace(/\.pdf$/i, '')}</span>
+        <button type="button" onClick={() => setToolsOpen(true)} aria-label={text('打开领读工具', 'Open reading tools')} aria-haspopup="dialog"><MoreHorizontal size={20}/></button>
       </header>
-      {switcher && (
-        <section className="mobile-session-picker" aria-label={text('切换领读', 'Switch reading')}>
-          {sessions.map((session, index) => (
-            <button
-              key={session.id}
-              disabled={busy}
-              aria-current={index === activeIndex ? 'true' : undefined}
-              onClick={() => {
-                onSelect(index);
-                setSwitcher(false);
-              }}
-            >
-              {session.title}
-              {index === activeIndex ? ' ✓' : ''}
-            </button>
-          ))}
-          <button
-            disabled={busy || sessions.length >= 10}
-            onClick={() => {
-              onAdd();
-              setSwitcher(false);
-            }}
-          >
-            {text('＋ 新建领读', '+ New reading')}
-          </button>
-          <button disabled={busy} onClick={onFull}>
-            {text('切换完整版', 'Switch to full version')}
-          </button>
-        </section>
-      )}
+      <MobileReadingSheet open={toolsOpen} onClose={() => setToolsOpen(false)} title={text('领读工具', 'Reading tools')}>
+        <p className="mobile-tools-file" data-preserve-language="true">{title}</p>
+        <p className="mobile-tools-status" role="status">{status}</p>
+        <div ref={setToolsTarget} className="mobile-tools-reading" />
+        <details className="mobile-tools-switcher">
+          <summary>{text('切换领读', 'Switch reading')}</summary>
+          <div className="mobile-session-picker">
+            {sessions.map((session, index) => <button type="button" key={session.id} disabled={busy || loading}
+              aria-current={index === activeIndex ? 'true' : undefined} onClick={() => { onSelect(index); setToolsOpen(false); }}>
+              {session.title}{index === activeIndex ? ' ✓' : ''}
+            </button>)}
+            <button type="button" disabled={busy || loading || sessions.length >= 10} onClick={() => { onAdd(); setToolsOpen(false); }}>{text('＋ 新建领读', '+ New reading')}</button>
+          </div>
+        </details>
+        <div className="mobile-tools-navigation">
+          <button type="button" disabled={busy} onClick={() => { setToolsOpen(false); onBack(); }}><ArrowLeft size={17}/>{text('返回资料库', 'Back to library')}</button>
+          <button type="button" disabled={busy} onClick={() => { setToolsOpen(false); onFull(); }}>{text('切换完整版', 'Switch to full version')}</button>
+        </div>
+      </MobileReadingSheet>
+      <MobileReadingToolsContext.Provider value={{ target: toolsTarget, open: () => setToolsOpen(true), close: () => setToolsOpen(false) }}>
       <main className="mobile-reader-content">
         {loading ? (
           <div className="mobile-loading">
@@ -110,6 +95,7 @@ export function MobileReader({
           children
         )}
       </main>
+      </MobileReadingToolsContext.Provider>
       {sourcePage != null && (
         <section
           className="mobile-source"

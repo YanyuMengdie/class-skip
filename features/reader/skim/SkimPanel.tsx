@@ -1,6 +1,7 @@
 import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import { useReadingScroll } from '../mobile/useReadingScroll';
-import { flushSync } from 'react-dom';
+import { flushSync, createPortal } from 'react-dom';
+import { MobileReadingSheet, useMobileReadingTools } from '../mobile/MobileReadingTools';
 import type { ReadingLease } from '@/services/readingPresence';
 import { isReadingStateFailure, readingStateFailure } from '@/services/readingSyncStatus';
 import { useRecordLabels } from './useRecordLabels';
@@ -992,6 +993,11 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
   const [readingToolsOpen, setReadingToolsOpen] = useState(false);
   const readingToolsRef = useRef<HTMLDivElement>(null);
   const compactReading = !mobile && stage === 'reading';
+  const mobileTools = useMobileReadingTools();
+  const mobileImmersive = mobile && stage === 'reading';
+  const [mobileAskOpen, setMobileAskOpen] = useState(false);
+  useEffect(() => { setMobileAskOpen(false); }, [readingSessionKey, stage]);
+
   useEffect(() => {
     setReadingToolsOpen(false);
     setRouteOutlineOpen(false);
@@ -2655,17 +2661,17 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                       <button type="button" disabled={isExplanationBusy} onClick={onUndoRecordComplete} className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-50">
                         <RotateCcw className="h-3.5 w-3.5" />{localizeText('撤销', 'Undo', language)}
                       </button>
-                      <button type="button" className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600">{localizeText('留在这里', 'Stay here', language)}</button>
-                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">{localizeText('返回分段目录', 'Back to sections', language)}</button>
+                      <button type="button" onClick={() => { if (mobile) mobileTools?.close(); }} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600">{localizeText('留在这里', 'Stay here', language)}</button>
+                      <button type="button" disabled={isExplanationBusy} onClick={() => { if (mobile) mobileTools?.close(); onOpenRecordShelf?.(); }} className="rounded-md border border-indigo-100 bg-white px-2.5 py-1.5 text-xs font-bold text-indigo-600 hover:bg-indigo-50">{localizeText('返回分段目录', 'Back to sections', language)}</button>
                       {nextRecordCard && (
-                        <button type="button" disabled={isExplanationBusy} onClick={onOpenNextRecord} className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-indigo-700">
+                        <button type="button" disabled={isExplanationBusy} onClick={() => { if (mobile) mobileTools?.close(); onOpenNextRecord?.(); }} className="inline-flex items-center gap-1 rounded-md bg-indigo-600 px-2.5 py-1.5 text-xs font-black text-white hover:bg-indigo-700">
                           {localizeText('下一段', 'Next section', language)}<ArrowRight className="h-3.5 w-3.5" />
                         </button>
                       )}
                     </>
                   ) : (
                     <>
-                      <button type="button" disabled={isExplanationBusy} onClick={onOpenRecordShelf} className="reader-return-sections">{localizeText('返回目录', 'Back to sections', language)}</button>
+                      <button type="button" disabled={isExplanationBusy} onClick={() => { if (mobile) mobileTools?.close(); onOpenRecordShelf?.(); }} className="reader-return-sections">{localizeText('返回目录', 'Back to sections', language)}</button>
                       <button type="button" disabled={isExplanationBusy} onClick={onCompleteRecord} className="reader-finish-reading">
                         <Check className="h-3.5 w-3.5" />{localizeText('我学完了', 'Mark as completed', language)}
                       </button>
@@ -2676,8 +2682,128 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
             )}</>
   );
 
+
+  const composer = (
+        <div className="reader-composer border-t border-stone-50 bg-white shrink-0 space-y-2">
+            {!mobile && !compactReading && stage === 'reading' && <p className="reader-composer-hint">随时追问，或说“继续”接着读。</p>}
+            {!mobileImmersive && explanationGenerationError && (
+              <div className="flex items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
+                <span>{explanationGenerationError}</span>
+                <button type="button" onClick={() => setExplanationGenerationError(null)} className="shrink-0 text-rose-500 hover:text-rose-800" aria-label="关闭错误提示">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
+            {/* 隐藏的文件选择器:由"图片"按钮触发 */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleImageSelect}
+            />
+            {/* 图片预览(选了图但还没发);多图横向 flex,每张独立 × */}
+            {pendingImages.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                    {pendingImages.map((img, idx) => (
+                        <div key={idx} className="relative">
+                            <img src={img} alt={`待发送图片 ${idx + 1}`} className="max-h-24 rounded-lg border border-stone-200" />
+                            <button
+                                type="button"
+                                onClick={() => setPendingImages((prev) => prev.filter((_, i) => i !== idx))}
+                                className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
+                                title="移除图片"
+                                aria-label="移除图片"
+                            >
+                                <X className="w-3 h-3" />
+                            </button>
+                        </div>
+                    ))}
+                </div>
+            )}
+            <div className="reader-input-row flex items-center space-x-2 bg-stone-50 p-1.5 border border-stone-100 focus-within:ring-2 focus-within:ring-indigo-100 transition-colors">
+                <textarea
+                    ref={chatInputRef}
+                    rows={1}
+                    autoFocus={mobileImmersive}
+                    value={input}
+                    onChange={(e) => {
+                        setInput(e.target.value);
+                        e.target.style.height = 'auto';
+                        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
+                    }}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) {
+                            e.preventDefault();
+                            if (mobileImmersive && (input.trim() || pendingImages.length)) setMobileAskOpen(false);
+                            void handleSend();
+                        }
+                    }}
+                    onPaste={handlePaste}
+                    placeholder={localizeText(stage === 'tutoring' ? '回答 AI 的追问或说“我不懂”…' : '随时追问，或说“继续”接着读…', stage === 'tutoring' ? 'Answer, or say “I don’t understand”…' : 'Ask a question, or say “Continue”…', language)}
+                    className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm focus:ring-0 focus:outline-none text-slate-700 placeholder:text-stone-400 resize-none overflow-y-auto max-h-[120px]"
+                    disabled={isExplanationBusy || stage === 'diagnosis'}
+                />
+                <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isExplanationBusy || stage === 'diagnosis'}
+                    title="添加图片"
+                    aria-label="添加图片"
+                    className="p-2 text-stone-500 hover:text-amber-700 hover:bg-stone-100 disabled:opacity-40 rounded-full transition-colors shrink-0"
+                >
+                    <ImagePlus className="w-4 h-4" />
+                </button>
+                {isExplanationBusy ? (
+                    <button
+                        type="button"
+                        onClick={handleStopSkimChat}
+                        title="停止生成"
+                        className="p-2 bg-rose-600 text-white rounded-full hover:bg-rose-700 transition-all shadow-md flex items-center gap-1 px-3"
+                    >
+                        <Square className="w-3 h-3 fill-current" />
+                        <span className="text-xs font-bold">停止</span>
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        onClick={() => { if (mobileImmersive && (input.trim() || pendingImages.length)) setMobileAskOpen(false); void handleSend(); }}
+                        aria-label="发送消息"
+                        disabled={!input.trim() || stage === 'diagnosis'}
+                        className="p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md"
+                    >
+                        <Send className="w-3.5 h-3.5 ml-0.5" />
+                    </button>
+                )}
+            </div>
+        </div>
+  );
+  const mobileReadingTools = <>
+    <div className="mobile-tools-scope">
+      <strong>{activeRecordCard ? `Module ${activeRecordCard.moduleIndex} · ${recordLabels.label(activeRecordCard, 'title')}` : localizeText('一起读下去', 'Read along', language)}</strong>
+      <small>{activeRecordCard ? localizeText(`第 ${activeRecordCard.pageStart}–${activeRecordCard.pageEnd} 页 · 当前第 ${currentPage} 页`, `Pages ${activeRecordCard.pageStart}–${activeRecordCard.pageEnd} · Page ${currentPage}`, language) : pageRangeLabel}</small>
+      {recordLabels.failed && <button type="button" onClick={recordLabels.retry}>{localizeText('重试分段翻译', 'Retry section translation', language)}</button>}
+    </div>
+    {activeRecordCard && <button type="button" disabled={isExplanationBusy} onClick={() => { mobileTools?.close(); onOpenRecordShelf?.(); }}><Library size={17}/>{localizeText('分段目录', 'Section list', language)}</button>}
+    {studyStyle === 'continuous' && displayRouteOutlineItems.length > 0 && <details className="mobile-tools-outline">
+      <summary>{localizeText('已讲目录', 'Reading outline', language)}</summary>
+      {displayRouteOutlineItems.map(item => <button type="button" key={item.id} onClick={() => { mobileTools?.close(); handleJumpToRouteItem(item); }}>{item.title}</button>)}
+    </details>}
+    <button type="button" disabled={isExplanationBusy} onClick={() => { mobileTools?.close(); setMobileAskOpen(true); }}><MessageCircle size={17}/>{localizeText('问一下', 'Ask a question', language)}</button>
+    {skimContentType === 'lecture' && <>
+      <button type="button" disabled={isExplanationBusy || !messages.length} onClick={() => { mobileTools?.close(); void handleShowTakeaways(); }}><ListChecks size={17}/>{localizeText('看要点', 'Key points', language)}</button>
+      <div className="mobile-tools-style" role="group" aria-label={localizeText('讲解方式', 'Explanation style', language)}>
+        {(['standard', 'interesting'] as const).map(style => <button type="button" key={style} disabled={isExplanationBusy} aria-pressed={explanationStyle === style}
+          onClick={() => onExplanationStyleChange(style)}>{style === 'standard' ? localizeText('正常讲', 'Standard', language) : localizeText('有意思地讲', 'Interesting', language)}</button>)}
+      </div>
+    </>}
+    {activeRecordCard && showRecordCompletion && <div className="mobile-tools-completion">{recordCompletion}</div>}
+  </>;
+
   return (
-    <div ref={containerRef} className={`reading-conversation ${stage === 'reading' ? 'is-reading' : 'is-preparing'} ${compactReading ? 'is-compact-reading' : ''} h-full bg-[#fffefb] flex flex-col relative overflow-hidden`}>
+    <div ref={containerRef} className={`reading-conversation ${stage === 'reading' ? 'is-reading' : 'is-preparing'} ${compactReading ? 'is-compact-reading' : ''} ${mobileImmersive ? 'is-mobile-immersive' : ''} h-full bg-[#fffefb] flex flex-col relative overflow-hidden`}>
+      {mobileImmersive && mobileTools?.target && createPortal(mobileReadingTools, mobileTools.target)}
       <div style={{ display: 'contents' }} inert={Boolean(activeUnderstanding)} aria-hidden={activeUnderstanding ? true : undefined}>
       {/* Selection Popover */}
       {!mobile && selectionRect && (
@@ -3065,7 +3191,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
       {/* 2. BOTTOM HALF: Chat (Hidden in Quiz Mode) */}
       {stage !== 'quiz' && showPreparationChat && (
       <div className="reader-dialogue flex-1 flex flex-col min-h-0 bg-white relative z-20">
-        {compactReading ? (
+        {mobileImmersive ? null : compactReading ? (
           <div className="reader-compact-bar shrink-0">
             <div className="reader-compact-heading">
               <p className="reader-compact-title">
@@ -3192,13 +3318,13 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
 
         )}
 
-        {!compactReading && stage === 'reading' && skimContentType !== 'lecture' && studyStyle === 'continuous' && (
+        {!mobileImmersive && !compactReading && stage === 'reading' && skimContentType !== 'lecture' && studyStyle === 'continuous' && (
           <div className="reader-route-overview px-5 py-2 text-xs text-stone-500">
             本次范围：PDF {configuredRangeStart}–{configuredRangeEnd} · {pageRangeLabel}
           </div>
         )}
 
-        {!compactReading && activeRecordCard && (
+        {!mobileImmersive && !compactReading && activeRecordCard && (
           <div className="reader-record-context shrink-0 border-b border-indigo-100 bg-indigo-50/45 px-4 py-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -3241,7 +3367,7 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
           </div>
         )}
 
-        {stage === 'reading' && studyStyle === 'continuous' && (!compactReading || routeOutlineOpen) && (displayRouteOutlineItems.length > 0 || isGeneratingRoute || routeError || !!onReadingRouteChange) && (
+        {!mobileImmersive && stage === 'reading' && studyStyle === 'continuous' && (!compactReading || routeOutlineOpen) && (displayRouteOutlineItems.length > 0 || isGeneratingRoute || routeError || !!onReadingRouteChange) && (
             <div className={`reader-outline shrink-0 ${compactReading ? 'reader-outline-popover' : ''}`}>
                 <div className="flex items-center justify-between gap-3">
                     <button
@@ -3815,103 +3941,18 @@ export const SkimPanel: React.FC<SkimPanelProps> = ({
                  </>
              )}
              {isChatLoading && messages.length > 0 && <ReadingWaitingCat compact key={readingSessionKey} />}
-             {!mobile && recordCompletion}
+             {recordCompletion}
         </div>
 
-        <div className="reader-composer border-t border-stone-50 bg-white shrink-0 space-y-2">
-            {mobile && stage === 'reading' && <button type="button" className="mobile-primary" disabled={isExplanationBusy} onClick={() => void handleSend('继续', 'reading')}>{localizeText('继续领读', 'Continue reading', language)}<ArrowRight className="ml-2 h-4 w-4" /></button>}
-            {!compactReading && stage === 'reading' && <p className="reader-composer-hint">随时追问，或说“继续”接着读。</p>}
-            {explanationGenerationError && (
-              <div className="flex items-start justify-between gap-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-700">
-                <span>{explanationGenerationError}</span>
-                <button type="button" onClick={() => setExplanationGenerationError(null)} className="shrink-0 text-rose-500 hover:text-rose-800" aria-label="关闭错误提示">
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            )}
-            {mobile && recordCompletion}
-            {/* 隐藏的文件选择器:由"图片"按钮触发 */}
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                style={{ display: 'none' }}
-                onChange={handleImageSelect}
-            />
-            {/* 图片预览(选了图但还没发);多图横向 flex,每张独立 × */}
-            {pendingImages.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                    {pendingImages.map((img, idx) => (
-                        <div key={idx} className="relative">
-                            <img src={img} alt={`待发送图片 ${idx + 1}`} className="max-h-24 rounded-lg border border-stone-200" />
-                            <button
-                                type="button"
-                                onClick={() => setPendingImages((prev) => prev.filter((_, i) => i !== idx))}
-                                className="absolute top-1 right-1 p-1 bg-black/60 hover:bg-black/80 text-white rounded-full transition-colors"
-                                title="移除图片"
-                                aria-label="移除图片"
-                            >
-                                <X className="w-3 h-3" />
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            )}
-            <div className="reader-input-row flex items-center space-x-2 bg-stone-50 p-1.5 border border-stone-100 focus-within:ring-2 focus-within:ring-indigo-100 transition-colors">
-                <textarea
-                    ref={chatInputRef}
-                    rows={1}
-                    value={input}
-                    onChange={(e) => {
-                        setInput(e.target.value);
-                        e.target.style.height = 'auto';
-                        e.target.style.height = Math.min(e.target.scrollHeight, 120) + 'px';
-                    }}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) {
-                            e.preventDefault();
-                            handleSend();
-                        }
-                    }}
-                    onPaste={handlePaste}
-                    placeholder={localizeText(stage === 'tutoring' ? '回答 AI 的追问或说“我不懂”…' : '随时追问，或说“继续”接着读…', stage === 'tutoring' ? 'Answer, or say “I don’t understand”…' : 'Ask a question, or say “Continue”…', language)}
-                    className="flex-1 bg-transparent border-0 px-4 py-1.5 text-sm focus:ring-0 focus:outline-none text-slate-700 placeholder:text-stone-400 resize-none overflow-y-auto max-h-[120px]"
-                    disabled={isExplanationBusy || stage === 'diagnosis'}
-                />
-                <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isExplanationBusy || stage === 'diagnosis'}
-                    title="添加图片"
-                    aria-label="添加图片"
-                    className="p-2 text-stone-500 hover:text-amber-700 hover:bg-stone-100 disabled:opacity-40 rounded-full transition-colors shrink-0"
-                >
-                    <ImagePlus className="w-4 h-4" />
-                </button>
-                {isExplanationBusy ? (
-                    <button
-                        type="button"
-                        onClick={handleStopSkimChat}
-                        title="停止生成"
-                        className="p-2 bg-rose-600 text-white rounded-full hover:bg-rose-700 transition-all shadow-md flex items-center gap-1 px-3"
-                    >
-                        <Square className="w-3 h-3 fill-current" />
-                        <span className="text-xs font-bold">停止</span>
-                    </button>
-                ) : (
-                    <button
-                        type="button"
-                        onClick={() => handleSend()}
-                        aria-label="发送消息"
-                        disabled={!input.trim() || stage === 'diagnosis'}
-                        className="p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md"
-                    >
-                        <Send className="w-3.5 h-3.5 ml-0.5" />
-                    </button>
-                )}
-            </div>
-        </div>
+        {mobileImmersive ? <>
+          {explanationGenerationError && <div className="mobile-reading-error" role="alert"><span>{explanationGenerationError}</span><button type="button" onClick={() => setExplanationGenerationError(null)} aria-label={localizeText('关闭错误提示', 'Dismiss error', language)}><X size={16}/></button></div>}
+          <div className="mobile-reading-dock">
+            <button type="button" onClick={() => mobileTools ? mobileTools.open() : setMobileAskOpen(true)}><MoreHorizontal size={18}/>{localizeText('工具', 'Tools', language)}</button>
+            {isExplanationBusy ? <button type="button" onClick={handleStopSkimChat}><Square size={14}/>{localizeText('停止', 'Stop', language)}</button>
+              : <button type="button" disabled={isGeneratingRoute || isRegeneratingMap} onClick={() => void handleSend('继续', 'reading')}>{localizeText(messages.length ? '继续领读' : '开始领读', messages.length ? 'Continue reading' : 'Start reading', language)}<ArrowRight size={17}/></button>}
+          </div>
+          <MobileReadingSheet open={mobileAskOpen} onClose={() => setMobileAskOpen(false)} title={localizeText('问一下', 'Ask a question', language)} composer>{composer}</MobileReadingSheet>
+        </> : composer}
 
       </div>
       )}
