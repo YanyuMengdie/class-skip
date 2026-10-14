@@ -1,3 +1,4 @@
+import { activeLibraryItems } from '@/features/library/archive';
 import type { CloudSession, PersistedSkimSession } from '@/types';
 
 function uploadedAt(value: CloudSession['createdAt']): number {
@@ -11,7 +12,7 @@ function uploadedAt(value: CloudSession['createdAt']): number {
 
 /** The upload window is fixed before checking progress; never refill with older PDFs. */
 export function recentStudyPdfs(sessions: CloudSession[]): CloudSession[] {
-  return sessions
+  return activeLibraryItems(sessions)
     .filter((session) => session.type === 'file' && /\.pdf$/i.test(session.fileName.trim()))
     .sort((a, b) => uploadedAt(b.createdAt) - uploadedAt(a.createdAt) || a.id.localeCompare(b.id))
     .slice(0, 10);

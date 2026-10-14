@@ -1,8 +1,11 @@
+import { watchLibraryMetadata } from '@/services/libraryArchiveService';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, BookOpen, FileText, Folder, Loader2, RefreshCw } from 'lucide-react';
+import { Archive, Check, ArrowLeft, ArrowRight, BookOpen, FileText, Folder, Loader2, RefreshCw } from 'lucide-react';
 import type { CloudSession } from '@/types';
+import { activeLibraryItems, archiveRoots, isArchived } from '@/features/library/archive';
+import { useLibraryArchive } from '@/shared/layout/useLibraryArchive';
+import { LibraryArchiveAction } from '@/shared/layout/LibraryArchiveAction';
 import { getFolderPath } from '@/shared/layout/libraryFolders';
-import { getUserSessions } from '@/services/firebase';
 import { isCloudUser, type WorkspaceUser } from '@/services/workspaceUser';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 
@@ -31,42 +34,67 @@ export function MobileLibrary({
 }) {
   const { text } = useAppLanguage();
   const [sessions, setSessions] = useState<CloudSession[]>([]);
+  const [archiveView, setArchiveView] = useState(false);
+  const [selecting, setSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const archive = useLibraryArchive(user, sessions, setSessions);
   const [folderId, setFolderId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [refresh, setRefresh] = useState(0);
+  const activeItems = useMemo(() => activeLibraryItems(sessions), [sessions]);
+  const roots = useMemo(() => archiveRoots(sessions), [sessions]);
   const { files, folders, folderCounts } = useMemo(() => {
     const files = sessions.filter((item) => item.type === 'file' && /\.pdf$/i.test(item.fileName));
     const folders = sessions.filter((item) => item.type === 'folder');
     const folderCounts = new Map<string, number>();
-    for (const file of files) {
+    for (const file of files.filter(file => isArchived(file, sessions) === archiveView)) {
       for (const folder of getFolderPath(file.parentId, folders)) {
         folderCounts.set(folder.id, (folderCounts.get(folder.id) ?? 0) + 1);
       }
     }
     return { files, folders, folderCounts };
-  }, [sessions]);
+  }, [sessions, archiveView]);
   const folderIds = new Set(folders.map((folder) => folder.id));
   const currentFolderId = folderId && folderIds.has(folderId) ? folderId : null;
-  const folderPath = getFolderPath(currentFolderId, folders);
+  useEffect(() => {
+    if (!loading && folderId) {
+      const folder = sessions.find(row => row.id === folderId);
+      if (!folder || isArchived(folder, sessions) !== archiveView) { setFolderId(null); setSearch(''); }
+    }
+  }, [sessions, loading, folderId, archiveView]);
+  const folderPath = getFolderPath(currentFolderId, folders).filter(folder => !archiveView || isArchived(folder, sessions));
   const parentOf = (item: CloudSession) =>
     item.parentId && folderIds.has(item.parentId) ? item.parentId : null;
   const query = search.trim().toLowerCase();
   const matchesSearch = (item: CloudSession) =>
     `${item.customTitle || ''} ${item.fileName}`.toLowerCase().includes(query);
-  const visibleFolders = folders.filter((folder) => query
+  const visibleFolders = folders.filter(folder => isArchived(folder, sessions) === archiveView).filter((folder) => query
     ? matchesSearch(folder)
-    : parentOf(folder) === currentFolderId);
-  const visibleFiles = files.filter((file) => query
+    : archiveView && !currentFolderId ? roots.some(root => root.id === folder.id) : parentOf(folder) === currentFolderId);
+  const visibleFiles = files.filter(file => isArchived(file, sessions) === archiveView).filter((file) => query
     ? matchesSearch(file)
-    : parentOf(file) === currentFolderId);
+    : archiveView && !currentFolderId ? roots.some(root => root.id === file.id) : parentOf(file) === currentFolderId);
   const pathLabel = (item: CloudSession) => getFolderPath(item.parentId, folders)
     .map((folder) => folder.customTitle || folder.fileName).join(' / ') || text('资料库', 'Library');
   const openFolder = (id: string | null) => {
     setFolderId(id);
     setSearch('');
   };
+  const toggleSelected = (id: string) => setSelectedIds(ids => ids.includes(id) ? ids.filter(i => i !== id) : [...ids, id]);
+  const changeArchive = async (ids: string[]) => {
+    const result = await archive.change(ids, !archiveView);
+    setSelectedIds(result.failedIds);
+    if (!result.failedIds.length) openFolder(null);
+  };
+  useEffect(() => { setSelectedIds([]); }, [folderId, search, archiveView, user.uid]);
+  useEffect(() => { setArchiveView(false); setSelecting(false); }, [user.uid]);
+  useEffect(() => {
+    const focus = () => setRefresh(n => n + 1);
+    window.addEventListener('focus', focus);
+    return () => window.removeEventListener('focus', focus);
+  }, []);
   useEffect(() => {
     setFolderId(null);
     setSearch('');
@@ -76,24 +104,11 @@ export function MobileLibrary({
     setLoading(true);
     setError('');
     setSessions([]);
-    getUserSessions(user, { throwOnError: true })
-      .then((sessions) => {
-        if (active) setSessions(sessions);
-      })
-      .catch(() => {
-        if (active)
-          setError(
-            text(
-              '资料没有加载成功，请联网后重试。',
-              'Could not load your library. Reconnect and retry.',
-            ),
-          );
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
+    const stop = watchLibraryMetadata(user, rows => {
+      if (active) { setSessions(rows); setLoading(false); }
+    }, () => { if (active) { setError(text('资料没有加载成功，请联网后重试。', 'Could not load your library. Reconnect and retry.')); setLoading(false); } });
     return () => {
-      active = false;
+      active = false; stop();
     };
   }, [user.uid, refresh]);
   return (
@@ -143,7 +158,7 @@ export function MobileLibrary({
         <button
           className="mobile-quick"
           onClick={onQuickStudy}
-          disabled={busy || loading || !files.length}
+          disabled={busy || loading || !activeItems.some(item => item.type === 'file')}
         >
           {text('任务太多不知道从哪里学', 'Too many tasks — where do I start?')}
           <ArrowRight size={18} />
@@ -154,7 +169,7 @@ export function MobileLibrary({
           </p>
         )}
         <div className="mobile-library-title">
-          <h2>{text('我的资料库', 'My library')}</h2>
+          <h2>{archiveView ? text('归档资料', 'Archived material') : text('我的资料库', 'My library')}</h2>
           <button
             onClick={() => setRefresh((value) => value + 1)}
             disabled={busy || loading}
@@ -163,10 +178,20 @@ export function MobileLibrary({
             <RefreshCw size={18} />
           </button>
         </div>
+        <div className="mobile-archive-tools">
+          <button disabled={busy || archive.busy} onClick={() => { setArchiveView(value => !value); openFolder(null); }}><Archive size={14}/> {archiveView ? text('返回资料库', 'Back to library') : text('查看归档', 'View archive')}</button>
+          <button disabled={busy || archive.busy} onClick={() => { setSelecting(value => !value); setSelectedIds([]); }}>{selecting ? text('完成多选', 'Done selecting') : text('多选', 'Select multiple')}</button>
+          {selecting && <>
+            <button disabled={busy || archive.busy} onClick={() => setSelectedIds([...visibleFolders, ...visibleFiles].map(i => i.id))}>{text('全选', 'Select all')}</button>
+            <button disabled={busy || archive.busy || !selectedIds.length} onClick={() => void changeArchive(selectedIds)}>{text(archiveView ? `恢复所选 ${selectedIds.length} 项` : `归档所选 ${selectedIds.length} 项`, `${archiveView ? 'Restore' : 'Archive'} ${selectedIds.length} selected`)}</button>
+          </>}
+        </div>
+        {archiveView && <p className="mobile-muted">{text('PDF 和记录都保留。恢复夹内资料也会恢复所属归档文件夹。', 'PDFs and history are kept. Restoring a contained item also restores its archived parent folders.')}</p>}
+        {archive.notice && <div role="status" className="library-archive-notice"><span>{archive.notice}</span>{archive.canUndo && <button disabled={archive.busy} onClick={() => void archive.undoLast()}>{text('撤销', 'Undo')}</button>}<button onClick={archive.dismiss}>{text('关闭', 'Dismiss')}</button></div>}
         <nav className="mobile-library-path" aria-label={text('文件夹位置', 'Folder location')}>
           <button disabled={busy} onClick={() => openFolder(null)}
             aria-current={!currentFolderId ? 'page' : undefined}>
-            {text('资料库', 'Library')}
+            {archiveView ? text('归档目录', 'Archive') : text('资料库', 'Library')}
           </button>
           {folderPath.map((folder) => (
             <React.Fragment key={folder.id}>
@@ -180,7 +205,7 @@ export function MobileLibrary({
         </nav>
         {currentFolderId && (
           <button className="mobile-folder-back" disabled={busy}
-            onClick={() => openFolder(parentOf(folderPath[folderPath.length - 1]))}>
+            onClick={() => { const parent = parentOf(folderPath[folderPath.length - 1]); openFolder(archiveView && !folders.some(f => f.id === parent && isArchived(f, sessions)) ? null : parent); }}>
             <ArrowLeft size={16} />{text('返回上级', 'Back to parent folder')}
           </button>
         )}
@@ -215,8 +240,9 @@ export function MobileLibrary({
           </p>
         )}
         {visibleFolders.map((folder) => (
-          <button className="mobile-file mobile-folder" key={folder.id}
-            onClick={() => openFolder(folder.id)} disabled={busy}>
+          <div key={folder.id} className={`mobile-archive-row${selectedIds.includes(folder.id) ? ' is-selected' : ''}`}>
+          <button className="mobile-file mobile-folder" aria-pressed={selecting ? selectedIds.includes(folder.id) : undefined}
+            onClick={() => selecting ? toggleSelected(folder.id) : openFolder(folder.id)} disabled={busy || archive.busy}>
             <span className="mobile-file-icon"><Folder size={22} /></span>
             <span>
               <strong>{folder.customTitle || folder.fileName}</strong>
@@ -226,15 +252,17 @@ export function MobileLibrary({
               )}</small>
               {query && <small>{pathLabel(folder)}</small>}
             </span>
-            <ArrowRight size={17} />
+            {selecting && selectedIds.includes(folder.id) ? <Check size={17}/> : <ArrowRight size={17} />}
           </button>
+          {!selecting && <LibraryArchiveAction name={folder.customTitle || folder.fileName} archived={archiveView} disabled={busy || archive.busy} onChange={() => changeArchive([folder.id])} />}
+          </div>
         ))}
         {visibleFiles.map((file) => (
+            <div key={file.id} className={`mobile-archive-row${selectedIds.includes(file.id) ? ' is-selected' : ''}`}>
             <button
-              className="mobile-file"
-              key={file.id}
-              onClick={() => onOpen(file)}
-              disabled={busy}
+              className="mobile-file" aria-pressed={selecting ? selectedIds.includes(file.id) : undefined}
+              onClick={() => selecting ? toggleSelected(file.id) : onOpen(file)}
+              disabled={busy || archive.busy}
             >
               <span className="mobile-file-icon">
                 <FileText size={22} />
@@ -244,8 +272,10 @@ export function MobileLibrary({
                 <small>{file.fileName}</small>
                 {query && <small>{pathLabel(file)}</small>}
               </span>
-              <ArrowRight size={17} />
+              {selecting && selectedIds.includes(file.id) ? <Check size={17}/> : <ArrowRight size={17} />}
             </button>
+            {!selecting && <LibraryArchiveAction name={file.customTitle || file.fileName} archived={archiveView} disabled={busy || archive.busy} onChange={() => changeArchive([file.id])} />}
+            </div>
           ))}
       </main>
     </div>

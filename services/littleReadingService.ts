@@ -31,7 +31,7 @@ export async function prepareRecentLectures(user:User,language:ReadingLanguage):
 export function watchLittleReading(user:User,files:CloudSession[],language:ReadingLanguage,
   onArticles:(a:LittleArticle[])=>void,onJobs:(j:ReadingJob[])=>void,onError:(e:Error)=>void,history:LittleArticle[]=[]):()=>void {
   const ids=recentPdfs(files).map(f=>f.id);
-  if(!ids.length){onArticles([]);onJobs([]);return()=>{};}
+  if(!ids.length){onArticles(history);onJobs([]);return()=>{};}
   const articles=query(collection(db,'users',user.uid,'littleReadingArticles'),where('sourceSessionId','in',ids));
   const decode=<T>(payload:unknown):T|undefined=>{try{return typeof payload==='string'?JSON.parse(payload):undefined;}catch{return undefined;}};
   const stopArticles=onSnapshot(articles,s=>{

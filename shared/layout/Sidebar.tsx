@@ -1,3 +1,5 @@
+import { activeLibraryItems } from '@/features/library/archive';
+import { watchLibraryMetadata } from '@/services/libraryArchiveService';
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { LayoutGrid, Cloud, FileText, Loader2, LogIn, Trash2, Edit2, Check, X, FolderPlus, Folder, FolderOpen, MoreHorizontal, Plus, CornerDownRight, Calendar as CalendarIcon, PenTool, ChevronLeft, ChevronRight, Clock, MapPin, CheckCircle2, BookOpen, Layers, Star, Filter, Lightbulb, Target, AlertTriangle, Flame, Sparkles } from 'lucide-react';
@@ -370,7 +372,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
   useEffect(() => {
     if (user) {
         // Load all cloud data
-        if (activeTab === 'cloud') refreshSessions();
+        if (activeTab === 'cloud') {
+          setLoadingSessions(true);
+          return watchLibraryMetadata(user, rows => { setSessions(rows); setLoadingSessions(false); }, () => setLoadingSessions(false));
+        }
         if (activeTab === 'calendar') loadCalendar();
         if (activeTab === 'memo') loadMemos();
     } else {
@@ -392,7 +397,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         .then(setSessions)
         .finally(() => setLoadingSessions(false));
   };
-  const fileTree = useMemo(() => buildFileTree(sessions), [sessions]);
+  const fileTree = useMemo(() => buildFileTree(activeLibraryItems(sessions)), [sessions]);
   const handleToggleFolder = (id: string) => {
       const newSet = new Set(expandedIds);
       if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
@@ -767,7 +772,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       </div>
                   ) : loadingSessions ? (
                       <div className="flex justify-center mt-20 text-indigo-400"><Loader2 className="w-6 h-6 animate-spin" /></div>
-                  ) : sessions.length === 0 ? (
+                  ) : activeLibraryItems(sessions).length === 0 ? (
                       <div className="text-center mt-20 text-stone-300 space-y-2"><Cloud className="w-12 h-12 mx-auto opacity-20" /><p className="text-xs">暂无笔记本分区</p></div>
                   ) : (
                       <>

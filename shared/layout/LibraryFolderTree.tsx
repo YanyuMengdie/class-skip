@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ChevronRight, Folder, PencilLine, Trash2 } from 'lucide-react';
+import { ChevronRight, Folder } from 'lucide-react';
 import type { CloudSession } from '@/types';
+import { LibraryArchiveAction } from './LibraryArchiveAction';
 import { getFolderPath } from './libraryFolders';
 
 interface LibraryFolderTreeProps {
@@ -10,10 +11,12 @@ interface LibraryFolderTreeProps {
   deleting: boolean;
   onOpen: (folderId: string) => void;
   onRename: (folder: CloudSession) => void;
+  archived?: boolean;
+  onArchive?: (folder: CloudSession) => Promise<unknown>;
   onDelete: (folder: CloudSession) => void;
 }
 
-export function LibraryFolderTree({ folders, activeFolderId, counts, deleting, onOpen, onRename, onDelete }: LibraryFolderTreeProps) {
+export function LibraryFolderTree({ folders, activeFolderId, counts, deleting, onOpen, onRename, onDelete, archived, onArchive }: LibraryFolderTreeProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const children = useMemo(() => {
     const ids = new Set(folders.map(folder => folder.id));
@@ -59,15 +62,7 @@ export function LibraryFolderTree({ folders, activeFolderId, counts, deleting, o
             <Folder size={16} /><span>{name}</span>
             <small title="含子文件夹中的 PDF">{counts[folder.id] ?? 0}</small>
           </button>
-          <button type="button" className="library-folder-rename" disabled={deleting}
-            onClick={event => { event.stopPropagation(); onRename(folder); }}
-            aria-label={`重命名文件夹 ${name}`} title={`重命名文件夹 ${name}`}>
-            <PencilLine size={14} />
-          </button>
-          <button type="button" className="library-folder-delete" disabled={deleting}
-            onClick={() => onDelete(folder)} aria-label={`删除文件夹 ${name}`} title="删除文件夹">
-            <Trash2 size={13} />
-          </button>
+          {onArchive && <LibraryArchiveAction name={name} archived={!!archived} disabled={deleting} onChange={() => onArchive(folder)} onRename={() => onRename(folder)} onDelete={() => onDelete(folder)} />}
         </div>
         {open && subfolders.length > 0 && <ul>{subfolders.map(child => renderFolder(child, path))}</ul>}
       </li>

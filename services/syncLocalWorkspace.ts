@@ -37,8 +37,8 @@ export async function syncLocalWorkspace(user: User, progress: (message: string)
       await remember(row.fileUrl, fileUrl);
     }
     const id = row.type === 'folder'
-      ? await createCloudFolder(user, row.customTitle || row.fileName, parentId)
-      : await createCloudSession(user, row.fileName, fileUrl, parentId);
+      ? await createCloudFolder(user, row.customTitle || row.fileName, parentId, !!row.archived)
+      : await createCloudSession(user, row.fileName, fileUrl, parentId, !!row.archived);
     assertOwner();
     await remember(row.id, id); visiting.delete(row.id);
     return id;
@@ -50,7 +50,7 @@ export async function syncLocalWorkspace(user: User, progress: (message: string)
     const detailKey = `details:${row.id}`;
     if (map[detailKey] === map[row.id]) continue;
     assertOwner();
-    const { id, userId, fileUrl, createdAt, updatedAt, parentId, type, ...details } = row;
+    const { id, userId, fileUrl, createdAt, updatedAt, parentId, type, archived, archiveRevision, ...details } = row;
     await updateCloudSessionState(map[row.id], remap(details), true);
     await remember(detailKey, map[row.id]);
   }

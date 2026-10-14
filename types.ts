@@ -1127,6 +1127,8 @@ export interface TinyStudyEntrySession {
 
 // --- CLOUD SESSION TYPES ---
 export interface CloudSession {
+  archived?: boolean;
+  archiveRevision?: string;
   id: string;
   userId: string;
   fileName: string;

@@ -1,3 +1,4 @@
+import { watchLibraryMetadata } from '@/services/libraryArchiveService';
 import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import { LocalSyllabusBrief } from '@/features/canvas/brief/LocalSyllabusBrief';
 import { isLocalUser, isCloudUser } from '@/services/workspaceUser';
@@ -5,6 +6,7 @@ import { syncLocalWorkspace } from '@/services/syncLocalWorkspace';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from '@/shared/i18n/ExplanationMarkdown';
 import {
+  Archive,
   ArrowRight,
   BookOpen,
   CalendarDays,
@@ -97,6 +99,9 @@ import {
   type AppLanguage,
 } from '@/types';
 import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
+import { activeLibraryItems, archiveRoots, isArchived } from '@/features/library/archive';
+import { useLibraryArchive } from './useLibraryArchive';
+import { LibraryArchiveAction } from './LibraryArchiveAction';
 import { LibraryFileActions } from './LibraryFileActions';
 import { LibraryBulkActions } from './LibraryBulkActions';
 import { runLibraryBatch } from './libraryBatch';
@@ -347,6 +352,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const [loadingCalendar, setLoadingCalendar] = useState(false);
   const [loadingMemos, setLoadingMemos] = useState(false);
   const [search, setSearch] = useState('');
+  const [archiveView, setArchiveView] = useState(false);
+  const archive = useLibraryArchive(user, sessions, setSessions);
   const [activeFolderId, setActiveFolderId] = useState<'all' | string>('all');
   const [jointReviewFolderId, setJointReviewFolderId] = useState<'all' | string>('all');
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -361,7 +368,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const renameFolderRequestRef = useRef(false);
   const [librarySelecting, setLibrarySelecting] = useState(false);
   const [librarySelectedIds, setLibrarySelectedIds] = useState<string[]>([]);
-  useEffect(() => { setLibrarySelectedIds([]); }, [activeFolderId, search, user?.uid, activeTab]);
+  useEffect(() => { setLibrarySelectedIds([]); }, [activeFolderId, archiveView, search, user?.uid, activeTab]);
   useEffect(() => { setLibrarySelecting(false); }, [user?.uid]);
   const fileEditRequestRef = useRef(false);
   const [editingFileId, setEditingFileId] = useState<string | null>(null);
@@ -438,7 +445,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   useEffect(() => {
     let cancelled = false;
     setSessions([]); setJointReviewPacks([]); setEvents([]); setMemos([]);
-    setActiveFolderId('all');
+    setActiveFolderId('all'); setArchiveView(false);
     if (!user) return;
     const read = async <T,>(loader: () => Promise<T>, apply: (value: T) => void, loading: (value: boolean) => void) => {
       loading(true);
@@ -446,11 +453,14 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       catch (error) { if (!cancelled) setLocalCopyMessage(error instanceof Error ? error.message : '资料读取失败，请重试。'); }
       finally { if (!cancelled) loading(false); }
     };
-    void read(() => getUserSessions(user), setSessions, setLoadingSessions);
+    setLoadingSessions(true);
+    const stopLibrary = watchLibraryMetadata(user, rows => {
+      if (!cancelled) { setSessions(rows); setLoadingSessions(false); }
+    }, error => { if (!cancelled) { setLocalCopyMessage(error.message); setLoadingSessions(false); } });
     void read(() => getJointReviewPacks(user), setJointReviewPacks, setLoadingJointReviewPacks);
     void read(() => getCalendarEvents(user), setEvents, setLoadingCalendar);
     void read(() => getMemos(user), setMemos, setLoadingMemos);
-    return () => { cancelled = true; };
+    return () => { cancelled = true; stopLibrary(); };
   }, [user]);
 
   const reloadSessions = async () => {
@@ -487,25 +497,44 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
     [sessions]
   );
 
+  const activeItems = useMemo(() => activeLibraryItems(sessions), [sessions]);
+  const activeFiles = activeItems.filter(item => item.type === 'file' && item.fileUrl);
+  const activeFolders = activeItems.filter(item => item.type === 'folder');
+  const archivedRoots = useMemo(() => archiveRoots(sessions), [sessions]);
+  const libraryFolders = archiveView ? folders.filter(folder => isArchived(folder, sessions)) : activeFolders;
+  const libraryFiles = archiveView ? fileSessions.filter(file => isArchived(file, sessions)) : activeFiles;
+  const changeArchive = async (ids: string[], archived: boolean) => {
+    const result = await archive.change(ids, archived);
+    setLibrarySelectedIds(result.failedIds);
+    if (!result.failedIds.length) { setActiveFolderId('all'); setSearch(''); }
+    return result;
+  };
+
   const activeFolder = useMemo(
     () => (activeFolderId === 'all' ? null : folders.find((folder) => folder.id === activeFolderId) ?? null),
     [activeFolderId, folders]
   );
 
-  const activeFolderPath = useMemo(() => getFolderPath(activeFolderId, folders), [activeFolderId, folders]);
+  useEffect(() => {
+    if (!loadingSessions && activeFolderId !== 'all' && (!activeFolder || isArchived(activeFolder, sessions) !== archiveView)) {
+      setActiveFolderId('all'); setSearch('');
+    }
+  }, [sessions, loadingSessions, archiveView, activeFolderId]);
+
+  const activeFolderPath = useMemo(() => getFolderPath(activeFolderId, folders).filter(folder => !archiveView || isArchived(folder, sessions)), [activeFolderId, folders, archiveView]);
   const folderFileTotals = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const file of fileSessions) {
+    for (const file of libraryFiles) {
       for (const folder of getFolderPath(file.parentId, folders)) counts[folder.id] = (counts[folder.id] ?? 0) + 1;
     }
     return counts;
-  }, [fileSessions, folders]);
+  }, [sessions, archiveView]);
   const visibleSubfolders = useMemo(() => {
-    if (!activeFolder) return [];
     const needle = search.trim().toLowerCase();
-    return folders.filter(folder => folder.parentId === activeFolder.id
-      && (!needle || (folder.customTitle || folder.fileName).toLowerCase().includes(needle)));
-  }, [activeFolder, folders, search]);
+    const scope = activeFolder ? libraryFolders.filter(folder => folder.parentId === activeFolder.id)
+      : archiveView ? (needle ? libraryFolders : archivedRoots.filter(item => item.type === 'folder')) : activeFolders.filter(folder => !folder.parentId || !activeFolders.some(parent => parent.id === folder.parentId));
+    return scope.filter(folder => !needle || (folder.customTitle || folder.fileName).toLowerCase().includes(needle));
+  }, [activeFolder, sessions, archiveView, search]);
 
   const openLibraryFolder = (folderId: string) => {
     if (fileEditRequestRef.current) return;
@@ -520,16 +549,17 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const visibleFiles = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return fileSessions
+    return libraryFiles
+      .filter(session => !archiveView || activeFolderId !== 'all' || !!search.trim() || archivedRoots.some(root => root.id === session.id))
       .filter((session) => activeFolderId === 'all' || session.parentId === activeFolderId)
       .filter((session) => {
         if (!needle) return true;
         const title = `${session.customTitle || ''} ${session.fileName || ''}`.toLowerCase();
         return title.includes(needle);
       });
-  }, [activeFolderId, fileSessions, search]);
+  }, [activeFolderId, sessions, archiveView, search]);
 
-  const librarySelectedFiles = visibleFiles.filter(file => librarySelectedIds.includes(file.id));
+  const librarySelectedFiles = [...visibleFiles, ...visibleSubfolders].filter(file => librarySelectedIds.includes(file.id));
   const toggleLibraryFile = (id: string) => {
     if (fileEditRequestRef.current) return;
     setLibrarySelectedIds(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id]);
@@ -541,9 +571,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   );
 
   const jointReviewVisibleFiles = useMemo(
-    () => fileSessions.filter((session) => jointReviewFolderId === 'all'
+    () => activeFiles.filter((session) => jointReviewFolderId === 'all'
       || getFolderPath(session.parentId, folders).some(folder => folder.id === jointReviewFolderId)),
-    [fileSessions, folders, jointReviewFolderId]
+    [sessions, jointReviewFolderId]
   );
 
   useEffect(() => {
@@ -1516,14 +1546,19 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
               <LayoutGrid className="w-4 h-4 shrink-0" />
               <span className="truncate">{localizeUiText("全部资料")}</span>
             </span>
-            <span className="text-xs opacity-70">{fileSessions.length}</span>
+            <span className="text-xs opacity-70">{libraryFiles.length}</span>
           </button>
-          <LibraryFolderTree folders={folders} activeFolderId={activeFolderId} counts={folderFileTotals}
-            deleting={deletingFolder || creatingFolder || movingFileId !== null || renamingFolderId !== null}
+          <LibraryFolderTree folders={libraryFolders} activeFolderId={activeFolderId} counts={folderFileTotals}
+            deleting={archive.busy || deletingFolder || creatingFolder || movingFileId !== null || renamingFolderId !== null}
+            archived={archiveView} onArchive={folder => changeArchive([folder.id], !archiveView)}
             onOpen={openLibraryFolder} onDelete={handleDeleteFolder} onRename={handleRenameFolder} />
         </div>
 
-        <div className="space-y-2">
+        <button type="button" className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[#526B5D]" disabled={archive.busy}
+          onClick={() => { setArchiveView(value => !value); setActiveFolderId('all'); setSearch(''); setLibraryMoveNotice(null); }}>
+          <Archive size={16}/>{archiveView ? text('返回资料库', 'Back to library') : text('查看归档', 'View archive')}
+        </button>
+        {!archiveView && <div className="space-y-2">
           <button
             type="button"
             onClick={handleCreateFolder}
@@ -1554,7 +1589,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             <GraduationCap className="w-4 h-4" />
             <span>{localizeUiText("从 Canvas 导入")}</span>
           </button>
-        </div>
+        </div>}
 
         <label className="flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-white border border-dashed border-slate-300 text-sm font-bold text-slate-600 hover:border-slate-500 hover:text-slate-900 cursor-pointer transition-colors">
           {isProcessing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
@@ -1581,7 +1616,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         </div>
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
           <div>
-            <h2 className="text-2xl font-black text-slate-900 tracking-tight">{localMode ? localizeUiText("本机资料库") : localizeUiText("云端资料库")}</h2>
+            <h2 className="text-2xl font-black text-slate-900 tracking-tight">{archiveView ? text("归档资料", "Archived material") : localMode ? localizeUiText("本机资料库") : localizeUiText("云端资料库")}</h2>
             <div className="mt-2 flex flex-wrap items-center gap-3 text-sm text-[#526B5D]">
               <span>{localMode ? localizeUiText("资料和记录保存在当前浏览器，清除网站数据会丢失。") : localizeUiText("当前使用账号资料，本机原件仍然保留。")}</span>
               {isCloudUser(cloudUser)
@@ -1592,7 +1627,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             {localCopyMessage && <p role="status" className="mt-2 text-sm">{localCopyMessage}</p>}
             {activeFolder ? (
               <nav className="library-folder-breadcrumb" aria-label={localizeUiText("文件夹路径")}>
-                <button type="button" onClick={() => openLibraryFolder('all')}>{localizeUiText("全部资料")}</button>
+                <button type="button" onClick={() => openLibraryFolder('all')}>{archiveView ? text('归档目录', 'Archive') : localizeUiText("全部资料")}</button>
                 {activeFolderPath.map((folder, index) => (
                   <React.Fragment key={folder.id}>
                     <ChevronRight size={12} />
@@ -1605,6 +1640,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             ) : <p className="text-sm text-slate-500 mt-1">{currentFileName ? text(`上次打开：${currentFileName}`, `Last opened: ${currentFileName}`) : localizeUiText("选一份资料进去，学习页会接住你。")}</p>}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 md:items-center">
+            {!archiveView && <>
             <button
               type="button"
               onClick={() => (user ? setCanvasImportOpen(true) : onLogin())}
@@ -1626,6 +1662,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                 onChange={handleLibraryBatchUpload}
               />
             </label>
+            </>}
             <div className="relative md:w-72">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
@@ -1638,10 +1675,13 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </div>
         </div>
 
-        {user && <LibraryBulkActions key={user.uid} active={librarySelecting} files={librarySelectedFiles} folders={folders} total={visibleFiles.length}
-          disabled={loadingSessions || openingSessionId !== null || editingFileId !== null || movingFileId !== null || creatingFolder || deletingFolder || renamingFolderId !== null || isLibraryUploading}
+        {archiveView && <p className="mb-4 text-sm text-[#6C796C]">{text('资料和学习记录都保留。恢复夹内资料时，会一并恢复所属的归档文件夹；单独归档的其他资料仍留在归档里。', 'Material and history are kept. Restoring an item inside an archived folder also restores its archived parent folders. Other individually archived items stay archived.')}</p>}
+        {archive.notice && <div className="library-archive-notice" role="status"><span>{archive.notice}</span>{archive.canUndo && <button disabled={archive.busy} onClick={() => void archive.undoLast()}>{text('撤销', 'Undo')}</button>}<button onClick={archive.dismiss}>{text('关闭', 'Dismiss')}</button></div>}
+        {user && <LibraryBulkActions key={user.uid} active={librarySelecting} files={librarySelectedFiles} folders={activeFolders} total={visibleFiles.length + visibleSubfolders.length}
+          archived={archiveView} onArchive={() => changeArchive(librarySelectedFiles.map(item => item.id), !archiveView)}
+          disabled={archive.busy || loadingSessions || openingSessionId !== null || editingFileId !== null || movingFileId !== null || creatingFolder || deletingFolder || renamingFolderId !== null || isLibraryUploading}
           onToggle={() => { setLibrarySelecting(value => !value); setLibrarySelectedIds([]); }}
-          onSelectAll={() => setLibrarySelectedIds(visibleFiles.map(file => file.id))} onClear={() => setLibrarySelectedIds([])} onApply={handleBulkLibraryFiles} />}
+          onSelectAll={() => setLibrarySelectedIds([...visibleFiles, ...visibleSubfolders].map(file => file.id))} onClear={() => setLibrarySelectedIds([])} onApply={handleBulkLibraryFiles} />}
         {libraryMoveNotice && <div className="library-move-notice" role="status">
           <Check className="h-4 w-4 shrink-0" aria-hidden="true" /><span>{libraryMoveNotice.message}</span>
           <button type="button" className="library-move-view" onClick={() => { setActiveFolderId(libraryMoveNotice.parentId ?? 'all'); setSearch(''); }}>
@@ -1682,7 +1722,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         {user && activeFolder && !loadingSessions && (
           <>
             <div className="library-folder-location-bar">
-              <button type="button" onClick={() => openLibraryFolder(activeFolder.parentId ?? 'all')}>
+              <button type="button" onClick={() => openLibraryFolder(archiveView && !libraryFolders.some(folder => folder.id === activeFolder.parentId) ? 'all' : activeFolder.parentId ?? 'all')}>
                 <ChevronLeft size={15} />{activeFolder.parentId ? localizeUiText("返回上级文件夹") : localizeUiText("返回全部资料")}
               </button>
               <div className="flex items-center gap-5">
@@ -1691,27 +1731,32 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   {renamingFolderId === activeFolder.id ? <Loader2 size={15} className="animate-spin" /> : <PencilLine size={15} />}
                   {renamingFolderId === activeFolder.id ? localizeUiText("重命名中") : localizeUiText("重命名")}
                 </button>
-                <button type="button" onClick={handleCreateFolder} disabled={creatingFolder || deletingFolder || renamingFolderId !== null}>
-                  {creatingFolder ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}{localizeUiText("新建子文件夹 ")}</button>
+                <LibraryArchiveAction name={activeFolder.customTitle || activeFolder.fileName} archived={archiveView} disabled={archive.busy} onChange={() => changeArchive([activeFolder.id], !archiveView)} />
+                {!archiveView && <button type="button" onClick={handleCreateFolder} disabled={creatingFolder || deletingFolder || renamingFolderId !== null}>
+                  {creatingFolder ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />}{localizeUiText("新建子文件夹 ")}</button>}
               </div>
             </div>
+          </>
+        )}
             {visibleSubfolders.length > 0 && (
               <div className="library-subfolders">
                 {visibleSubfolders.map(folder => {
-                  const childCount = folders.filter(item => item.parentId === folder.id).length;
+                  const childCount = libraryFolders.filter(item => item.parentId === folder.id).length;
                   return (
-                    <button type="button" key={folder.id} className="library-subfolder-card" onClick={() => openLibraryFolder(folder.id)}>
+                    <div key={folder.id} className="library-archive-folder">
+                    <button type="button" className={`library-subfolder-card${librarySelecting && librarySelectedIds.includes(folder.id) ? ' is-selected' : ''}`} disabled={archive.busy}
+                      aria-pressed={librarySelecting ? librarySelectedIds.includes(folder.id) : undefined} onClick={() => librarySelecting ? toggleLibraryFile(folder.id) : openLibraryFolder(folder.id)}>
                       <Folder size={26} />
                       <span><strong>{folder.customTitle || folder.fileName}</strong>
                         <small>{folderFileTotals[folder.id] ?? 0}{localizeUiText(" 份 PDF")}{childCount > 0 ? text(` · ${childCount} 个子文件夹`, ` · ${childCount} subfolders`) : ''}</small></span>
-                      <ChevronRight size={16} />
+                      {librarySelecting && librarySelectedIds.includes(folder.id) ? <Check size={16}/> : <ChevronRight size={16} />}
                     </button>
+                    {!librarySelecting && <LibraryArchiveAction name={folder.customTitle || folder.fileName} archived={archiveView} disabled={archive.busy} onChange={() => changeArchive([folder.id], !archiveView)} />}
+                    </div>
                   );
                 })}
               </div>
             )}
-          </>
-        )}
 
         {!user ? (
           <div className="min-h-[320px] bg-white border border-slate-200 rounded-lg flex flex-col items-center justify-center text-center p-8">
@@ -1799,8 +1844,8 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   <p className="mt-2 text-xs text-slate-500">{formatDate(session.createdAt, language)}</p>
                 </div>
               </button>
-              {!librarySelecting && <LibraryFileActions file={session} folders={folders} inFolder={activeFolderId !== 'all'}
-                disabled={openingSessionId !== null || movingFileId !== null || deletingFolder || renamingFolderId !== null || editingFileId !== null || creatingFolder}
+              {!librarySelecting && <LibraryFileActions file={session} folders={activeFolders} archived={archiveView} onArchive={(id, value) => changeArchive([id], value)} inFolder={activeFolderId !== 'all'}
+                disabled={archive.busy || openingSessionId !== null || movingFileId !== null || deletingFolder || renamingFolderId !== null || editingFileId !== null || creatingFolder}
                 onMove={handleMoveLibraryFile} onRename={(id, name) => handleEditLibraryFile(id, name)} onDelete={id => handleEditLibraryFile(id)} />}
               </div>
             ))}
@@ -1855,7 +1900,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                   onClick={onLogin}
                   className="mt-4 w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-black text-white"
                 >{localizeUiText(" 登录后创建 ")}</button>
-              ) : fileSessions.length === 0 ? (
+              ) : activeFiles.length === 0 ? (
                 <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">{localizeUiText(" 资料库里还没有云端 PDF。先上传一些 lecture 和 reading。 ")}</div>
               ) : (
                 <>
@@ -1876,9 +1921,9 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
                           <LayoutGrid className="h-4 w-4 shrink-0" />
                           <span className="truncate">{localizeUiText("全部资料")}</span>
                         </span>
-                        <span className="text-xs opacity-70">{fileSessions.length}</span>
+                        <span className="text-xs opacity-70">{activeFiles.length}</span>
                       </button>
-                      {folders.map((folder) => {
+                      {activeFolders.map((folder) => {
                         const active = jointReviewFolderId === folder.id;
                         return (
                           <button
@@ -2460,7 +2505,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
   const renderGrowth = () => {
     const learningDays = new Set(fileSessions.map((session) => formatDate(session.createdAt, language))).size;
-    const recentDocs = fileSessions.slice(0, 4);
+    const recentDocs = activeFiles.slice(0, 4);
     return (
       <div className="space-y-6">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -2796,7 +2841,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       setReluctantView('pick');
     }} />;
     if (reluctantView === 'pick' || !selectedTinyStudySession || !user) return <ReluctantPdfPicker
-      language={language} mode={reluctantMode} style={overviewStyle} files={fileSessions} folders={folders} covers={coverPreviews}
+      language={language} mode={reluctantMode} style={overviewStyle} files={activeFiles} folders={activeFolders} covers={coverPreviews}
       loading={loadingSessions} signedIn={!!user} onChoose={choosePdf} onLogin={onLogin}
       onBack={() => setReluctantView(reluctantMode === 'overview' ? 'styles' : 'home')}
       onLibrary={() => setActiveTab('library')}
@@ -3063,7 +3108,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       <CanvasImportDialog
         open={canvasImportOpen}
         defaultFolderId={activeFolder?.id ?? null}
-        destinationFolders={folders.map(folder => ({ id: folder.id,
+        destinationFolders={activeFolders.map(folder => ({ id: folder.id,
           label: getFolderPath(folder.id, folders).map(part => part.customTitle || part.fileName).join(' / '),
         })).sort((a, b) => a.label.localeCompare(b.label))}
         disabled={!user || !!libraryUploadStatus && libraryUploadStatus.completed < libraryUploadStatus.total}

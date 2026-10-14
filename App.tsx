@@ -1,3 +1,4 @@
+import { activeLibraryItems } from '@/features/library/archive';
 import { CloudRecordError } from '@/services/cloudStudy/chunks';
 import { studySaveFailure } from '@/services/cloudStudy/saveStatus';
 import { useBackgroundAudio } from '@/features/background-audio/useBackgroundAudio';
@@ -4322,7 +4323,7 @@ const App: React.FC = () => {
           caseSourceId={fileHash || currentSessionId || fileName || 'local-document'}
           currentPage={slides.length > 0 ? currentIndex + 1 : undefined}
           onJumpToPage={slides.length > 0 ? (page) => { const safePage = Math.max(1, Math.min(page, slides.length)); setCurrentIndex(safePage - 1); if (isMobileReader) setMobileSourcePage(safePage); } : undefined}
-          cloudSessions={studyCloudSessions}
+          cloudSessions={activeLibraryItems(studyCloudSessions)}
           currentCloudSessionId={currentSessionId}
           pageRangeStart={activeSkim.pageRangeStart}
           setPageRangeStart={setSkimPageRangeStart}

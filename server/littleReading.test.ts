@@ -1,6 +1,6 @@
 import { describe,it,expect } from 'vitest';
 import { PDFDocument } from 'pdf-lib';
-import { advanceReadingJob,claimReadingJob,jobIdFor,sourceObject,UnsupportedLecture } from './littleReading';
+import { advanceReadingJob,claimReadingJob,jobIdFor,sourceObject,UnsupportedLecture, readingSourceArchived } from './littleReading';
 import { parseReadingCommand,verifyWorkerSignature,workerSignature } from './littleReadingApi';
 import { StoreConflict,type ReadingStore,type Stored } from './littleReadingStore';
 import type { ReadingJob,LittleArticle } from '../features/littleReading/model';
@@ -13,6 +13,29 @@ function memory(){
   return {store,jobs,articles};
 }
 describe('background lecture articles',()=>{
+  it('pauses queued work under an archived parent, retains drafts, and resumes after restoration', async () => {
+    const {store, jobs, articles} = memory();
+    const original = await store.session('s');
+    let archived = false;
+    store.session = async id => id === 'course' ? { ...original!, type: 'folder', parentId: null, archived } : { ...original!, parentId: 'course' };
+    const claimed = await claimReadingJob(store, 's', 'en');
+    const draft = { title: 'saved draft', body: 'still kept', pages: [1] };
+    jobs.get(claimed!.id)!.value.draft = draft;
+    archived = true;
+    let calls = 0;
+    expect(await claimReadingJob(store, 's', 'en')).toBeNull();
+    expect(await advanceReadingJob(store, claimed!, 'alice', 'token', 'key', { load: async () => { calls++; throw new Error('Should not load'); } })).toBe(false);
+    expect(calls).toBe(0); expect(articles.size).toBe(0);
+    expect(jobs.get(claimed!.id)!.value).toMatchObject({ status: 'paused', attempts: 0, draft });
+    archived = false;
+    expect(await claimReadingJob(store, 's', 'en')).toMatchObject({ draft, status: 'working' });
+  });
+  it('checks archived ancestors and stops safely on corrupt cyclic folder chains', async () => {
+    const { store } = memory();
+    const source = (await store.session('s'))!;
+    store.session = async id => ({ ...source, type: 'folder', parentId: id === 'a' ? 'b' : 'a' });
+    expect(await readingSourceArchived(store, { ...source, parentId: 'a' })).toBe(true);
+  });
   it('only reads the account-owned object on the fixed storage host',()=>{
     expect(sourceObject('https://firebasestorage.googleapis.com/v0/b/ai-tutor-647fd.firebasestorage.app/o/users%2Falice%2Fuploads%2Fx.pdf?token=private','alice')).toBe('users/alice/uploads/x.pdf');
     for(const u of ['https://example.com/x.pdf','https://firebasestorage.googleapis.com/v0/b/ai-tutor-647fd.firebasestorage.app/o/users%2Fbob%2Fuploads%2Fx.pdf','http://127.0.0.1/private'])expect(()=>sourceObject(u,'alice')).toThrow();

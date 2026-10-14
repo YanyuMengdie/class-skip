@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { Check, Folder, FolderInput, Loader2, Trash2, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Check, Folder, FolderInput, Loader2, Trash2, X } from 'lucide-react';
 import type { CloudSession } from '@/types';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { getFolderPath } from './libraryFolders';
@@ -11,6 +11,8 @@ interface Props {
   files: CloudSession[];
   folders: CloudSession[];
   total: number;
+  archived?: boolean;
+  onArchive?: () => Promise<unknown>;
   disabled: boolean;
   onToggle: () => void;
   onSelectAll: () => void;
@@ -18,7 +20,7 @@ interface Props {
   onApply: (ids: string[], action: 'move' | 'delete', parentId: string | null) => Promise<LibraryBatchResult>;
 }
 
-export function LibraryBulkActions({ active, files, folders, total, disabled, onToggle, onSelectAll, onClear, onApply }: Props) {
+export function LibraryBulkActions({ active, files, folders, total, archived, onArchive, disabled, onToggle, onSelectAll, onClear, onApply }: Props) {
   const { text } = useAppLanguage();
   const [mode, setMode] = useState<'move' | 'delete' | null>(null);
   const [destination, setDestination] = useState<string | null | undefined>();
@@ -65,11 +67,19 @@ export function LibraryBulkActions({ active, files, folders, total, disabled, on
         <button type="button" disabled={disabled || pending || !total || files.length === total} onClick={onSelectAll}>{text('全选当前列表', 'Select all in this list')}</button>
         <button type="button" disabled={disabled || pending || !files.length} onClick={onClear}>{text('取消选择', 'Clear selection')}</button>
         <span className="library-bulk-spacer" />
-        <button type="button" disabled={disabled || pending || !files.length} onClick={event => open('move', event.currentTarget)}><FolderInput size={16} />{text('移动所选', 'Move selected')}</button>
-        <button type="button" className="library-bulk-delete" disabled={disabled || pending || !files.length} onClick={event => open('delete', event.currentTarget)}><Trash2 size={16} />{text('删除所选', 'Delete selected')}</button>
-        <small>{text('只选择当前列表中的讲义；切换文件夹或搜索时会清空选择。', 'Select PDFs in this list. Changing folders or search clears the selection.')}</small>
+        {onArchive && <button type="button" disabled={disabled || pending || !files.length} onClick={async () => {
+          if (busy.current) return;
+          busy.current = true; setPending(true); setError('');
+          try { await onArchive(); } catch { setError(text('归档状态未能保存，请重试。', 'Could not save archive status. Please retry.')); }
+          finally { busy.current = false; setPending(false); }
+        }}>{archived ? <ArchiveRestore size={16}/> : <Archive size={16}/>} {archived ? text('恢复所选', 'Restore selected') : text('归档所选', 'Archive selected')}</button>}
+
+        <button type="button" disabled={disabled || pending || !files.length || files.some(f => f.type === 'folder')} onClick={event => open('move', event.currentTarget)}><FolderInput size={16} />{text('移动所选', 'Move selected')}</button>
+        <button type="button" className="library-bulk-delete" disabled={disabled || pending || !files.length || files.some(f => f.type === 'folder')} onClick={event => open('delete', event.currentTarget)}><Trash2 size={16} />{text('删除所选', 'Delete selected')}</button>
+        <small>{text('文件夹可批量归档或恢复；切换位置会清空选择。', 'Folders can be archived or restored together. Changing locations clears your selection.')}</small>
       </>}
     </div>
+    {error && !mode && <p role="alert" className="library-file-error">{error}</p>}
     <dialog ref={dialogRef} className="library-move-dialog" aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
       onCancel={event => { event.preventDefault(); close(); }} onClick={event => { if (event.target === event.currentTarget) close(); }}>
       <div className="library-move-content">

@@ -1,5 +1,5 @@
 import React, { useEffect, useId, useRef, useState } from 'react';
-import { Check, Folder, FolderInput, FolderOutput, Loader2, MoreHorizontal, PencilLine, Trash2, Search, X } from 'lucide-react';
+import { Archive, ArchiveRestore, Check, Folder, FolderInput, FolderOutput, Loader2, MoreHorizontal, PencilLine, Trash2, Search, X } from 'lucide-react';
 import type { CloudSession } from '@/types';
 import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { getFolderPath } from './libraryFolders';
@@ -10,12 +10,14 @@ interface LibraryFileActionsProps {
   folders: CloudSession[];
   inFolder: boolean;
   disabled?: boolean;
+  archived?: boolean;
+  onArchive?: (id: string, archived: boolean) => Promise<unknown>;
   onRename: (fileId: string, name: string) => Promise<void>;
   onDelete: (fileId: string) => Promise<void>;
   onMove: (fileId: string, parentId: string | null) => Promise<void>;
 }
 
-export function LibraryFileActions({ file, folders, inFolder, disabled, onMove, onRename, onDelete }: LibraryFileActionsProps) {
+export function LibraryFileActions({ file, folders, inFolder, disabled, archived, onArchive, onMove, onRename, onDelete }: LibraryFileActionsProps) {
   const { text } = useAppLanguage();
   const [open, setOpen] = useState(false);
   const [choosing, setChoosing] = useState(false);
@@ -115,6 +117,13 @@ export function LibraryFileActions({ file, folders, inFolder, disabled, onMove, 
       <button type="button" role="menuitem" disabled={disabled || pending} onClick={() => { setName(file.customTitle || file.fileName); setError(''); setOpen(false); setEditing('rename'); }}>
         <PencilLine size={17} /><span>{text('重命名', 'Rename')}</span>
       </button>
+      {onArchive && <button type="button" role="menuitem" disabled={disabled || pending} onClick={async () => {
+        if (requestRef.current) return;
+        requestRef.current = true; setPending(true); setError('');
+        try { await onArchive(file.id, !archived); setOpen(false); }
+        catch { setError(text('归档状态未能保存，请重试。', 'Could not save archive status. Please retry.')); }
+        finally { requestRef.current = false; setPending(false); }
+      }}>{archived ? <ArchiveRestore size={17}/> : <Archive size={17}/>}<span>{archived ? text('恢复到原位置', 'Restore to original location') : text('归档', 'Archive')}</span></button>}
       <button type="button" role="menuitem" className="library-file-delete" disabled={disabled || pending} onClick={() => { setError(''); setOpen(false); setEditing('delete'); }}>
         <Trash2 size={17} /><span>{text('删除资料', 'Delete PDF')}</span>
       </button>

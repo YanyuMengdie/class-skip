@@ -1,10 +1,11 @@
 import type { ReadingJob, LittleArticle } from '../features/littleReading/model.js';
 const ROOT = 'https://firestore.googleapis.com/v1/projects/ai-tutor-647fd/databases/(default)/documents';
-type Field = { stringValue?: string; integerValue?: string; timestampValue?: string; nullValue?: null };
+type Field = { stringValue?: string; integerValue?: string; timestampValue?: string; nullValue?: null; booleanValue?: boolean };
 export interface Stored<T> { value:T; updateTime:string; }
 export class StoreConflict extends Error {}
+export interface ReadingSource { userId: string; fileName: string; fileUrl: string; type: string; parentId?: string | null; archived?: boolean; }
 export interface ReadingStore {
-  session(id:string):Promise<{ userId:string; fileName:string; fileUrl:string; type:string } | null>;
+  session(id:string):Promise<ReadingSource | null>;
   get(id:string):Promise<Stored<ReadingJob> | null>;
   put(job:ReadingJob, expected:string | null):Promise<void>;
   article(article:LittleArticle):Promise<void>;
@@ -21,7 +22,7 @@ export function createReadingStore(uid:string, token:string):ReadingStore {
   const fields=(value:unknown)=>({payload:{stringValue:JSON.stringify(value)}});
   return {
     async session(id){const d=await request(`sessions/${encodeURIComponent(id)}`);if(!d)return null;
-      const f=d.fields as Record<string,Field>;return {userId:f.userId?.stringValue??'',fileName:f.fileName?.stringValue??'',fileUrl:f.fileUrl?.stringValue??'',type:f.type?.stringValue??'file'};},
+      const f=d.fields as Record<string,Field>;return {userId:f.userId?.stringValue??'',fileName:f.fileName?.stringValue??'',fileUrl:f.fileUrl?.stringValue??'',type:f.type?.stringValue??'file',parentId:f.parentId?.stringValue??null,archived:f.archived?.booleanValue===true};},
     async get(id){const d=await request(`${base}/littleReadingJobs/${id}`);return d?{value:JSON.parse(d.fields.payload.stringValue),updateTime:d.updateTime}:null;},
     async put(job,expected){const condition=expected?`currentDocument.updateTime=${encodeURIComponent(expected)}`:'currentDocument.exists=false';
       await request(`${base}/littleReadingJobs/${job.id}?${condition}`,{method:'PATCH',body:JSON.stringify({fields:fields(job)})});},

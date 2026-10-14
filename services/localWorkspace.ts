@@ -97,3 +97,26 @@ export async function deleteLocalSession(sessionId: string): Promise<void> {
     tx.onerror = tx.onabort = () => reject(tx.error || new Error('删除失败，资料已保留。'));
   });
 }
+
+/** Merge archive metadata against the latest rows in one IndexedDB transaction. */
+export async function mutateLocalSessionMetadata(plan: (rows: CloudSession[]) => { id: string; archived?: boolean; archiveRevision?: string }[]) {
+  const db = await database();
+  return new Promise<ReturnType<typeof plan>>((resolve, reject) => {
+    const tx = db.transaction('records', 'readwrite'), store = tx.objectStore('records');
+    let patches: ReturnType<typeof plan> = [], failure: unknown;
+    const req = store.getAll(IDBKeyRange.bound('sessions/', 'sessions/\uffff'));
+    req.onsuccess = () => {
+      try {
+        const rows = req.result as CloudSession[];
+        patches = plan(rows);
+        for (const patch of patches) {
+          const row = rows.find(row => row.id === patch.id);
+          if (!row) throw new Error('Material unavailable.');
+          store.put({ ...row, ...patch }, `sessions/${row.id}`);
+        }
+      } catch (error) { failure = error; tx.abort(); }
+    };
+    tx.oncomplete = () => resolve(patches);
+    tx.onerror = tx.onabort = () => reject(failure || tx.error || new Error('Archive could not be saved.'));
+  });
+}

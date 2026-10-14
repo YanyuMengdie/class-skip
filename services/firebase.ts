@@ -184,7 +184,7 @@ const uploadToFirebaseREST = async (user: User, data: Blob | File, filename: str
  */
 const META_KEYS = new Set([
     'id', 'userId', 'fileName', 'customTitle', 'fileUrl', 'downloadUrl', 
-    'createdAt', 'updatedAt', 'sortIndex', 'type', 'parentId'
+    'createdAt', 'updatedAt', 'sortIndex', 'type', 'parentId', 'archived', 'archiveRevision'
 ]);
 
 /**
@@ -214,9 +214,10 @@ export const createCloudSession = async (
   user: User,
   fileName: string,
   fileUrl: string,
-  parentId: string | null = null
+  parentId: string | null = null,
+  archived = false
 ): Promise<string> => {
-  if (isLocalUser(user)) return createLocalSession(fileName, fileUrl, parentId);
+  if (isLocalUser(user)) { const id = await createLocalSession(fileName, fileUrl, parentId); if (archived) await localPatch('sessions', id, { archived }); return id; }
 
   console.group("📝 [Firestore] Session Creation");
   try {
@@ -233,6 +234,7 @@ export const createCloudSession = async (
       sortIndex: Date.now(),
       updatedAt: now,
       type: 'file', // Default
+      archived,
       parentId
     };
 
@@ -260,7 +262,7 @@ export const createCloudSession = async (
 
     console.log("✅ Created Session:", sessionId);
     console.groupEnd();
-    if (/\.pdf$/i.test(fileName)) {
+    if (!archived && /\.pdf$/i.test(fileName)) {
       // Preparation has its own persisted records and cannot turn a successful upload into a failure.
       void import('./littleReadingService').then(({ prepareLecture }) => prepareLecture(user, sessionId))
         .catch(() => console.warn('[Read a little] Upload saved; article preparation will retry on the next visit.'));
@@ -273,8 +275,8 @@ export const createCloudSession = async (
   }
 };
 
-export const createCloudFolder = async (user: User, folderName: string, parentId: string | null = null): Promise<string> => {
-  if (isLocalUser(user)) return createLocalSession(folderName, '', parentId, 'folder');
+export const createCloudFolder = async (user: User, folderName: string, parentId: string | null = null, archived = false): Promise<string> => {
+  if (isLocalUser(user)) { const id = await createLocalSession(folderName, '', parentId, 'folder'); if (archived) await localPatch('sessions', id, { archived }); return id; }
 
     try {
         const sessionsRef = collection(db, "sessions");
@@ -289,6 +291,7 @@ export const createCloudFolder = async (user: User, folderName: string, parentId
             sortIndex: Date.now(),
             updatedAt: now,
             type: 'folder',
+            archived,
             parentId: parentId
         };
 

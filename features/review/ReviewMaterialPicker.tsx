@@ -1,3 +1,4 @@
+import { activeLibraryItems } from '@/features/library/archive';
 import { useAppLanguage, localizeUiText } from '@/shared/i18n/appLanguage';
 import React, { useState } from 'react';
 import { ArrowRight, Check, ChevronLeft, ChevronRight, FileText, Folder, Loader2, Search, X } from 'lucide-react';
@@ -17,8 +18,9 @@ export function ReviewMaterialPicker({ sessions, loading, error, signedIn, toolL
   useAppLanguage();
   const [location, setLocation] = useState<{ kind: 'root' } | { kind: 'folder'; id: string } | { kind: 'other' }>({ kind: 'root' });
   const [query, setQuery] = useState('');
-  const folders = sessions.filter(s => s.type === 'folder');
-  const files = sessions.filter(s => s.type === 'file');
+  const visibleSessions = activeLibraryItems(sessions);
+  const folders = visibleSessions.filter(s => s.type === 'folder');
+  const files = visibleSessions.filter(s => s.type === 'file');
   const ids = new Set(folders.map(f => f.id));
   const currentFolder = location.kind === 'folder' ? folders.find(f => f.id === location.id) : undefined;
   const inOther = location.kind === 'other';

@@ -1,3 +1,4 @@
+import { activeLibraryItems, type ArchiveItem } from '../library/archive.js';
 export type ReadingLanguage = 'zh-CN' | 'en';
 export const READING_VERSION = 1;
 export const INITIAL_ARTICLES = 3;
@@ -10,20 +11,20 @@ export interface LittleArticle {
 }
 export interface ReadingJob {
   id: string; sourceSessionId: string; sourceName: string; sourceUrl: string; language: ReadingLanguage;
-  version: number; status: 'queued' | 'working' | 'ready' | 'failed' | 'unsupported';
+  version: number; status: 'queued' | 'working' | 'ready' | 'failed' | 'unsupported' | 'paused';
   target: number; completed: number; plan: ArticleTopic[]; pageCount: number;
   draft: { title: string; body: string; pages: number[] } | null;
   lease: string; leaseUntil: number; attempts: number; error: string; createdAt: number; updatedAt: number;
 }
 export interface ReadingPosition { articleId: string; fraction: number; finished: boolean; updatedAt: number; }
-export function recentPdfs<T extends { type: string; fileName: string; createdAt?: unknown }>(files: T[]): T[] {
+export function recentPdfs<T extends ArchiveItem & { fileName: string; createdAt?: unknown }>(files: T[]): T[] {
   const time = (v: unknown): number => {
     if (typeof v === 'number') return v;
     if (v instanceof Date) return v.getTime();
     const t = v as { toMillis?: () => number; seconds?: number } | undefined;
     return t?.toMillis?.() ?? (t?.seconds ?? 0) * 1000;
   };
-  return files.filter(f => f.type === 'file' && /\.pdf$/i.test(f.fileName)).sort((a,b) => time(b.createdAt)-time(a.createdAt)).slice(0,10);
+  return activeLibraryItems(files).filter(f => f.type === 'file' && /\.pdf$/i.test(f.fileName)).sort((a,b) => time(b.createdAt)-time(a.createdAt)).slice(0,10);
 }
 export function selectArticle(articles: LittleArticle[], positions: Record<string, ReadingPosition>, currentId?: string,
   mode: 'resume' | 'next' | 'change' = 'resume'): LittleArticle | undefined {

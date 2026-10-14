@@ -1,3 +1,4 @@
+import { activeLibraryItems } from '@/features/library/archive';
 import React, { useEffect, useMemo, useState } from 'react';
 import { X } from 'lucide-react';
 import type { WorkspaceUser as User } from '@/services/workspaceUser';
@@ -96,7 +97,7 @@ export const ExamLinkModal: React.FC<ExamLinkModalProps> = ({
       try {
         const sessions = await getUserSessions(user);
         if (cancelled) return;
-        setCloudFiles(sessions.filter((s) => s.type === 'file' && !!s.fileUrl));
+        setCloudFiles(activeLibraryItems(sessions).filter((s) => s.type === 'file' && !!s.fileUrl));
       } catch {
         if (!cancelled) setCloudFiles([]);
       }

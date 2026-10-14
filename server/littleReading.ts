@@ -3,7 +3,7 @@ import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { requestReadingAstra } from './readingAstra.js';
 import { INITIAL_ARTICLES, MAX_ARTICLES, LEASE_MS, READING_VERSION, parsePlan, parseArticle,
   type ReadingJob, type ReadingLanguage } from '../features/littleReading/model.js';
-import { StoreConflict, type ReadingStore } from './littleReadingStore.js';
+import { StoreConflict, type ReadingStore, type ReadingSource } from './littleReadingStore.js';
 export const jobIdFor=(sessionId:string,language:ReadingLanguage)=>createHash('sha256').update(`${READING_VERSION}:${sessionId}:${language}`).digest('hex');
 export function sourceObject(url:string,uid:string):string {
   const u=new URL(url),prefix='/v0/b/ai-tutor-647fd.firebasestorage.app/o/';
@@ -46,10 +46,27 @@ export interface WorkerDependencies {
   model?:(raw:unknown)=>Promise<{text:string}>;
   now?:()=>number;
 }
+/** Resolve inherited archive metadata before spending tokens, without reading study records. */
+export async function readingSourceArchived(store: ReadingStore, source: ReadingSource): Promise<boolean> {
+  const seen = new Set<string>();
+  let row: ReadingSource | null = source;
+  while (row) {
+    if (row.archived) return true;
+    if (!row.parentId) return false;
+    if (seen.has(row.parentId) || seen.size >= 100) return true;
+    seen.add(row.parentId);
+    const parent = await store.session(row.parentId);
+    if (parent && parent.userId !== source.userId) return true;
+    row = parent?.type === 'folder' ? parent : null;
+  }
+  return false;
+}
+class ArchivedLecture extends Error {}
 export async function claimReadingJob(store:ReadingStore,sessionId:string,language:ReadingLanguage,target=INITIAL_ARTICLES,
   now=Date.now()):Promise<ReadingJob | null> {
   const source=await store.session(sessionId);
   if(!source || source.type!=='file' || !/\.pdf$/i.test(source.fileName))throw new Error('Lecture not found.');
+  if (await readingSourceArchived(store, source)) return null;
   const id=jobIdFor(sessionId,language),existing=await store.get(id),previous=existing?.value;
   if(previous?.status==='unsupported' || previous && previous.leaseUntil>now)return null;
   if(previous?.status==='ready' && previous.completed>=Math.min(target,previous.plan.length))return null;
@@ -70,6 +87,7 @@ export async function advanceReadingJob(store:ReadingStore,claimed:ReadingJob,ui
   const job={...current.value};
   try {
     const source=await store.session(job.sourceSessionId);if(!source || source.userId!==uid || source.fileUrl!==job.sourceUrl)throw new UnsupportedLecture('Lecture was removed or changed.');
+    if (await readingSourceArchived(store, source)) throw new ArchivedLecture();
     const bytes=await(deps.load?deps.load(job):loadPdf(job.sourceUrl,uid,token));
     let pdf:PDFDocument;try{pdf=await PDFDocument.load(bytes);}catch{throw new UnsupportedLecture('The PDF is encrypted or unreadable.');}
     job.pageCount=pdf.getPageCount();
@@ -104,15 +122,20 @@ export async function advanceReadingJob(store:ReadingStore,claimed:ReadingJob,ui
       const r=await request('You are the independent evidence editor. Recheck EVERY factual claim and research result in the draft against the attached pages, including diagrams and limits. Remove unsupported additions; correct causal overclaims and misleading certainty. Ensure hypothetical scenes are labeled. Preserve the short, conversational paragraphs and complete story. Do not introduce a textbook voice, academic timeline or new background exposition. Prefer precise local edits. Return the corrected publishable article using original PDF page headers for references. Refuse if there is insufficient support.',
         JSON.stringify({originalPages:topic.pages,topic,draft:job.draft}),topic.pages);
       const approved=parseArticle(r.text,job.pageCount,topic.pages,job.language);
+      const latestSource = await store.session(job.sourceSessionId);
+      if (!latestSource || latestSource.userId !== uid || latestSource.fileUrl !== job.sourceUrl) throw new UnsupportedLecture('Lecture was removed or changed.');
+      if (await readingSourceArchived(store, latestSource)) throw new ArchivedLecture();
       await store.article({...approved,id:`${job.id}-${job.completed}`,jobId:job.id,sourceSessionId:job.sourceSessionId,
         sourceName:job.sourceName,language:job.language,sequence:job.completed,nextTitle:job.plan[job.completed+1]?.title??'',createdAt:now()});
       job.completed++;job.draft=null;
     }
     job.status=job.completed>=Math.min(job.target,job.plan.length)?'ready':'queued';job.attempts=0;job.error='';
   }catch(e){
+    if (e instanceof ArchivedLecture) { job.status = 'paused'; job.error = ''; } else {
     console.warn('[Read a little] Stage failed:', e instanceof Error ? e.message : 'Unknown error');
     job.attempts++;job.status=e instanceof UnsupportedLecture?'unsupported':job.attempts>=3?'failed':'queued';
     job.error=e instanceof UnsupportedLecture?e.message:'文章准备暂时中断，已完成的文章仍可阅读。';
+    }
   }
   job.lease='';job.leaseUntil=0;job.updatedAt=now();
   const latest=await store.get(job.id);if(!latest || latest.value.lease!==claimed.lease)return false;
