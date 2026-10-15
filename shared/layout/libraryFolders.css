@@ -37,3 +37,6 @@
 .library-subfolder-card small { display: block; color: #8a9680; font-size: 12px; margin-top: 6px; }
 .library-subfolder-card > svg:last-child { opacity: .5; }
 @media (prefers-reduced-motion: reduce) { .library-folder-toggle svg, .library-subfolder-card { transition: none; } }
+
+.library-folder-select { display:flex; align-items:center; justify-content:center; width:28px; min-height:36px; flex-shrink:0; }
+.library-folder-select input { width:16px; height:16px; accent-color:#365e48; margin:0; }

@@ -532,7 +532,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   const visibleSubfolders = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const scope = activeFolder ? libraryFolders.filter(folder => folder.parentId === activeFolder.id)
-      : archiveView ? (needle ? libraryFolders : archivedRoots.filter(item => item.type === 'folder')) : activeFolders.filter(folder => !folder.parentId || !activeFolders.some(parent => parent.id === folder.parentId));
+      : archiveView ? (needle ? libraryFolders : archivedRoots.filter(item => item.type === 'folder')) : [];
     return scope.filter(folder => !needle || (folder.customTitle || folder.fileName).toLowerCase().includes(needle));
   }, [activeFolder, sessions, archiveView, search]);
 
@@ -559,7 +559,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
       });
   }, [activeFolderId, sessions, archiveView, search]);
 
-  const librarySelectedFiles = [...visibleFiles, ...visibleSubfolders].filter(file => librarySelectedIds.includes(file.id));
+  const librarySelectedFiles = [...visibleFiles, ...libraryFolders].filter(file => librarySelectedIds.includes(file.id));
   const toggleLibraryFile = (id: string) => {
     if (fileEditRequestRef.current) return;
     setLibrarySelectedIds(previous => previous.includes(id) ? previous.filter(item => item !== id) : [...previous, id]);
@@ -1550,6 +1550,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
           </button>
           <LibraryFolderTree folders={libraryFolders} activeFolderId={activeFolderId} counts={folderFileTotals}
             deleting={archive.busy || deletingFolder || creatingFolder || movingFileId !== null || renamingFolderId !== null}
+            selecting={librarySelecting} selectedIds={librarySelectedIds} onToggleSelection={toggleLibraryFile}
             archived={archiveView} onArchive={folder => changeArchive([folder.id], !archiveView)}
             onOpen={openLibraryFolder} onDelete={handleDeleteFolder} onRename={handleRenameFolder} />
         </div>
@@ -1677,11 +1678,11 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
 
         {archiveView && <p className="mb-4 text-sm text-[#6C796C]">{text('资料和学习记录都保留。恢复夹内资料时，会一并恢复所属的归档文件夹；单独归档的其他资料仍留在归档里。', 'Material and history are kept. Restoring an item inside an archived folder also restores its archived parent folders. Other individually archived items stay archived.')}</p>}
         {archive.notice && <div className="library-archive-notice" role="status"><span>{archive.notice}</span>{archive.canUndo && <button disabled={archive.busy} onClick={() => void archive.undoLast()}>{text('撤销', 'Undo')}</button>}<button onClick={archive.dismiss}>{text('关闭', 'Dismiss')}</button></div>}
-        {user && <LibraryBulkActions key={user.uid} active={librarySelecting} files={librarySelectedFiles} folders={activeFolders} total={visibleFiles.length + visibleSubfolders.length}
+        {user && <LibraryBulkActions key={user.uid} active={librarySelecting} files={librarySelectedFiles} folders={activeFolders} total={visibleFiles.length + libraryFolders.length}
           archived={archiveView} onArchive={() => changeArchive(librarySelectedFiles.map(item => item.id), !archiveView)}
           disabled={archive.busy || loadingSessions || openingSessionId !== null || editingFileId !== null || movingFileId !== null || creatingFolder || deletingFolder || renamingFolderId !== null || isLibraryUploading}
           onToggle={() => { setLibrarySelecting(value => !value); setLibrarySelectedIds([]); }}
-          onSelectAll={() => setLibrarySelectedIds([...visibleFiles, ...visibleSubfolders].map(file => file.id))} onClear={() => setLibrarySelectedIds([])} onApply={handleBulkLibraryFiles} />}
+          onSelectAll={() => setLibrarySelectedIds([...visibleFiles, ...libraryFolders].map(file => file.id))} onClear={() => setLibrarySelectedIds([])} onApply={handleBulkLibraryFiles} />}
         {libraryMoveNotice && <div className="library-move-notice" role="status">
           <Check className="h-4 w-4 shrink-0" aria-hidden="true" /><span>{libraryMoveNotice.message}</span>
           <button type="button" className="library-move-view" onClick={() => { setActiveFolderId(libraryMoveNotice.parentId ?? 'all'); setSearch(''); }}>

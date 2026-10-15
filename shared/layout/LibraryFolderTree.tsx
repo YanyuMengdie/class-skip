@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ChevronRight, Folder } from 'lucide-react';
 import type { CloudSession } from '@/types';
 import { LibraryArchiveAction } from './LibraryArchiveAction';
+import { useAppLanguage } from '@/shared/i18n/appLanguage';
 import { getFolderPath } from './libraryFolders';
 
 interface LibraryFolderTreeProps {
@@ -9,6 +10,9 @@ interface LibraryFolderTreeProps {
   activeFolderId: string;
   counts: Record<string, number>;
   deleting: boolean;
+  selecting?: boolean;
+  selectedIds?: string[];
+  onToggleSelection?: (id: string) => void;
   onOpen: (folderId: string) => void;
   onRename: (folder: CloudSession) => void;
   archived?: boolean;
@@ -16,7 +20,8 @@ interface LibraryFolderTreeProps {
   onDelete: (folder: CloudSession) => void;
 }
 
-export function LibraryFolderTree({ folders, activeFolderId, counts, deleting, onOpen, onRename, onDelete, archived, onArchive }: LibraryFolderTreeProps) {
+export function LibraryFolderTree({ folders, activeFolderId, counts, deleting, onOpen, onRename, onDelete, archived, onArchive, selecting, selectedIds, onToggleSelection }: LibraryFolderTreeProps) {
+  const { text } = useAppLanguage();
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const children = useMemo(() => {
     const ids = new Set(folders.map(folder => folder.id));
@@ -46,6 +51,10 @@ export function LibraryFolderTree({ folders, activeFolderId, counts, deleting, o
     return (
       <li key={folder.id}>
         <div className={`library-folder-row${activeFolderId === folder.id ? ' is-active' : ''}`}>
+          {selecting && <label className="library-folder-select">
+            <input type="checkbox" checked={selectedIds?.includes(folder.id) ?? false} disabled={deleting}
+              aria-label={text(`选择文件夹 ${name}`, `Select folder ${name}`)} onChange={() => onToggleSelection?.(folder.id)} />
+          </label>}
           {subfolders.length > 0 ? (
             <button type="button" className="library-folder-toggle" aria-expanded={open}
               aria-label={`${open ? '收起' : '展开'} ${name}`} onClick={() => setExpanded(previous => {
@@ -59,10 +68,10 @@ export function LibraryFolderTree({ folders, activeFolderId, counts, deleting, o
           <button type="button" className="library-folder-open" onClick={() => onOpen(folder.id)}
             aria-current={activeFolderId === folder.id ? 'page' : undefined}
             title={getFolderPath(folder.id, folders).map(item => item.customTitle || item.fileName).join(' / ')}>
-            <Folder size={16} /><span>{name}</span>
+            {!selecting && <Folder size={16} />}<span>{name}</span>
             <small title="含子文件夹中的 PDF">{counts[folder.id] ?? 0}</small>
           </button>
-          {onArchive && <LibraryArchiveAction name={name} archived={!!archived} disabled={deleting} onChange={() => onArchive(folder)} onRename={() => onRename(folder)} onDelete={() => onDelete(folder)} />}
+          {!selecting && onArchive && <LibraryArchiveAction name={name} archived={!!archived} disabled={deleting} onChange={() => onArchive(folder)} onRename={() => onRename(folder)} onDelete={() => onDelete(folder)} />}
         </div>
         {open && subfolders.length > 0 && <ul>{subfolders.map(child => renderFolder(child, path))}</ul>}
       </li>
