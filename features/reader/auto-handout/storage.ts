@@ -29,7 +29,14 @@ export async function loadHandoutJob(id: string, owner: string, source: string):
             if (item.draft) parseDraft(item.draft);
             if (item.audit) parseAudit(item.audit);
           }
-          if (v.plan) parsePlan(v.plan, v.pageNumbers, [...new Set([...v.pageNumbers, ...v.plan.pages.flatMap(p => p.linkedPages)])]);
+          if (v.plan) {
+            // Interrupted planning may retain a validated subset. Missing pages are
+            // retried on resume; previously completed explanations remain intact.
+            const planned = v.plan.pages.map(page => page.page);
+            if (planned.some(page => !v.pageNumbers.includes(page))) throw new Error('Plan outside job scope');
+            parsePlan(v.plan, planned, [...new Set([...v.pageNumbers, ...v.plan.pages.flatMap(p => p.linkedPages)])]);
+            if (v.plan.issues && Object.entries(v.plan.issues).some(([page, issue]) => !v.pageNumbers.includes(Number(page)) || typeof issue !== 'string')) throw new Error('Invalid planning issues');
+          }
           result = v;
         } catch { reject(new Error('本机试验草稿格式异常，未覆盖原记录。 / Invalid local draft; existing data retained.')); }
       };

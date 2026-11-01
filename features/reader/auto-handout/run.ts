@@ -1,5 +1,5 @@
 import type { HandoutAI } from './ai';
-import { auditPassed, type HandoutJob, type HandoutPage } from './model';
+import { auditPassed, type HandoutJob, type HandoutPage, type HandoutPlan } from './model';
 
 const cancelled = () => Object.assign(new Error('已暂停，已完成内容保留。 / Paused; completed work retained.'), { name: 'AbortError' });
 const accountFailure = (e: unknown) => !!e && typeof e === 'object' && 'code' in e && ['billing_required', 'rate_limit', 'unauthorized', 'not_configured'].includes(String(e.code));
@@ -20,18 +20,40 @@ export async function runHandout(options: {
     check();
   };
   check();
-  if (!job.plan) {
+  const wanted = options.pages || job.pageNumbers;
+  if (wanted.some(page => !job.pageNumbers.includes(page))) throw new Error('Page outside selected scope.');
+  const missingPlans = wanted.filter(page => !job.plan?.pages.some(item => item.page === page));
+  if (missingPlans.length) {
     options.onProgress('planning');
-    job.plan = await options.ai.plan(job.pageNumbers);
+    let planned: HandoutPlan | undefined;
+    let failure: unknown;
+    try { planned = await options.ai.plan(missingPlans); }
+    catch (e) {
+      check(); failure = e;
+      if (e && typeof e === 'object' && 'partialHandoutPlan' in e) planned = e.partialHandoutPlan as HandoutPlan;
+    }
+    if (planned) {
+      const accepted = new Set(planned.pages.map(page => page.page));
+      const issues = { ...job.plan?.issues, ...planned.issues };
+      for (const page of accepted) delete issues[page];
+      job.plan = { overview: job.plan?.overview || planned.overview,
+        pages: [...(job.plan?.pages.filter(page => !accepted.has(page.page)) || []), ...planned.pages].sort((a, b) => a.page - b.page), issues };
+    }
+    for (const number of missingPlans) if (!job.plan?.pages.some(page => page.page === number)) {
+      job.pages[number] = { ...job.pages[number], status: 'failed', updatedAt: Date.now(),
+        error: job.plan?.issues?.[number] || `原文第 ${number} 页规划失败 / Source page ${number} planning failed: ${failure instanceof Error ? failure.message : '自动修复后仍有格式异常，可单页重试。 / Format still invalid after repair; retry this page.'}` };
+    }
     await commit();
+    if (failure) throw failure;
   }
-  for (const number of options.pages || job.pageNumbers) {
+  for (const number of wanted) {
     check();
     if (!job.pageNumbers.includes(number)) throw new Error('Page outside selected scope.');
     const before = job.pages[number];
     if (!options.pages && (before.status === 'checked' || before.status === 'needs_review' || before.status === 'edited')) continue;
-    const page = job.plan.pages.find(p => p.page === number);
-    if (!page) throw new Error(`Missing page plan: ${number}`);
+    const page = job.plan?.pages.find(p => p.page === number);
+    // A failed plan has an explicit page-level error. Continue every valid page.
+    if (!page || !job.plan) continue;
     let current: HandoutPage = { ...before, updatedAt: Date.now() };
     if (!options.recheckOnly && (options.pages || !current.draft)) {
       options.onProgress('writing', number);

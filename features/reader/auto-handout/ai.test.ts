@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Schema } from '@google/genai';
 vi.mock('@/services/readingAstraClient', () => ({ generateReadingContent: vi.fn() }));
 import { generateReadingContent } from '@/services/readingAstraClient';
 import { createHandoutAI } from './ai';
@@ -10,15 +11,39 @@ const draft = { title: '研究结果', sections: [{ heading: '比较条件', exp
 beforeEach(() => vi.clearAllMocks());
 describe('grounded AI requests', () => {
   it('plans from the complete PDF with requested physical pages and captured language', async () => {
-    vi.mocked(generateReadingContent).mockResolvedValue({ text: JSON.stringify(plan) });
+    vi.mocked(generateReadingContent).mockResolvedValue({ text: JSON.stringify({ overview: plan.overview, pages: { page_2: page } }) });
     const signal = new AbortController().signal;
     const ai = createHandoutAI({ pdf: source, slides, language: 'en', depth: 'quick', signal });
-    expect(await ai.plan([2])).toEqual(plan);
+    expect(await ai.plan([2])).toEqual({ ...plan, issues: {} });
     const [request, options] = vi.mocked(generateReadingContent).mock.calls[0];
     expect(JSON.stringify(request.contents)).toContain('application/pdf');
     expect(JSON.stringify(request.contents)).toContain('requestedPages');
     expect(request.config?.abortSignal).toBe(signal);
+    expect((request.config?.responseSchema as Schema)?.properties?.pages.required).toEqual(['page_2']);
     expect(options).toEqual({ outputLanguage: 'en' });
+  });
+  it('repairs only invalid slots once, keeping valid plans and physical page identity', async () => {
+    const model = vi.mocked(generateReadingContent);
+    model.mockResolvedValueOnce({ text: JSON.stringify({ overview: plan.overview, pages: { page_1: { ...page, page: 99 }, page_2: { ...page, linkedPages: [99] } } }) });
+    model.mockResolvedValueOnce({ text: JSON.stringify({ overview: plan.overview, pages: { page_2: page } }) });
+    const onPlanRepair = vi.fn();
+    const result = await createHandoutAI({ pdf: source, slides, language: 'en', depth: 'quick', signal: new AbortController().signal, onPlanRepair }).plan([1, 2]);
+    expect(result.pages.map(p => p.page)).toEqual([1, 2]);
+    expect(onPlanRepair).toHaveBeenCalledWith([2]);
+    expect((model.mock.calls[1][0].config?.responseSchema as Schema)?.properties?.pages.required).toEqual(['page_2']);
+    expect(model).toHaveBeenCalledTimes(2);
+  });
+  it('returns valid pages and precise per-page errors if one repair still fails', async () => {
+    vi.mocked(generateReadingContent).mockResolvedValue({ text: JSON.stringify({ overview: plan.overview, pages: { page_1: page, page_2: { ...page, linkedPages: [99] } } }) });
+    const result = await createHandoutAI({ pdf: source, slides, language: 'en', depth: 'quick', signal: new AbortController().signal }).plan([1, 2]);
+    expect(result.pages.map(p => p.page)).toEqual([1]);
+    expect(result.issues?.[2]).toContain('99');
+    expect(generateReadingContent).toHaveBeenCalledTimes(2);
+  });
+  it('does not retry billing failures as formatting errors', async () => {
+    vi.mocked(generateReadingContent).mockRejectedValue(Object.assign(new Error('billing'), { code: 'billing_required' }));
+    await expect(createHandoutAI({ pdf: source, slides, language: 'en', depth: 'quick', signal: new AbortController().signal }).plan([1])).rejects.toThrow('billing');
+    expect(generateReadingContent).toHaveBeenCalledTimes(1);
   });
   it('gives the checker actual labeled source images rather than the explanation alone', async () => {
     vi.mocked(generateReadingContent).mockResolvedValue({ text: JSON.stringify({ coverage: true, source: true, visuals: false, context: true, teaching: true, issues: ['图例不支持这项结论'] }) });

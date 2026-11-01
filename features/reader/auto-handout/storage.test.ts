@@ -4,6 +4,13 @@ import { newJob } from './model';
 import { HandoutConflictError, loadHandoutJob, saveHandoutJob } from './storage';
 beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()));
 describe('isolated durable trial drafts', () => {
+  it('reloads a partial source plan without dropping completed work or failed-page reasons', async () => {
+    const job = newJob('alice', 'content-hash', 'en', 'quick', [1, 2]);
+    job.plan = { overview: 'Document context', pages: [{ page: 1, kind: 'concept', title: 'One', role: 'Definition', focus: ['Meaning'], linkedPages: [] }], issues: { 2: 'Invalid linked page 99' } };
+    job.pages[2] = { page: 2, status: 'failed', error: 'Invalid linked page 99', updatedAt: 2 };
+    const stored = await saveHandoutJob(job);
+    expect(await loadHandoutJob(job.id, job.owner, job.source)).toEqual(stored);
+  });
   it('saves and reloads the exact owner and PDF without touching another workspace', async () => {
     const job = newJob('alice', 'content-hash', 'en', 'quick', [1, 2]);
     const stored = await saveHandoutJob(job);

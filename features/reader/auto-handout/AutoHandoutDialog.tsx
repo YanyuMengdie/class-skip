@@ -30,6 +30,7 @@ export function AutoHandoutDialog(props: AutoHandoutDialogProps) {
   const [includeUnverified, setIncludeUnverified] = useState(false);
   const [editing, setEditing] = useState<PageDraft>();
   const [busy, setBusy] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
   const [exporting, setExporting] = useState(false);
   const controller = useRef<AbortController | undefined>(undefined);
   const lock = useRef(false);
@@ -41,6 +42,12 @@ export function AutoHandoutDialog(props: AutoHandoutDialogProps) {
   try { range = pageRange(start, end, props.slides); }
   catch (e) { rangeError = e instanceof Error ? e.message : String(e); }
   const seed = newJob(props.owner, props.source, props.language, depth, range);
+  useEffect(() => {
+    if (!busy) return;
+    const started = Date.now(); setElapsed(0);
+    const timer = window.setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => window.clearInterval(timer);
+  }, [busy]);
   useEffect(() => {
     alive.current = true;
     const previous = document.activeElement as HTMLElement | null;
@@ -86,7 +93,8 @@ export function AutoHandoutDialog(props: AutoHandoutDialogProps) {
         // Ensure a writable draft before making the first paid model request.
         await save(jobRef.current!);
         await runHandout({ job: jobRef.current!, signal: controller.current!.signal, pages, recheckOnly,
-          ai: createHandoutAI({ pdf: props.pdf, slides: props.slides, language: props.language, depth, signal: controller.current.signal }),
+          ai: createHandoutAI({ pdf: props.pdf, slides: props.slides, language: props.language, depth, signal: controller.current.signal,
+            onPlanRepair: pages => { if (alive.current) setStage(t(`正在自动修复 ${pages.length} 页的规划格式（仅重试一次）…`, `Repairing plan format for ${pages.length} pages (one attempt)…`)); } }),
           save, onProgress: (phase, page) => {
             if (alive.current) setStage(phase === 'planning' ? t('正在阅读整份 PDF，建立本批页码的上下文…', 'Reading the full PDF and planning these pages…')
               : `${t('原文第', 'Source page')} ${page} ${t('页', '')} · ${phase === 'writing' ? t('正在写解析', 'Writing explanation') : t('正在对照原文核查', 'Checking against the source')}`);
@@ -97,7 +105,11 @@ export function AutoHandoutDialog(props: AutoHandoutDialogProps) {
         if (!held) throw new Error(t('另一个页面正在处理这批试验解析，请先在那里暂停，或稍后接续。', 'Another tab is processing this batch. Pause it there or resume later.'));
         await work();
       }); else await work();
-      if (alive.current) setStage(t('本批处理结束。请查看待核查或失败的页面。', 'Batch finished. Review flagged or failed pages.'));
+      if (alive.current) {
+        const unfinished = Object.values(jobRef.current?.pages || {}).filter(page => page.status === 'failed').length;
+        setStage(unfinished ? t(`本批处理结束，${unfinished} 页未完成；其余结果已保留，可重试未完成页。`, `Batch finished with ${unfinished} incomplete pages. Other results are saved; retry incomplete pages.`)
+          : t('本批处理结束。可逐页查看解析和核查结果。', 'Batch finished. Review explanations and source checks page by page.'));
+      }
     } catch (e) {
       if (alive.current) {
         if (controller.current.signal.aborted) setStage(t('已暂停；再次开始会接续已保存进度。', 'Paused; resume from saved progress.'));
@@ -113,6 +125,7 @@ export function AutoHandoutDialog(props: AutoHandoutDialogProps) {
   }[page.status]);
   const ready = Object.values(job?.pages || {}).filter(p => p.status === 'checked').length;
   const drafted = Object.values(job?.pages || {}).filter(p => p.draft).length;
+  const failed = Object.values(job?.pages || {}).filter(p => p.status === 'failed').length;
   const close = () => { if (editing || exporting) return; controller.current?.abort(); props.onClose(); };
   async function download() {
     if (lock.current || !jobRef.current) return;
@@ -138,14 +151,14 @@ export function AutoHandoutDialog(props: AutoHandoutDialogProps) {
     }}>
     <header className="auto-handout-header"><div><span className="auto-handout-eyebrow">{t('试验功能', 'EXPERIMENT')}</span><h2 id="auto-handout-title">{t('自动解析讲义', 'Annotated handout')}</h2><p>{props.fileName}</p></div><button disabled={!!editing || exporting} onClick={close} aria-label={t('关闭并暂停生成', 'Close and pause generation')}><X size={20}/></button></header>
     <div className="auto-handout-settings"><label>{t('原文起始页', 'First source page')}<input type="number" min={first} max={last} disabled={busy || !!editing} value={start} onChange={e => setStart(Number(e.target.value))}/></label><label>{t('原文结束页', 'Last source page')}<input type="number" min={start} max={last} disabled={busy || !!editing} value={end} onChange={e => setEnd(Number(e.target.value))}/></label><label>{t('这次想学多仔细', 'Learning depth')}<select disabled={busy || !!editing} value={depth} onChange={e => setDepth(e.target.value as HandoutDepth)}><option value="quick">{t('快速理解', 'Quick understanding')}</option><option value="thorough">{t('仔细讲解', 'Careful explanation')}</option></select></label><button disabled={busy || !!editing || last - first >= 60} onClick={() => { setStart(first); setEnd(last); }}>{t('整份讲义', 'Whole PDF')}</button>
-      <button className="auto-handout-primary" disabled={busy || loading || !!rangeError || !!saveError || !props.pdf || !props.source || !!editing} onClick={() => void run()}>{busy ? <Loader2 size={16} className="animate-spin"/> : <RefreshCw size={16}/>} {drafted ? t('继续／重试未完成页', 'Resume / retry incomplete pages') : t('生成并核查', 'Generate and check')}</button>
+      <button className="auto-handout-primary" disabled={busy || loading || !!rangeError || !!saveError || !props.pdf || !props.source || !!editing} onClick={() => void run()}>{busy ? <Loader2 size={16} className="animate-spin"/> : <RefreshCw size={16}/>} {busy ? t('正在处理…', 'Processing…') : drafted || failed ? t('继续／重试未完成页', 'Resume / retry incomplete pages') : t('生成并核查', 'Generate and check')}</button>
       {busy && !exporting && <button onClick={() => { controller.current?.abort(); setStage(t('正在暂停，等待当前请求结束…', 'Pausing the current request…')); }} disabled={!controller.current || controller.current.signal.aborted}><Pause size={16}/>{t('暂停', 'Pause')}</button>}
     </div>
     <div className="auto-handout-notice">{t('默认先试当前起的 3 页，每批最多 60 页。逐页写作并另行核查；封面与过渡页简短处理。草稿仅保存在当前浏览器，尚不跨设备同步。', 'Starts with three pages; up to 60 per batch. Each explanation is checked against the source. Cover and transition pages stay brief. Trial drafts are saved in this browser only.')}</div>
     {(rangeError || error) && <p className="auto-handout-error" role="alert">{rangeError || error}</p>}
     {saveError && <div className="auto-handout-error" role="alert">{saveError}<button disabled={busy} onClick={() => { if (jobRef.current) void save(jobRef.current).catch(() => {}); else setReload(v => v + 1); }}>{t('重试保存／读取', 'Retry save / load')}</button><button disabled={busy || !!editing} onClick={() => setReload(v => v + 1)}>{t('放弃本页未保存修改，重新读取草稿', 'Discard unsaved changes and reload draft')}</button></div>}
-    <div className="auto-handout-progress" role="status" aria-live="polite">{loading ? t('正在读取试验草稿…', 'Loading trial drafts…') : stage || t('生成内容会自动加入下载的讲义，无需逐条粘贴。', 'Generated explanations are added to the downloaded handout automatically.')}<span>{t('自动核查通过', 'AI checks passed')} {ready}/{range.length}</span></div>
-    <div className="auto-handout-body"><nav className="auto-handout-pages" aria-label={t('逐页解析状态', 'Page explanation status')}>{range.map(p => <button key={p} disabled={!!editing} className={selected === p ? 'is-active' : ''} aria-current={selected === p ? 'page' : undefined} onClick={() => setSelected(p)}><strong>{t('第', 'Page')} {p} {t('页', '')}</strong><small>{status(job?.pages[p])}</small></button>)}</nav>
+    <div className="auto-handout-progress" role="status" aria-live="polite">{loading ? t('正在读取试验草稿…', 'Loading trial drafts…') : stage || t('生成内容会自动加入下载的讲义，无需逐条粘贴。', 'Generated explanations are added to the downloaded handout automatically.')}<span>{busy && `${elapsed}s · `}{t('已生成', 'Drafts')} {drafted}/{range.length} · {t('核查通过', 'Passed')} {ready}{failed > 0 && ` · ${t('未完成', 'Incomplete')} ${failed}`}</span></div>
+    <div className="auto-handout-body"><nav className="auto-handout-pages" aria-label={t('逐页解析状态', 'Page explanation status')}>{range.map(p => <button key={p} disabled={!!editing} className={`${selected === p ? 'is-active' : ''} ${job?.pages[p]?.status === 'failed' ? 'has-error' : ''}`} aria-current={selected === p ? 'page' : undefined} onClick={() => setSelected(p)}><strong>{t('第', 'Page')} {p} {t('页', '')}</strong><small>{status(job?.pages[p])}</small></button>)}</nav>
       <main className="auto-handout-preview"><div className="auto-handout-original">{slide && <img src={slide.imageUrl} alt={t(`原文第 ${selected} 页`, `Source page ${selected}`)}/>}</div><section className="auto-handout-explanation"><div className="auto-handout-section-head"><h3>{t('本页解析', 'Page explanation')}</h3><span>{status(current)}</span></div>
         {current?.error && <p role="alert" className="auto-handout-error">{current.error}</p>}
         {editing ? <><label>{t('标题', 'Title')}<input value={editing.title} maxLength={250} onChange={e => setEditing({ ...editing, title: e.target.value })}/></label>{editing.sections.map((s, i) => <div className="auto-handout-edit" key={i}><label>{t('小标题', 'Heading')}<input value={s.heading} maxLength={200} onChange={e => setEditing({ ...editing, sections: editing.sections.map((v, j) => j === i ? { ...v, heading: e.target.value } : v) })}/></label><label>{t('解释', 'Explanation')}<textarea value={s.explanation} maxLength={6000} onChange={e => setEditing({ ...editing, sections: editing.sections.map((v, j) => j === i ? { ...v, explanation: e.target.value } : v) })}/></label><label>{t('原文依据', 'Source basis')}<textarea value={s.sourceEvidence} maxLength={1200} onChange={e => setEditing({ ...editing, sections: editing.sections.map((v, j) => j === i ? { ...v, sourceEvidence: e.target.value } : v) })}/></label></div>)}<div className="auto-handout-actions"><button disabled={busy || !editing.title.trim() || editing.sections.some(s => !s.heading.trim() || !s.explanation.trim() || !s.sourceEvidence.trim())} className="auto-handout-primary" onClick={async () => {

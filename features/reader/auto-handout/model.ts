@@ -10,7 +10,7 @@ export interface PagePlan {
   focus: string[];
   linkedPages: number[];
 }
-export interface HandoutPlan { overview: string; pages: PagePlan[] }
+export interface HandoutPlan { overview: string; pages: PagePlan[]; issues?: Record<number, string> }
 export interface PageDraft {
   title: string;
   sections: { heading: string; explanation: string; sourceEvidence: string }[];
@@ -66,9 +66,14 @@ export function parsePlan(v: unknown, selected: number[], allPages: number[]): H
   const seen = new Set<number>();
   const kinds = ['cover', 'outline', 'concept', 'method', 'figure', 'formula', 'transition', 'other'];
   const pages = v.pages.map(item => {
-    if (!record(item) || typeof item.page !== 'number' || !selected.includes(item.page) || seen.has(item.page)
-      || !kinds.includes(String(item.kind)) || !Array.isArray(item.linkedPages) || item.linkedPages.length > 4
-      || item.linkedPages.some(p => typeof p !== 'number' || !allPages.includes(p))) throw new Error('AI 规划页码与原文不一致。 / Plan does not match source pages.');
+    if (!record(item) || typeof item.page !== 'number' || !selected.includes(item.page)) throw new Error('规划包含所选范围以外的页码。 / Plan includes a page outside the selected range.');
+    const at = `原文第 ${item.page} 页 / Source page ${item.page}: `;
+    if (seen.has(item.page)) throw new Error(at + '返回了重复页码。 / Duplicate page.');
+    if (!kinds.includes(String(item.kind))) throw new Error(at + '页面类型格式不正确。 / Invalid page type.');
+    if (!Array.isArray(item.linkedPages)) throw new Error(at + '关联页格式不正确。 / Invalid linked-page list.');
+    if (item.linkedPages.length > 4) throw new Error(at + '关联页超过 4 页，需要重新规划。 / More than four linked pages.');
+    const invalid = item.linkedPages.find(p => typeof p !== 'number' || !allPages.includes(p));
+    if (item.linkedPages.some(p => typeof p !== 'number' || !allPages.includes(p))) throw new Error(at + `关联页 ${String(invalid).slice(0, 30)} 不在原文中。 / Linked page is absent from the source.`);
     seen.add(item.page);
     return { page: item.page, title: str(item.title, 250), kind: item.kind as PagePlan['kind'], role: str(item.role, 1200), focus: texts(item.focus, 10), linkedPages: [...new Set(item.linkedPages as number[])] };
   });

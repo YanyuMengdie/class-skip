@@ -13,6 +13,22 @@ function setup() {
   return { job: newJob('alice', 'hash', 'zh-CN', 'thorough', [1, 2, 3]), ai, signal: controller.signal, controller, save, snapshots, onProgress: vi.fn() };
 }
 describe('resumable source-check pipeline', () => {
+  it('continues valid pages after a planning error and resumes only the missing plan', async () => {
+    const s = setup();
+    vi.mocked(s.ai.plan).mockResolvedValueOnce({ ...plan, pages: plan.pages.filter(p => p.page !== 2), issues: { 2: 'Source page 2: invalid linked page 99' } });
+    const partial = await runHandout(s);
+    expect(partial.pages[1].status).toBe('checked');
+    expect(partial.pages[2].status).toBe('failed');
+    expect(partial.pages[2].error).toContain('99');
+    expect(partial.pages[3].status).toBe('checked');
+    const again = setup();
+    vi.mocked(again.ai.plan).mockResolvedValueOnce({ ...plan, pages: [plan.pages[1]] });
+    const resumed = await runHandout({ ...again, job: partial });
+    expect(again.ai.plan).toHaveBeenCalledWith([2]);
+    expect(again.ai.draft).toHaveBeenCalledTimes(1);
+    expect(resumed.pages[1]).toEqual(partial.pages[1]);
+    expect(resumed.pages[2].status).toBe('checked');
+  });
   it('plans once and persists each draft before its independent check', async () => {
     const s = setup();
     const result = await runHandout(s);
