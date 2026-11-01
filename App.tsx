@@ -15,6 +15,7 @@ import { Header } from '@/shared/layout/Header';
 import { dashboardFeatures } from '@/shared/dashboardFeatures';
 import { SlideViewer } from '@/features/reader/slide-viewer/SlideViewer';
 import { exportStudyHandoutPdf } from '@/features/reader/export/studyHandoutPdf';
+import { AutoHandoutDialog } from '@/features/reader/auto-handout/AutoHandoutDialog';
 import { SlidePageComments } from '@/features/reader/page-notes/SlidePageComments';
 import { ExplanationPanel } from '@/features/reader/deep-read/ExplanationPanel';
 import { SkimPanel } from '@/features/reader/skim/SkimPanel';
@@ -752,6 +753,7 @@ const App: React.FC = () => {
 
   const [isProcessingFile, setIsProcessingFile] = useState<boolean>(false);
   const [isExportingHandout, setIsExportingHandout] = useState(false);
+  const [autoHandoutOpen, setAutoHandoutOpen] = useState(false);
   const [isOpeningStudyFile, setIsOpeningStudyFile] = useState<boolean>(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
   const [isChatLoading, setIsChatLoading] = useState<boolean>(false);
@@ -3996,6 +3998,7 @@ const App: React.FC = () => {
       onUpdateAnnotation={handleUpdateAnnotation}
       onDeleteAnnotation={handleDeleteAnnotation}
       onExportPDF={handleExportPDF}
+      onAutoHandout={pdfDataUrl?.startsWith('data:application/pdf') && (fileHash || currentSessionId) ? () => setAutoHandoutOpen(true) : undefined}
       isExporting={isExportingHandout}
       onRequestUpload={() => hiddenFileInputRef.current?.click()}
       isImmersive={isImmersive}
@@ -4744,6 +4747,12 @@ const App: React.FC = () => {
           onBuildMaintenanceContent={buildMaintenanceMergedContent}
         />
       )}
+
+      {autoHandoutOpen && pdfDataUrl && (fileHash || currentSessionId) && <AutoHandoutDialog
+        key={`${user?.uid || 'device'}:${fileHash || currentSessionId}:${appLanguage}`}
+        owner={user?.uid || 'device'} source={fileHash || currentSessionId!} pdf={pdfDataUrl}
+        slides={slides} fileName={fileName || 'lecture.pdf'} language={appLanguage} initialPage={currentIndex + 1}
+        annotations={annotations} pageComments={pageComments} onClose={() => setAutoHandoutOpen(false)} />}
 
       <HistoryModal
         isOpen={isHistoryOpen}

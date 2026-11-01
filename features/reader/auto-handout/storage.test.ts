@@ -1,0 +1,29 @@
+import { IDBFactory } from 'fake-indexeddb';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { newJob } from './model';
+import { HandoutConflictError, loadHandoutJob, saveHandoutJob } from './storage';
+beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()));
+describe('isolated durable trial drafts', () => {
+  it('saves and reloads the exact owner and PDF without touching another workspace', async () => {
+    const job = newJob('alice', 'content-hash', 'en', 'quick', [1, 2]);
+    const stored = await saveHandoutJob(job);
+    expect(stored.revision).toBe(1);
+    expect((await loadHandoutJob(job.id, 'alice', 'content-hash'))?.revision).toBe(1);
+    expect(await loadHandoutJob(job.id, 'bob', 'content-hash')).toBeUndefined();
+    expect(await loadHandoutJob(job.id, 'alice', 'other-hash')).toBeUndefined();
+  });
+  it('rejects a stale tab atomically and preserves the newer draft', async () => {
+    const seed = newJob('alice', 'content-hash', 'en', 'quick', [1]);
+    const first = await saveHandoutJob(seed);
+    const otherTab = structuredClone(first);
+    const newer = await saveHandoutJob({ ...first, pages: { 1: { page: 1, status: 'failed', error: 'newer result', updatedAt: 2 } } });
+    await expect(saveHandoutJob(otherTab)).rejects.toBeInstanceOf(HandoutConflictError);
+    expect(await loadHandoutJob(seed.id, 'alice', 'content-hash')).toEqual(newer);
+  });
+  it('parallel first saves cannot overwrite one another', async () => {
+    const seed = newJob('alice', 'content-hash', 'en', 'quick', [1]);
+    const results = await Promise.allSettled([saveHandoutJob(seed), saveHandoutJob(seed)]);
+    expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter(r => r.status === 'rejected')).toHaveLength(1);
+  });
+});
