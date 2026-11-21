@@ -10,6 +10,13 @@ const base={title:'关系',afterText:'第一段：身体和情绪有不同的关
 const aid:ReadingAid={...base,kind:'parallel',nodes:[{label:'看到刺激',detail:''},{label:'身体反应',detail:''},{label:'情绪感受',detail:''}]};
 const terms=[{term:'身体',english:'body',explanation:'这里指身体反应。'}];
 describe('optional reading aids',()=>{
+ it('preserves math layout and accessible markup for inline and block formulas',()=>{
+  const markdown = '班级 $c$ 中的学生\n\n$$\ny_i = x^2\n$$';
+  const html = renderToStaticMarkup(<ReadingMessage text={markdown} components={{}} language="zh-CN"/>);
+  expect(html.match(/class="katex-mathml"/g)).toHaveLength(2);
+  expect(html.match(/class="katex-html" aria-hidden="true"/g)).toHaveLength(2);
+  expect(html).toContain('class="katex-display"');
+ });
  it('accepts a prose-only response and does not invent media',()=>{expect(parseReadingResponse(JSON.stringify({messageMarkdown:text}),1,4,true)).toEqual({text,media:{}});expect(parseReadingMedia(undefined,text)).toEqual({});});
  it('flags unsafe figures and preserves unplaced valid diagrams',()=>{
   const figure={...base,kind:'figure',page:5,focus:'两组差异'};

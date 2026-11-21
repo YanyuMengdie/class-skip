@@ -17,8 +17,8 @@ export function ReadingMessage({ text, media, components, pdfDataUrl, onPage, la
   text:string; media?:ReadingMedia; components:Components; pdfDataUrl?:string; onPage?:(page:number)=>void; language:AppLanguage; userRequest?:string; preserveStoredContent?:boolean;
 }) {
   const safe=useMemo(()=>parseReadingMedia(media,text,1,Number.MAX_SAFE_INTEGER,!!pdfDataUrl),[media,text,pdfDataUrl]);
-  const renderers=useMemo<Components>(()=>({...components,span:({node,children})=>node?.properties?.['data-study-term']!==undefined
-    ? <StudyTermButton index={Number(node.properties['data-study-term'])} showEnglish={node.properties['data-show-english']==='yes'}>{children}</StudyTermButton> : <span>{children}</span>}),[components]);
+  const renderers=useMemo<Components>(()=>({...components,span:({node,children,...props})=>node?.properties?.['data-study-term']!==undefined
+    ? <StudyTermButton index={Number(node.properties['data-study-term'])} showEnglish={node.properties['data-show-english']==='yes'}>{children}</StudyTermButton> : <span {...props}>{children}</span>}),[components]);
   // Group Markdown up to insertion points without changing the original prose.
   const layout=useMemo(()=>{
     const sourceBlocks=readingBlocks(text);
