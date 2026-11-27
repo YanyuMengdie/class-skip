@@ -1,3 +1,4 @@
+import { BatchHandoutDialog } from '@/features/reader/auto-handout/BatchHandoutDialog';
 import { watchLibraryMetadata } from '@/services/libraryArchiveService';
 import { previousLearnerRequest } from '@/shared/i18n/explanationTranslation';
 import { LocalSyllabusBrief } from '@/features/canvas/brief/LocalSyllabusBrief';
@@ -380,6 +381,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
   useEffect(() => { setLibraryMoveNotice(null); }, [user?.uid]);
   const [libraryUploadStatus, setLibraryUploadStatus] = useState<LibraryUploadStatus | null>(null);
   const [canvasImportOpen, setCanvasImportOpen] = useState(false);
+  const [batchHandoutOpen, setBatchHandoutOpen] = useState(false);
   const [calendarView, setCalendarView] = useState<'brief' | 'personal' | 'local'>('brief');
   const [verifiedCourseBrief, setVerifiedCourseBrief] = useState<CourseBriefReport | null>(null);
   useEffect(() => {
@@ -1641,6 +1643,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
             ) : <p className="text-sm text-slate-500 mt-1">{currentFileName ? text(`上次打开：${currentFileName}`, `Last opened: ${currentFileName}`) : localizeUiText("选一份资料进去，学习页会接住你。")}</p>}
           </div>
           <div className="flex flex-col sm:flex-row gap-2 md:items-center">
+            <button type="button" onClick={() => user ? setBatchHandoutOpen(true) : onLogin()} disabled={isLibraryUploading || loadingSessions} className="inline-flex items-center justify-center gap-2 rounded-md border border-[#B7C7BC] bg-white px-3 py-2 text-sm font-semibold text-[#294B3B]"><Sparkles size={16}/>{text('批量生成讲解', 'Batch explanations')}</button>
             {!archiveView && <>
             <button
               type="button"
@@ -3106,6 +3109,7 @@ export const DashboardScreen: React.FC<DashboardScreenProps> = ({
         </div>
       </main>
 
+      {batchHandoutOpen && user && <BatchHandoutDialog key={`${user.uid}:${language}`} owner={user.uid} files={libraryFiles.filter(file => /\.pdf$/i.test(file.fileName))} folders={folders} language={language} initialIds={librarySelectedIds} onClose={() => setBatchHandoutOpen(false)} />}
       <CanvasImportDialog
         open={canvasImportOpen}
         defaultFolderId={activeFolder?.id ?? null}

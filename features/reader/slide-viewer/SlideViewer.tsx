@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
-import { Image as ImageIcon, Coffee, X, Download, StickyNote, GripHorizontal, Minus, Plus, Scaling, Move, Bold, ZoomIn, ZoomOut, Maximize2, ChevronDown, Loader2 } from 'lucide-react';
+import { Image as ImageIcon, Coffee, X, Download, StickyNote, GripHorizontal, Minus, Plus, Scaling, Move, Bold, ZoomIn, ZoomOut, Maximize2, ChevronDown, Loader2, Sparkles } from 'lucide-react';
 import { Slide, SlideAnnotation } from '@/types';
 import { plainTextToHtmlWithSupSub } from '@/features/reader/lib/textUtils';
 import './slideViewer.css';
@@ -11,6 +11,7 @@ interface SlideViewerProps {
   onUpdateAnnotation: (id: string, updates: Partial<SlideAnnotation>) => void;
   onDeleteAnnotation: (id: string) => void;
   onExportPDF: () => void;
+  onAutoHandout?: () => void;
   isExporting?: boolean;
   onRequestUpload?: () => void;
   isImmersive?: boolean;
@@ -45,6 +46,7 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
   onUpdateAnnotation, 
   onDeleteAnnotation,
   onExportPDF,
+  onAutoHandout,
   isExporting = false,
   onRequestUpload: _onRequestUpload,
   isImmersive = false,
@@ -387,6 +389,8 @@ export const SlideViewer: React.FC<SlideViewerProps> = ({
                       <button type="button" onClick={handleFitWidth} title="适合宽度" aria-label="适合宽度"><Maximize2 className="w-4 h-4" /></button>
                     </div>
                 )}
+                {onAutoHandout && <button type="button" className="editorial-pdf-export" onClick={event => { event.stopPropagation(); onAutoHandout(); }}
+                  title="试验：逐页生成解析并自动加入导出讲义" aria-label="自动解析讲义（试验）"><Sparkles className="w-4 h-4"/><span>自动解析</span></button>}
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); onExportPDF(); }}
