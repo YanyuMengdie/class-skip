@@ -7,6 +7,8 @@ interface ExportStudyHandoutPdfOptions {
   annotations: AnnotationCache;
   pageComments: PageCommentsCache;
   fileName?: string | null;
+  output?: 'download' | 'blob';
+  signal?: AbortSignal;
 }
 
 const EXPORT_WIDTH = 1280;
@@ -566,20 +568,41 @@ const appendStyles = (root: HTMLElement) => {
     .study-handout-comment-card .study-handout-note-body {
       white-space: pre-line;
     }
+    .study-handout-auto-explanation .study-handout-note-body {
+      line-height: 1.85;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    .study-handout-auto-explanation .study-handout-note-heading,
+    .study-handout-auto-explanation .study-handout-note-body strong,
+    .study-handout-auto-explanation .study-handout-note-body b,
+    .study-handout-auto-explanation .study-handout-note-body .study-handout-term,
+    .study-handout-auto-explanation .study-handout-note-table th {
+      font-weight: 650;
+      color: #315740;
+      background: transparent;
+    }
+    .study-handout-auto-explanation .study-handout-note-heading {
+      margin-top: 22px;
+      margin-bottom: 10px;
+    }
+    .study-handout-auto-explanation .study-handout-note-heading:first-child {
+      margin-top: 0;
+    }
   `;
   root.appendChild(style);
 };
 
 const appendAnnotationCard = (root: HTMLElement, annotation: SlideAnnotation, index: number) => {
   const card = document.createElement('section');
-  card.className = 'study-handout-note-card';
+  const autoExplanation = annotation.id.startsWith('auto-handout-export-');
+  card.className = `study-handout-note-card${autoExplanation ? ' study-handout-auto-explanation' : ''}`;
 
   card.appendChild(createText('div', `便签 ${index + 1}`, 'study-handout-card-label'));
 
   const body = document.createElement('div');
   body.className = 'study-handout-note-body';
   body.style.fontSize = `${Math.max(17, Math.min(23, (annotation.fontSize || 14) + 4))}px`;
-  body.style.fontWeight = annotation.isBold ? '850' : '700';
+  body.style.fontWeight = autoExplanation ? '400' : annotation.isBold ? '850' : '700';
   appendHandoutBlocks(body, parseAnnotationBlocks(annotation.text));
   card.appendChild(body);
 
@@ -662,6 +685,8 @@ export async function exportStudyHandoutPdf({
   annotations,
   pageComments,
   fileName,
+  output = 'download',
+  signal,
 }: ExportStudyHandoutPdfOptions) {
   if (slides.length === 0) return;
 
@@ -679,6 +704,7 @@ export async function exportStudyHandoutPdf({
     if (document.fonts?.ready) await document.fonts.ready;
 
     for (let i = 0; i < slides.length; i += 1) {
+      if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
       const slide = slides[i];
       host.innerHTML = '';
       const page = await buildHandoutPage(
@@ -710,6 +736,8 @@ export async function exportStudyHandoutPdf({
       pdf.addImage(image, 'JPEG', 0, 0, pageWidth, pageHeight, undefined, 'FAST');
     }
 
+    if (signal?.aborted) throw new DOMException('Export cancelled', 'AbortError');
+    if (output === 'blob') return pdf?.output('blob');
     pdf?.save(`${sanitizeFileName(fileName || 'study-handout')}_复习讲义版.pdf`);
   } finally {
     document.body.removeChild(host);

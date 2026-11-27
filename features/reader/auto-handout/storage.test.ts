@@ -1,7 +1,7 @@
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { newJob } from './model';
-import { HandoutConflictError, loadHandoutJob, saveHandoutJob } from './storage';
+import { newJob, parseModulePlan } from './model';
+import { HandoutConflictError, loadHandoutJob, saveHandoutJob, sharedModulePlan } from './storage';
 beforeEach(() => vi.stubGlobal('indexedDB', new IDBFactory()));
 describe('isolated durable trial drafts', () => {
   it('reloads a partial source plan without dropping completed work or failed-page reasons', async () => {
@@ -32,5 +32,18 @@ describe('isolated durable trial drafts', () => {
     const results = await Promise.allSettled([saveHandoutJob(seed), saveHandoutJob(seed)]);
     expect(results.filter(r => r.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter(r => r.status === 'rejected')).toHaveLength(1);
+  });
+});
+
+describe('shared module directories', () => {
+  it('reuses one directory across runs while isolating accounts and source files', async () => {
+    const plan = parseModulePlan({ overview: 'Lecture', modules: [{ title: 'One', role: 'Experiment', startPage: 1, endPage: 2, linkedPages: [] }] }, [1, 2]);
+    const generate = vi.fn(async () => plan);
+    const signal = new AbortController().signal;
+    await sharedModulePlan('alice', 'hash', 'en', [1, 2], generate, signal);
+    expect(await sharedModulePlan('alice', 'hash', 'en', [1, 2], generate, signal)).toEqual(plan);
+    expect(generate).toHaveBeenCalledTimes(1);
+    await sharedModulePlan('bob', 'hash', 'en', [1, 2], generate, signal);
+    expect(generate).toHaveBeenCalledTimes(2);
   });
 });

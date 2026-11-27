@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { annotationForPage, auditPassed, exportAnnotations, newJob, pageRange, parseAudit, parseDraft, parsePlan, sourceImagePages, type HandoutPlan, type PageAudit, type PageDraft } from './model';
+import { parseModulePlan, moduleSourcePages, annotationForPage, auditPassed, exportAnnotations, newJob, pageRange, parseAudit, parseDraft, parsePlan, sourceImagePages, type HandoutPlan, type PageAudit, type PageDraft } from './model';
 const slides = [1, 2, 3, 4].map(pageNumber => ({ id: `slide-${pageNumber}`, pageNumber, imageUrl: 'data:image/png;base64,YQ==' }));
 export const draft: PageDraft = { title: '概念', sections: [{ heading: '关系', explanation: '解释主干，并保留条件。', sourceEvidence: '第 2 页：原文中有明确限定。' }], uncertainties: [] };
 export const audit: PageAudit = { coverage: true, source: true, visuals: true, context: true, teaching: true, issues: [] };
@@ -47,18 +47,33 @@ describe('source coverage and export isolation', () => {
     expect(original).toEqual(snapshot);
     expect(output['slide-1'][0]).toBe(manual);
     expect(output['slide-1'][1].text).toContain('概念');
-    expect(output['slide-2'][0].text).not.toContain('UNVERIFIED');
-    expect(output['slide-2'][0].text).toContain('尚无通过核查');
+    expect(output['slide-2'][0].text).toContain('UNVERIFIED');
+    expect(output['slide-2'][0].text).not.toContain('核查');
+    expect(output['slide-1'][1].text).not.toContain('原文依据');
     expect(output['slide-3']).toBeUndefined();
     expect(output['slide-4']).toBe(original['slide-4']);
-    expect(exportAnnotations(job, slides, original, true)['slide-2'][0].text).toContain('UNVERIFIED');
   });
-  it('never treats an edited draft as checked and escapes model/user HTML', () => {
+  it('exports edited content without audit labels and escapes model/user HTML', () => {
     const malicious = { ...draft, title: '<script>unsafe</script>', sections: [{ heading: '<img onerror=bad>', explanation: '<iframe src=evil>', sourceEvidence: '& source' }] };
-    const output = annotationForPage({ page: 1, status: 'edited', draft: malicious, audit, updatedAt: 1 }, 'zh-CN', true);
-    expect(output.text).toContain('未重新核查');
+    const output = annotationForPage({ page: 1, status: 'edited', draft: malicious, audit, updatedAt: 1 }, 'zh-CN');
+    expect(output.text).not.toContain('核查');
     expect(output.text).toContain('&lt;script&gt;');
     expect(output.text).not.toContain('<script>');
     expect(output.text).not.toContain('<iframe');
+  });
+});
+
+describe('semantic module coverage', () => {
+  it('requires every source page exactly once and accepts distant dependencies', () => {
+    const modules = { overview: 'Lecture', modules: [
+      { title: 'One', role: 'Experiment', startPage: 1, endPage: 3, linkedPages: [4] },
+      { title: 'Two', role: 'Application', startPage: 4, endPage: 4, linkedPages: [1] },
+    ] };
+    const parsed = parseModulePlan(modules, [1, 2, 3, 4]);
+    expect(moduleSourcePages(parsed.modules[0], [1, 2, 3, 4])).toEqual([1, 2, 3, 4]);
+    expect(() => parseModulePlan({ ...modules, modules: modules.modules.slice(1) }, [1, 2, 3, 4])).toThrow();
+    expect(() => parseModulePlan({ ...modules, modules: modules.modules.slice(0, 1) }, [1, 2, 3, 4])).toThrow();
+    expect(() => parseModulePlan({ ...modules, modules: [modules.modules[0], { ...modules.modules[1], startPage: 3 }] }, [1, 2, 3, 4])).toThrow();
+    expect(() => parseModulePlan({ ...modules, modules: [modules.modules[0], { ...modules.modules[1], linkedPages: [99] }] }, [1, 2, 3, 4])).toThrow();
   });
 });

@@ -1,88 +1,104 @@
-import type { HandoutAI } from './ai';
-import { auditPassed, type HandoutJob, type HandoutPage, type HandoutPlan } from './model';
+import { HandoutResponseFormatError, type HandoutAI, type ModuleDraftResult } from './ai';
+import { parseModulePlan, teachingContext, type HandoutJob, type HandoutPage, type HandoutModule, type PageDraft } from './model';
+import type { AppLanguage } from '@/types';
 
+export interface HandoutProgress {
+  stage: 'planning' | 'writing';
+  moduleCount: number;
+  active: { title: string; pages: number[] }[];
+}
+export function handoutProgressText(progress: HandoutProgress, language: AppLanguage): string {
+  if (progress.stage === 'planning') return language === 'en' ? 'Reading the full PDF and preparing its module directory…' : '正在通读整份 PDF，准备模块目录…';
+  const active = progress.active.map(item => `${item.title} · ${language === 'en' ? 'pages' : '第'} ${item.pages.join(', ')}${language === 'en' ? '' : ' 页'}`).join(' ｜ ');
+  return language === 'en' ? `${progress.moduleCount} modules · ${active || 'Saving explanations…'}` : `共 ${progress.moduleCount} 个模块 · ${active || '正在保存讲解…'}`;
+}
 const cancelled = () => Object.assign(new Error('已暂停，已完成内容保留。 / Paused; completed work retained.'), { name: 'AbortError' });
-const accountFailure = (e: unknown) => !!e && typeof e === 'object' && 'code' in e && ['billing_required', 'rate_limit', 'unauthorized', 'not_configured'].includes(String(e.code));
-/** Serial requests keep cost bounded; every completed stage is durably saved before continuing. */
+const fatalRequest = (e: unknown) => !!e && typeof e === 'object' && 'code' in e && ['billing_required', 'rate_limit', 'unauthorized', 'not_configured', 'invalid_request'].includes(String(e.code));
+/** Two modules run concurrently. Parts within a module stay ordered; saves are serialized. */
 export async function runHandout(options: {
-  job: HandoutJob; ai: HandoutAI; signal: AbortSignal; pages?: number[]; recheckOnly?: boolean;
+  job: HandoutJob; ai: HandoutAI; signal: AbortSignal; pages?: number[];
   save: (job: HandoutJob) => Promise<HandoutJob | void>;
-  onProgress: (stage: 'planning' | 'writing' | 'checking', page?: number) => void;
+  onProgress: (progress: HandoutProgress) => void;
 }): Promise<HandoutJob> {
   let job = structuredClone(options.job);
-  const check = () => { if (options.signal.aborted) throw cancelled(); };
-  const commit = async (page?: HandoutPage) => {
-    check();
-    job = { ...job, ...(page ? { pages: { ...job.pages, [page.page]: page } } : {}), updatedAt: Date.now() };
-    // A storage failure stops the run. It must never be mislabeled as a page's AI failure.
-    const saved = await options.save(structuredClone(job));
-    if (saved) job = saved;
-    check();
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  options.signal.addEventListener('abort', abort, { once: true });
+  if (options.signal.aborted) abort();
+  let fatal: unknown;
+  const check = () => { if (fatal) throw fatal; if (controller.signal.aborted) throw cancelled(); };
+  const stop = (error: unknown) => { fatal ||= error; controller.abort(); };
+  let saves: Promise<void> = Promise.resolve();
+  // Merge changes at execution time, not at request start: concurrent modules
+  // cannot overwrite another module's pages or reuse an old storage revision.
+  const commit = (pages: HandoutPage[] = [], plan?: HandoutJob['modulePlan']) => {
+    const saved = saves.then(async () => {
+      check();
+      const next = structuredClone(job);
+      for (const page of pages) next.pages[page.page] = page;
+      if (plan) next.modulePlan = plan;
+      next.updatedAt = Date.now();
+      job = await options.save(next) || next;
+      check();
+    });
+    saves = saved.catch(error => { if (!options.signal.aborted) stop(error); });
+    return saved;
   };
-  check();
-  const wanted = options.pages || job.pageNumbers;
-  if (wanted.some(page => !job.pageNumbers.includes(page))) throw new Error('Page outside selected scope.');
-  const missingPlans = wanted.filter(page => !job.plan?.pages.some(item => item.page === page));
-  if (missingPlans.length) {
-    options.onProgress('planning');
-    let planned: HandoutPlan | undefined;
-    let failure: unknown;
-    try { planned = await options.ai.plan(missingPlans); }
-    catch (e) {
-      check(); failure = e;
-      if (e && typeof e === 'object' && 'partialHandoutPlan' in e) planned = e.partialHandoutPlan as HandoutPlan;
-    }
-    if (planned) {
-      const accepted = new Set(planned.pages.map(page => page.page));
-      const issues = { ...job.plan?.issues, ...planned.issues };
-      for (const page of accepted) delete issues[page];
-      job.plan = { overview: job.plan?.overview || planned.overview,
-        pages: [...(job.plan?.pages.filter(page => !accepted.has(page.page)) || []), ...planned.pages].sort((a, b) => a.page - b.page), issues };
-    }
-    for (const number of missingPlans) if (!job.plan?.pages.some(page => page.page === number)) {
-      job.pages[number] = { ...job.pages[number], status: 'failed', updatedAt: Date.now(),
-        error: job.plan?.issues?.[number] || `原文第 ${number} 页规划失败 / Source page ${number} planning failed: ${failure instanceof Error ? failure.message : '自动修复后仍有格式异常，可单页重试。 / Format still invalid after repair; retry this page.'}` };
-    }
-    await commit();
-    if (failure) throw failure;
-  }
-  for (const number of wanted) {
+  try {
     check();
-    if (!job.pageNumbers.includes(number)) throw new Error('Page outside selected scope.');
-    const before = job.pages[number];
-    if (!options.pages && (before.status === 'checked' || before.status === 'needs_review' || before.status === 'edited')) continue;
-    const page = job.plan?.pages.find(p => p.page === number);
-    // A failed plan has an explicit page-level error. Continue every valid page.
-    if (!page || !job.plan) continue;
-    let current: HandoutPage = { ...before, updatedAt: Date.now() };
-    if (!options.recheckOnly && (options.pages || !current.draft)) {
-      options.onProgress('writing', number);
-      try {
-        const draft = await options.ai.draft(job.plan, page, current.draft, current.audit?.issues);
+    const wanted = options.pages || job.pageNumbers;
+    if (wanted.some(page => !job.pageNumbers.includes(page) || !options.ai.sourcePages.includes(page))) throw new Error('Page outside selected scope.');
+    const pending = wanted.filter(page => options.pages || !job.pages[page]?.draft);
+    if (!pending.length) return job;
+    let plan = job.modulePlan ? parseModulePlan(job.modulePlan, options.ai.sourcePages) : undefined;
+    if (!plan) {
+      options.onProgress({ stage: 'planning', moduleCount: 0, active: [] });
+      plan = parseModulePlan(await options.ai.planModules(controller.signal), options.ai.sourcePages);
+      await commit([], plan);
+    }
+    const modulePlan = plan;
+    const modules = plan.modules.filter(module => pending.some(page => page >= module.startPage && page <= module.endPage));
+    const active = new Map<string, { title: string; pages: number[] }>();
+    const report = () => options.onProgress({ stage: 'writing', moduleCount: modulePlan.modules.length, active: [...active.values()] });
+    async function generate(module: HandoutModule, pages: number[]): Promise<void> {
+      check(); active.set(module.id, { title: module.title, pages }); report();
+      const previous: Record<number, PageDraft> = {};
+      for (const page of pages) if (job.pages[page]?.draft) previous[page] = job.pages[page].draft!;
+      let result: ModuleDraftResult;
+      try { result = await options.ai.draftModule(modulePlan, module, pages, previous, controller.signal, teachingContext(job, module, pages)); }
+      catch (error) {
         check();
-        current = { page: number, draft, status: 'draft', updatedAt: Date.now() };
-      } catch (e) {
-        check();
-        await commit({ ...current, status: 'failed', error: e instanceof Error ? e.message : '生成失败 / Generation failed', updatedAt: Date.now() });
-        if (accountFailure(e)) throw e;
-        continue;
+        if (error instanceof HandoutResponseFormatError) result = { drafts: {}, issues: Object.fromEntries(pages.map(page => [page, error.message])) };
+        else {
+          await commit(pages.map(page => ({ ...job.pages[page], status: 'failed', error: error instanceof Error ? error.message : 'Generation failed', updatedAt: Date.now() })));
+          if (fatalRequest(error)) { stop(error); throw error; }
+          return;
+        }
       }
-      await commit(current);
-    }
-    if (!current.draft) throw new Error('No explanation to check.');
-    options.onProgress('checking', number);
-    let fatal: unknown;
-    try {
-      const audit = await options.ai.audit(job.plan, page, current.draft);
       check();
-      current = { ...current, audit, error: undefined, status: auditPassed(current.draft, audit) ? 'checked' : 'needs_review', updatedAt: Date.now() };
-    } catch (e) {
-      check();
-      current = { ...current, status: 'failed', error: e instanceof Error ? e.message : '核查失败 / Source check failed', updatedAt: Date.now() };
-      if (accountFailure(e)) fatal = e;
+      await commit(pages.map(page => result.drafts[page]
+        ? { page, draft: result.drafts[page], status: 'draft', updatedAt: Date.now() }
+        : { ...job.pages[page], status: 'failed', error: result.issues[page] || '本页未完整返回 / Page output incomplete', updatedAt: Date.now() }));
+      // Keep valid siblings. If a multi-page output was cut short, retry just its
+      // missing pages individually, once each, with the same full module input.
+      if (pages.length > 1) for (const page of pages) if (!result.drafts[page]) await generate(module, [page]);
     }
-    await commit(current);
-    if (fatal) throw fatal;
-  }
-  return job;
+    let nextModule = 0;
+    async function worker() {
+      while (nextModule < modules.length) {
+        check();
+        const module = modules[nextModule++];
+        const pages = pending.filter(page => page >= module.startPage && page <= module.endPage);
+        try {
+          for (let offset = 0; offset < pages.length; offset += 3) await generate(module, pages.slice(offset, offset + 3));
+        } finally { active.delete(module.id); report(); }
+      }
+    }
+    const workers = await Promise.allSettled(Array.from({ length: Math.min(2, modules.length) }, () => worker().catch(error => { if (!options.signal.aborted) stop(error); throw error; })));
+    await saves;
+    check();
+    const rejected = workers.find(result => result.status === 'rejected');
+    if (rejected?.status === 'rejected') throw rejected.reason;
+    return job;
+  } finally { options.signal.removeEventListener('abort', abort); }
 }

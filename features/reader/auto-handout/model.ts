@@ -1,4 +1,5 @@
 import type { AnnotationCache, AppLanguage, Slide, SlideAnnotation } from '@/types';
+import { explanationHtml } from './explanationFormat';
 
 export const HANDOUT_VERSION = 1;
 export type HandoutDepth = 'quick' | 'thorough';
@@ -13,8 +14,24 @@ export interface PagePlan {
 export interface HandoutPlan { overview: string; pages: PagePlan[]; issues?: Record<number, string> }
 export interface PageDraft {
   title: string;
-  sections: { heading: string; explanation: string; sourceEvidence: string }[];
+  sections: { heading: string; explanation: string; sourceEvidence?: string }[];
   uncertainties: string[];
+  teachingMemory?: TeachingMemory;
+}
+export interface TeachingMemory {
+  covered: string;
+  terminology: string;
+  example: string;
+  bridge: string;
+}
+export interface TeachingContextEntry { page: number; title: string; memory: TeachingMemory }
+
+// Optional metadata must never discard an otherwise usable explanation.
+export function parseTeachingMemory(value: unknown): TeachingMemory | undefined {
+  if (!record(value)) return undefined;
+  const brief = (key: string) => typeof value[key] === 'string' ? value[key].trim().slice(0, 240) : '';
+  const memory = { covered: brief('covered'), terminology: brief('terminology'), example: brief('example'), bridge: brief('bridge') };
+  return Object.values(memory).some(Boolean) ? memory : undefined;
 }
 export interface PageAudit {
   coverage: boolean;
@@ -32,6 +49,20 @@ export interface HandoutPage {
   error?: string;
   updatedAt: number;
 }
+export interface HandoutModule {
+  id: string;
+  title: string;
+  role: string;
+  startPage: number;
+  endPage: number;
+  linkedPages: number[];
+}
+export interface HandoutModulePlan {
+  version: 1;
+  totalPages: number;
+  overview: string;
+  modules: HandoutModule[];
+}
 export interface HandoutJob {
   version: 1;
   revision: number;
@@ -41,7 +72,8 @@ export interface HandoutJob {
   language: AppLanguage;
   depth: HandoutDepth;
   pageNumbers: number[];
-  plan?: HandoutPlan;
+  plan?: HandoutPlan; // Legacy page planning; retained for existing drafts.
+  modulePlan?: HandoutModulePlan;
   pages: Record<number, HandoutPage>;
   updatedAt: number;
 }
@@ -55,8 +87,9 @@ function texts(v: unknown, max: number): string[] {
   return v.map(s => str(s, 1200));
 }
 export function pageRange(start: number, end: number, slides: Slide[]): number[] {
-  if (!Number.isInteger(start) || !Number.isInteger(end) || end < start || end - start >= 60) throw new Error('每批请选择连续的 1–60 页。 / Select 1–60 consecutive pages per batch.');
+  if (!Number.isInteger(start) || !Number.isInteger(end) || end < start || start < 1) throw new Error('请选择有效的连续页码。 / Select a valid consecutive page range.');
   const available = new Set(slides.map(s => s.pageNumber));
+  if (!available.has(start) || !available.has(end)) throw new Error('所选页码不在讲义中。 / Page range outside this PDF.');
   const pages = Array.from({ length: end - start + 1 }, (_, i) => start + i);
   if (pages.some(p => !available.has(p))) throw new Error('所选范围包含无法读取的原文页。 / Source page missing from this range.');
   return pages;
@@ -83,9 +116,10 @@ export function parseDraft(v: unknown): PageDraft {
   if (!record(v) || !Array.isArray(v.sections) || !v.sections.length || v.sections.length > 10) throw new Error('解析缺少正文，请重试。 / Missing explanation.');
   const sections = v.sections.map(s => {
     if (!record(s)) throw new Error('解析段落格式不完整。 / Invalid section.');
-    return { heading: str(s.heading, 200), explanation: str(s.explanation, 6000), sourceEvidence: str(s.sourceEvidence, 1200) };
+    return { heading: str(s.heading, 200), explanation: str(s.explanation, 6000), ...(s.sourceEvidence ? { sourceEvidence: str(s.sourceEvidence, 1200) } : {}) };
   });
-  const draft = { title: str(v.title, 250), sections, uncertainties: texts(v.uncertainties, 12) };
+  const teachingMemory = parseTeachingMemory(v.teachingMemory);
+  const draft = { title: str(v.title, 250), sections, uncertainties: texts(v.uncertainties ?? [], 12), ...(teachingMemory ? { teachingMemory } : {}) };
   if (JSON.stringify(draft).length > 24000) throw new Error('本页解析过长，请缩短后重试。 / Page explanation too large.');
   return draft;
 }
@@ -107,25 +141,63 @@ export function sourceImagePages(plan: PagePlan, slides: Slide[]): number[] {
   return [...new Set([plan.page, ...plan.linkedPages, plan.page - 1, plan.page + 1])].filter(p => all.has(p)).slice(0, 7);
 }
 const escape = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/\n/g, '<br />');
-export function annotationForPage(page: HandoutPage, language: AppLanguage, includeUnverified: boolean): SlideAnnotation {
-  const en = language === 'en';
-  const checked = page.status === 'checked' && page.draft && page.audit && auditPassed(page.draft, page.audit);
-  const label = checked ? (en ? 'AI source check completed' : '已完成 AI 原文核查') : page.status === 'edited' ? (en ? 'Edited · not rechecked' : '已手动修改 · 未重新核查') : (en ? 'Needs checking / incomplete' : '待核查／尚未完成');
-  const show = page.draft && (checked || includeUnverified);
-  let html = `<h3>${en ? 'AI page explanation' : 'AI 逐页解析'} · ${escape(label)}</h3>`;
-  if (show) {
-    html += `<h3>${escape(page.draft!.title)}</h3>` + page.draft!.sections.map(s => `<h4>${escape(s.heading)}</h4><p>${escape(s.explanation)}</p><p>${en ? 'Source basis' : '原文依据'}：${escape(s.sourceEvidence)}</p>`).join('');
-    const issues = [...page.draft!.uncertainties, ...(page.audit?.issues || [])];
-    if (issues.length) html += `<h4>${en ? 'Unresolved' : '待核对的地方'}</h4><ul>${issues.map(s => `<li>${escape(s)}</li>`).join('')}</ul>`;
-  } else html += `<p>${en ? 'No checked explanation is attached for this source page. Existing notes are retained.' : '本页尚无通过核查的解析，未自动附入解析正文；已有标签与注释保留。'}</p>`;
-  html += `<p>${en ? 'AI checks do not guarantee correctness. Verify important claims against the original slide.' : '自动核查不能保证无误，重要结论请结合上方原文判断。'}</p>`;
+export function annotationForPage(page: HandoutPage, language: AppLanguage): SlideAnnotation {
+  let html = '';
+  if (page.draft) {
+    html = `<h3>${escape(page.draft.title)}</h3>` + page.draft.sections.map(s => `<h4>${escape(s.heading)}</h4>${explanationHtml(s.explanation)}`).join('');
+    // Preserve meaningful caveats from older drafts, without their audit metadata.
+    if (page.draft.uncertainties.length) html += page.draft.uncertainties.map(s => `<p>${escape(s)}</p>`).join('');
+  } else html = `<p>${language === 'en' ? 'Explanation not yet generated for this page.' : '本页解析尚未生成。'}</p>`;
   return { id: `auto-handout-export-${page.page}`, text: html, x: 0, y: 100, fontSize: 14 };
 }
 /** A fresh export-only layer: never mutate or replace the learner's existing notes. */
-export function exportAnnotations(job: HandoutJob, slides: Slide[], existing: AnnotationCache, includeUnverified = false): AnnotationCache {
+export function exportAnnotations(job: HandoutJob, slides: Slide[], existing: AnnotationCache): AnnotationCache {
   const result = { ...existing };
   for (const slide of slides) if (job.pageNumbers.includes(slide.pageNumber)) {
-    result[slide.id] = [...(existing[slide.id] || []), annotationForPage(job.pages[slide.pageNumber] || { page: slide.pageNumber, status: 'pending', updatedAt: 0 }, job.language, includeUnverified)];
+    result[slide.id] = [...(existing[slide.id] || []), annotationForPage(job.pages[slide.pageNumber] || { page: slide.pageNumber, status: 'pending', updatedAt: 0 }, job.language)];
   }
   return result;
+}
+
+/** Validate coverage mechanically; this is not an AI content audit. Never invent missing modules. */
+export function parseModulePlan(value: unknown, sourcePages: number[]): HandoutModulePlan {
+  if (!sourcePages.length || sourcePages.some((page, i) => page !== i + 1)) throw new Error('原文页码不完整。 / Source pages are incomplete.');
+  if (!record(value) || !Array.isArray(value.modules) || !value.modules.length || value.modules.length > sourcePages.length) throw new Error('模块目录不完整。 / Module directory is incomplete.');
+  let nextPage = 1;
+  const modules = value.modules.map((item, index): HandoutModule => {
+    if (!record(item) || !Number.isInteger(item.startPage) || !Number.isInteger(item.endPage)
+      || item.startPage !== nextPage || Number(item.endPage) < nextPage || Number(item.endPage) > sourcePages.length) {
+      throw new Error(`模块 ${index + 1} 的页码存在遗漏、重叠或乱序（应从第 ${nextPage} 页开始）。 / Invalid module page coverage.`);
+    }
+    if (!Array.isArray(item.linkedPages) || item.linkedPages.some(page => typeof page !== 'number' || !sourcePages.includes(page))) throw new Error('模块关联页不在原文中。 / Invalid module references.');
+    nextPage = Number(item.endPage) + 1;
+    return { id: `module-${index + 1}`, title: str(item.title, 250), role: str(item.role, 1200), startPage: Number(item.startPage), endPage: Number(item.endPage), linkedPages: [...new Set(item.linkedPages as number[])].sort((a, b) => a - b) };
+  });
+  if (nextPage !== sourcePages.length + 1) throw new Error(`模块目录未覆盖第 ${nextPage} 页之后的内容。 / Module directory does not cover the complete PDF.`);
+  return { version: 1, totalPages: sourcePages.length, overview: str(value.overview, 5000), modules };
+}
+export function moduleSourcePages(module: HandoutModule, sourcePages: number[]): number[] {
+  // Every page in the module and every explicit dependency stays in every part.
+  return sourcePages.filter(page => (page >= module.startPage && page <= module.endPage)
+    || module.linkedPages.includes(page) || page === module.startPage - 1 || page === module.endPage + 1);
+}
+
+/** Only earlier, saved pages in this module; no future pages from parallel workers.
+ * Reconstructing from drafts also works after pause/reload without another AI call. */
+export function teachingContext(job: HandoutJob, module: HandoutModule, requestedPages: number[]): TeachingContextEntry[] {
+  const first = Math.min(...requestedPages);
+  return Object.values(job.pages)
+    .filter(page => page.draft && page.page >= module.startPage && page.page <= module.endPage && page.page < first)
+    .sort((a, b) => a.page - b.page).slice(-6)
+    .map(page => {
+      const draft = page.draft!;
+      // Edited/legacy explanations have no trustworthy generated memory: use
+      // bounded excerpts of the actual saved text, not stale metadata.
+      const memory = page.status !== 'edited' ? parseTeachingMemory(draft.teachingMemory) : undefined;
+      return { page: page.page, title: draft.title.slice(0, 120), memory: memory || {
+        covered: draft.sections.map(s => s.heading).join('；').slice(0, 240),
+        terminology: '', example: '',
+        bridge: draft.sections.at(-1)?.explanation.slice(-240) || '',
+      } };
+    });
 }

@@ -1,107 +1,95 @@
 import { describe, expect, it, vi } from 'vitest';
-import { newJob, type HandoutJob, type HandoutPlan, type PageAudit, type PageDraft } from './model';
+import { newJob, parseModulePlan, type HandoutJob, type PageDraft } from './model';
 import { runHandout } from './run';
-import type { HandoutAI } from './ai';
-const draft: PageDraft = { title: '概念', sections: [{ heading: '关系', explanation: '概念之间的关系', sourceEvidence: '第 1 页定义' }], uncertainties: [] };
-const audit: PageAudit = { coverage: true, source: true, visuals: true, context: true, teaching: true, issues: [] };
-const plan: HandoutPlan = { overview: '讲义上下文', pages: [1, 2, 3].map(page => ({ page, title: `${page}`, kind: 'concept', role: '知识讲解', focus: ['概念'], linkedPages: [] })) };
+import { HandoutResponseFormatError, type HandoutAI } from './ai';
+const draft: PageDraft = { title: '概念', sections: [{ heading: '关系', explanation: '解释概念之间的关系' }], uncertainties: [] };
+const sourcePages = [1, 2, 3, 4, 5, 6];
+const plan = parseModulePlan({ overview: '整体脉络', modules: [
+  { title: '实验', role: '背景、方法、结果', startPage: 1, endPage: 4, linkedPages: [6] },
+  { title: '应用', role: '应用与总结', startPage: 5, endPage: 6, linkedPages: [1] },
+] }, sourcePages);
 function setup() {
-  const ai: HandoutAI = { plan: vi.fn(async () => plan), draft: vi.fn(async () => draft), audit: vi.fn(async () => audit) };
+  const ai: HandoutAI = {
+    sourcePages,
+    planModules: vi.fn(async () => plan),
+    draftModule: vi.fn(async (_plan, _module, pages) => ({ drafts: Object.fromEntries(pages.map(page => [page, draft])), issues: {} })),
+  };
   const controller = new AbortController();
   const snapshots: HandoutJob[] = [];
-  const save = vi.fn(async (value: HandoutJob) => { snapshots.push(structuredClone(value)); });
-  return { job: newJob('alice', 'hash', 'zh-CN', 'thorough', [1, 2, 3]), ai, signal: controller.signal, controller, save, snapshots, onProgress: vi.fn() };
+  let revision = 0;
+  let saving = false;
+  const save = vi.fn(async (value: HandoutJob) => {
+    if (saving || value.revision !== revision) throw new Error('Overlapping or stale write');
+    saving = true;
+    await Promise.resolve();
+    const next = { ...structuredClone(value), revision: ++revision };
+    snapshots.push(next); saving = false; return next;
+  });
+  return { job: newJob('alice', 'hash', 'zh-CN', 'thorough', sourcePages), ai, signal: controller.signal, controller, snapshots, save, onProgress: vi.fn() };
 }
-describe('resumable source-check pipeline', () => {
-  it('continues valid pages after a planning error and resumes only the missing plan', async () => {
-    const s = setup();
-    vi.mocked(s.ai.plan).mockResolvedValueOnce({ ...plan, pages: plan.pages.filter(p => p.page !== 2), issues: { 2: 'Source page 2: invalid linked page 99' } });
-    const partial = await runHandout(s);
-    expect(partial.pages[1].status).toBe('checked');
-    expect(partial.pages[2].status).toBe('failed');
-    expect(partial.pages[2].error).toContain('99');
-    expect(partial.pages[3].status).toBe('checked');
-    const again = setup();
-    vi.mocked(again.ai.plan).mockResolvedValueOnce({ ...plan, pages: [plan.pages[1]] });
-    const resumed = await runHandout({ ...again, job: partial });
-    expect(again.ai.plan).toHaveBeenCalledWith([2]);
-    expect(again.ai.draft).toHaveBeenCalledTimes(1);
-    expect(resumed.pages[1]).toEqual(partial.pages[1]);
-    expect(resumed.pages[2].status).toBe('checked');
-  });
-  it('plans once and persists each draft before its independent check', async () => {
+describe('module generation with serialized persistence', () => {
+  it('plans once, runs two modules concurrently and preserves every page through queued saves', async () => {
     const s = setup();
     const result = await runHandout(s);
-    expect(s.ai.plan).toHaveBeenCalledTimes(1);
-    expect(s.ai.draft).toHaveBeenCalledTimes(3);
-    expect(s.ai.audit).toHaveBeenCalledTimes(3);
-    expect(s.snapshots.map(j => j.pages[1].status).slice(0, 3)).toEqual(['pending', 'draft', 'checked']);
-    expect(Object.values(result.pages).every(p => p.status === 'checked')).toBe(true);
-    expect(s.job.plan).toBeUndefined(); // caller's input is never mutated
+    expect(s.ai.planModules).toHaveBeenCalledTimes(1);
+    const calls = vi.mocked(s.ai.draftModule).mock.calls;
+    expect(calls.map(call => call[2])).toEqual([[1, 2, 3], [5, 6], [4]]);
+    expect(calls[0][1]).toEqual(calls[2][1]); // parts retain the full module boundaries
+    expect(Object.values(result.pages).every(page => page.draft && page.status === 'draft')).toBe(true);
+    expect(result.revision).toBe(4); // directory + three outputs
+    expect(s.job.modulePlan).toBeUndefined();
   });
-  it('continues other pages after one model failure and retains the failed audit draft', async () => {
+  it('preserves a valid sibling and retries only the missing page with the same module', async () => {
     const s = setup();
-    vi.mocked(s.ai.audit).mockRejectedValueOnce(new Error('timeout'));
+    vi.mocked(s.ai.draftModule).mockImplementation(async (_plan, _module, pages) => ({ drafts: Object.fromEntries(pages.filter(page => pages.length === 1 || page !== 2).map(page => [page, draft])), issues: { 2: 'truncated' } }));
     const result = await runHandout(s);
-    expect(result.pages[1].status).toBe('failed');
-    expect(result.pages[1].draft).toEqual(draft);
-    expect(result.pages[3].status).toBe('checked');
-    const again = setup();
-    const resumed = await runHandout({ ...again, job: result });
-    expect(again.ai.plan).not.toHaveBeenCalled();
-    expect(again.ai.draft).not.toHaveBeenCalled();
-    expect(again.ai.audit).toHaveBeenCalledTimes(1);
-    expect(resumed.pages[1].status).toBe('checked');
+    expect(vi.mocked(s.ai.draftModule).mock.calls.map(call => call[2])).toContainEqual([2]);
+    expect(s.snapshots.some(snapshot => snapshot.pages[1].draft && !snapshot.pages[2].draft)).toBe(true);
+    expect(result.pages[2].draft).toEqual(draft);
   });
-  it('does not silently re-generate checked, flagged or manually edited pages on resume', async () => {
-    const s = setup(); s.job.plan = plan;
-    s.job.pages[1] = { page: 1, draft, audit, status: 'checked', updatedAt: 1 };
-    s.job.pages[2] = { page: 2, draft, audit: { ...audit, visuals: false }, status: 'needs_review', updatedAt: 1 };
-    s.job.pages[3] = { page: 3, draft, status: 'edited', updatedAt: 1 };
+  it('falls back to individual output pages after a truncated part without rebuilding its directory', async () => {
+    const s = setup();
+    vi.mocked(s.ai.draftModule).mockRejectedValueOnce(new HandoutResponseFormatError('truncated'));
     const result = await runHandout(s);
-    expect(s.ai.draft).not.toHaveBeenCalled(); expect(s.ai.audit).not.toHaveBeenCalled();
-    expect(result.pages).toEqual(s.job.pages);
+    expect(s.ai.planModules).toHaveBeenCalledTimes(1);
+    expect(Object.values(result.pages).every(page => page.draft)).toBe(true);
   });
-  it('allows a targeted rewrite and recheck without touching other pages', async () => {
-    const s = setup(); s.job.plan = plan;
-    s.job.pages[2] = { page: 2, draft, audit: { ...audit, issues: ['图例读错'] }, status: 'needs_review', updatedAt: 1 };
+  it('reuses a stored directory and only generates missing pages', async () => {
+    const s = setup(); s.job.modulePlan = plan;
+    s.job.pages[1] = { page: 1, draft, status: 'needs_review', updatedAt: 1 };
+    const result = await runHandout(s);
+    expect(s.ai.planModules).not.toHaveBeenCalled();
+    expect(vi.mocked(s.ai.draftModule).mock.calls.flatMap(call => call[2])).not.toContain(1);
+    expect(result.pages[1]).toEqual(s.job.pages[1]);
+  });
+  it('targeted regeneration keeps the entire module context but changes only the requested page', async () => {
+    const s = setup(); s.job.modulePlan = plan;
+    s.job.pages[2] = { page: 2, draft, status: 'edited', updatedAt: 1 };
     const result = await runHandout({ ...s, pages: [2] });
-    expect(s.ai.draft).toHaveBeenCalledWith(plan, plan.pages[1], draft, ['图例读错']);
-    expect(result.pages[1].status).toBe('pending'); expect(result.pages[3].status).toBe('pending');
-    expect(result.pages[2].status).toBe('checked');
+    expect(s.ai.draftModule).toHaveBeenCalledWith(plan, plan.modules[0], [2], { 2: draft }, expect.any(AbortSignal), []);
+    expect(result.pages[1].status).toBe('pending');
+    expect(result.pages[2].status).toBe('draft');
   });
-  it('keeps uncertain source content flagged even if the checker returns all true', async () => {
+  it('does not spend requests on a module directory when every selected page already has a draft', async () => {
     const s = setup();
-    vi.mocked(s.ai.draft).mockResolvedValue({ ...draft, uncertainties: ['坐标无法确认'] });
-    const result = await runHandout(s);
-    expect(result.pages[1].status).toBe('needs_review');
+    for (const page of sourcePages) s.job.pages[page] = { page, draft, status: 'draft', updatedAt: 1 };
+    await runHandout(s);
+    expect(s.ai.planModules).not.toHaveBeenCalled(); expect(s.ai.draftModule).not.toHaveBeenCalled();
   });
-  it('stops on storage failure instead of making more requests or losing a draft', async () => {
-    const s = setup(); s.job.plan = plan;
-    s.save.mockRejectedValueOnce(new Error('quota'));
+  it('stops before generation if saving the directory fails', async () => {
+    const s = setup(); s.save.mockRejectedValueOnce(new Error('quota'));
     await expect(runHandout(s)).rejects.toThrow('quota');
-    expect(s.ai.draft).toHaveBeenCalledTimes(1); expect(s.ai.audit).not.toHaveBeenCalled();
+    expect(s.ai.draftModule).not.toHaveBeenCalled();
   });
-  it('cancellation retains the saved draft and prevents the next request', async () => {
-    const s = setup(); s.job.plan = plan;
-    s.save.mockImplementation(async value => { s.snapshots.push(value); s.controller.abort(); });
-    await expect(runHandout(s)).rejects.toMatchObject({ name: 'AbortError' });
-    expect(s.snapshots.at(-1)?.pages[1].status).toBe('draft');
-    expect(s.ai.audit).not.toHaveBeenCalled();
-  });
-  it('rechecks an edited page without rewriting the learner edit', async () => {
-    const s = setup(); s.job.plan = plan; s.job.pages[1] = { page: 1, draft, status: 'edited', updatedAt: 1 };
-    const result = await runHandout({ ...s, pages: [1], recheckOnly: true });
-    expect(s.ai.draft).not.toHaveBeenCalled(); expect(s.ai.audit).toHaveBeenCalledTimes(1);
-    expect(result.pages[1].status).toBe('checked');
-  });
-  it('stops on exhausted credits and preserves the generated draft before checking failed', async () => {
+  it('retains committed pages and cancels remaining work on pause', async () => {
     const s = setup();
-    const exhausted = Object.assign(new Error('credits exhausted'), { code: 'billing_required' });
-    vi.mocked(s.ai.audit).mockRejectedValueOnce(exhausted);
-    await expect(runHandout(s)).rejects.toThrow('credits exhausted');
-    expect(s.ai.draft).toHaveBeenCalledTimes(1);
+    s.save.mockImplementation(async value => {
+      const next = { ...value, revision: value.revision + 1 }; s.snapshots.push(next);
+      if (Object.values(value.pages).some(page => page.draft)) s.controller.abort();
+      return next;
+    });
+    await expect(runHandout(s)).rejects.toMatchObject({ name: 'AbortError' });
     expect(s.snapshots.at(-1)?.pages[1].draft).toEqual(draft);
-    expect(s.snapshots.at(-1)?.pages[2].status).toBe('pending');
+    expect(vi.mocked(s.ai.draftModule).mock.calls.some(call => call[2].includes(4))).toBe(false);
   });
 });
